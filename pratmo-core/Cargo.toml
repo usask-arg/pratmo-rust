@@ -1,0 +1,10 @@
+[package]
+name = "pratmo-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ndarray = { version = "0.16", features = ["approx"] }
+nalgebra = "0.33"
+anyhow = "1"
+thiserror = "1"

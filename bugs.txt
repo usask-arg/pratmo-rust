@@ -1,0 +1,123 @@
+Issues in the PRATMOS sofwtare "as delivered" running with our Fortran compiler (intel 64 bit).
+
+1) Line 7 boxin_gui.dat only has 23 numbers but code attempts to read 24. This is an error the Intel fortran compiler on line 123 of bctmx.f, edit line 7 of boxin_gui.dat to fix the problem
+
+2) line 7 bread.f  Change CHARACTER*8 TITJ(43),TITLEX(5)
+   to                     CHARACTER*8 TITJ(44),TITLEX(5)
+    original code cause line 85 to fail as it tries to write 44 elements instead of 43. WRITE(6,'(I5,A10,2A20,3F5.0)') (JQ,TITJ(JQ),TITLEJ(1,JQ),
+    Note: you also have to add 'J(OCS)   ' to the TITJ data statement on line 18.
+    
+3) Line 157 of bjval.f, compiler crashes when KSR == 0. Cause is compiler specific as it tries to execute IF(LSR.AND.FNO(KSR).GT.0.)
+   in the failing case LSR is false. In principle the code does not need to execute FNO(KSR) which is causing the problem. In practice, the Fortran Debug version does call it and crashes.
+   Replace code with more portable version. Note there are 2 occurrences, one near line 143 and one near line 157.
+   
+
+4) Line 30 bctmx.f, 
+     real*4 osno2(27),zos(27),zkmr4    
+     should be 
+     real*8 osno2(27),zos(27),zkmr4
+     
+     so it is compatible with HUNT.FOR
+     
+5) bchem.f
+    Does heterogeneous reaction #173 N2O5+HCL=HNO3+CLONO  produce atomic Cl?
+    Line 418 of bchem.g has +R(173) suggesting this is a source of Cl. Does CLONO -> immediately go to CL and NO2? (I think it does)
+    Similar problem with RPCH3O+RPCHO term. I think this is ok but it just needs clarification 
+     
+6) Reaction 150 and 206 in fort11_jpl09.x, The line
+RATE/  150  1.70e-11     -250      BrO+OH=Br+HO2    --JPL2006--(CM,11/07)
+and
+RATE/  206  1.90E-11     -230      BRO+O=BR+O2      --NASA97---
+the -250 on the first line is read by Fortran as -0.250 and the -230 on the second line is read as -0.23. It should be -230.0
+
+7) Line 197 of bjval.f in subrotine OPTAU.
+   The line PIRAY(JI)=XLRAY/DTAU(J) makes more sense if we
+   use      PIRAY(J )=XLRAY/DTAU(J)    
+   
+   similarly on line 200
+   replace PIAER(JI)=XLAER/DTAU(J)
+   with    PIAER(J )=XLAER/DTAU(J)
+   
+   The first option repeatedly sets the 1st element of PIRAY/PIAER while the second  sets each element in the array.
+   
+   This has implications for the SCATTR subroutine call.
+   
+8) Line 908 bchem.f Reactions R(5) to R10 call React and claim to be losing species N11=O3. In reality they lose O1D (N10)
+  **** UPDATE *** I think this is OK as O1D is the "same" as O3 through Odd oxygen chemistry. Dont implement this change. 
+      CALL REACT(R(3)-R5TO10,N11, 0, 0,  N10,0)
+      CALL REACT(R(5),       N11, 0, 0,  N7, N7)
+      CALL REACT(R(6),       N11, 0, 0,  N7, N6)
+      CALL REACT(R(7),       N11, 0, 0,  N7, N26)
+      CALL REACT(R(8),       N11, 0, 0,  N25,0)
+      CALL REACT(R(9),       N11, 0, 0,  0,  0)
+      CALL REACT(R(10),      N11, 0, 0,  0,  0)
+      
+      should be
+      CALL REACT(R(3)-R5TO10,N11, 0, 0,  N10,0)
+      CALL REACT(R(5),       N10, 0, 0,  N7, N7)
+      CALL REACT(R(6),       N10, 0, 0,  N7, N6)
+      CALL REACT(R(7),       N10, 0, 0,  N7, N26)
+      CALL REACT(R(8),       N10, 0, 0,  N25,0)
+      CALL REACT(R(9),       N10, 0, 0,  0,  0)
+      CALL REACT(R(10),      N10, 0, 0,  0,  0)
+
+10) Line 193 bchem.f The line
+      R(103) = RATEK(108)*XCL*XHO2
+   should be replaced by
+      R(103) = RATEK(103)*XCL*XHO2
+   i.e. the line should use the raection rate constant of 103 not 108.
+
+11)  Chemical Reactions 124 and 125, Photolysis of CLNO3.  The reaction 124 has a rate of 0.0, i.e. none of the photolysis is partitioned into equation 124.
+Reaction 125 has a rate of 1.0, i.e. all of the photolysis goes into reaction 125.
+
+12) Line 883 and line 907 of bry_vs_tracers.gen.vers03.f
+  clypt = 0.0 should be
+  cly_fit =0.0
+  
+13) HYSTAT. Fixed pressure level. Should the code adjust the temperature on the new pressure levels? Given that we are changing the Z you would expect the T to change appropriately.
+ Right now the new height levels have the same temperature as the old height levels. Seems wrong to me.
+ 
+14) Line 222 and 223 of bctmx.f.
+    		mm1=imon
+    		mm2=imon
+ Should probably read
+    		mm1=imon
+    		mm2=imon+1
+    		if (mm2 .eq. 13) then
+		  mm2 = 1
+	        endif
+15) Line 240 of bctmx.f.
+      wm=0.5 
+    This is probably too crude as it assumes that the code will linearly interpolate 50/50 between this month and last months climatologys independent of users date and time. 
+
+16) Clarification required, lines 370 to 374 of bctmx.f
+      DO J=1,31
+        DO3REF(J) = DO3REF(J)*DM(J)*1.D-6
+        DNOyREF(j)= DNOyREF(J)*DM(J)*1.D-9
+	DN2OREF(j)= DN2OREF(J)*DM(J)*1.D-9
+      ENDDO
+      
+      This calculates height profiles of O3, N2O and NOy number desnities. However it is not interpolated from the height levels readin fron file to the Z levels calculated in HYSTAT. This only works
+      if the input files are on the height levels calculated by HYSTAT (In that case we need to look at T as it is placed on a regular grid).
+
+17) probable bug. Lines 292 to 295 of bctmx.f
+        do i=22,nl
+          dz=(z(i)-z(i-1))*1D-5
+          asa(i)=asa(i-1) * dexp(-dz/3.0D0)
+        enddo
+ The code is extrapolating exponential decay onto the aerosol surface area at high altitudes. The problem is the Z and DZ coords are produced by an earlier unrelated call to HYSTAT and is a grid that is quite different
+ to the actual Z grid used after the next call to HYSTAT.
+ 
+ 18) Accuracy warning. Line 154 of bhetp.f is ill conditioned
+       fHOCl     =  1.0D0/dtanh(r/lHOCl)- lHOCl/r
+       is poorly conditions. For example fhocl = 316018.462082816 - 316018.462081761 = 1.05483923107386e-06
+       
+       This translates to poor accuracy in the reaction rate of equation 174. It is worse than others by an 3 orders of magntude!
+      
+19) The convergence criteria for the Newton-Raphson in subroutine NEWRAX (line 292 of butil.f) does not properly account for the limitations of numerical precision. In our tests it failed
+for BrCl in dark conditions.  The code fails to converge to the desired precision of 1.0E-10 as there is insufficient numerical precision. Curiously the strategy of shortening the time gap
+in subroutine NEWRAF to improve convergence makes the matter worse!
+The C++ code has implemented an additional achievable convergence criteria based upon the numerical precision (EPSILON) of the machine and uses the higher limit of the desired and achievable.
+
+  
+  

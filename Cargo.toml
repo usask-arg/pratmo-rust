@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "pratmo-core",
+    "pratmo-cli",
+]
+resolver = "2"

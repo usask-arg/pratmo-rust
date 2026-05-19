@@ -560,7 +560,7 @@ impl ModelReader for FortranReader {
         s.flscal = *fv.get(2).unwrap_or(&1.0);
         s.zo3col = *fv.get(3).unwrap_or(&0.0);
         s.daysec = *fv.get(4).unwrap_or(&86400.0);
-        s.gmu0   = -0.14; // hardcoded override in Fortran
+        s.gmu0   = *fv.get(5).unwrap_or(&-0.14); // from fort01 LAT/DEC/FL line
         let crad = 57.29578_f64;
         s.xlat = s.xlatd / crad;
         s.xdec = s.xdecd / crad;
@@ -1105,11 +1105,19 @@ pub fn setday(s: &mut ModelState) {
 
     let sset = 3600.0 * s.sunset;
 
-    // Build DTIME from ATIME fractions of sunset
+    // Build DTIME from ATIME fractions of sunset.
+    // Fortran JJ counts DTIME(1..JJ) including noon at step 1.
+    // Rust jj here counts dtime[1..jj] (non-noon afternoon steps).
+    // After the loop jj = last valid ATIME index (= Fortran JJ - 1).
     s.dtime[0] = 0.0;
     let mut jj = 1usize;
     for j in 1..15 {
-        if s.atime[j] < 1e-5 { break; }
+        if s.atime[j] < 1e-5 {
+            // Matches Fortran: when ATIME(J)=0, set JJ = J-1 (i.e., previous j).
+            // In Fortran 1-based: JJ = J-1 where J was the terminating index (=j+1 0-based).
+            // Result: Fortran JJ = j (0-based); we set jj = j here (already done on prev iter).
+            break;
+        }
         s.dtime[j] = s.atime[j] * sset;
         if s.dtime[j] > 0.5 * s.daysec {
             jj = j - 1;
@@ -1117,6 +1125,9 @@ pub fn setday(s: &mut ModelState) {
         }
         jj = j;
     }
+    // Fortran JJ includes noon (step 1 = 0.0). Adjust to match Fortran's NTIM calculation.
+    // Fortran: NTIM = JJ_fortran + JJ_fortran + J_night where JJ_fortran = jj + 1.
+    let jj_fortran = jj + 1; // equivalent to Fortran's JJ
 
     let mut night_j = 0usize;
     let snit = s.daysec - s.dtime[jj] - s.dtime[jj];
@@ -1129,14 +1140,18 @@ pub fn setday(s: &mut ModelState) {
     }
 
     let morn = jj + night_j;
-    s.ntim = jj + jj + night_j;
+    // NTIM matches Fortran: JJ_fortran + JJ_fortran + J_night
+    s.ntim = jj_fortran + jj_fortran + night_j;
     if s.ntim > 44 {
         panic!("NTIM ({}) > 44", s.ntim);
     }
 
-    // Mirror morning into afternoon/night
-    for j in 0..jj {
-        s.dtime[s.ntim - j] = s.daysec - s.dtime[j];
+    // Mirror morning into afternoon/night: Fortran mirrors JJ_fortran steps (1..JJ in 1-based)
+    for j in 0..jj_fortran {
+        let mirror_idx = s.ntim - j;
+        if mirror_idx <= 43 {
+            s.dtime[mirror_idx] = s.daysec - s.dtime[j];
+        }
     }
 
     // Compute WTIME (fractional weights)
@@ -1157,7 +1172,9 @@ pub fn setday(s: &mut ModelState) {
         s.ztime[jj] = 57.29578 * gmu.acos();
         s.jtim[jj] = s.nmu as i32;
 
-        let jcomp = ntim + 1 - jj;
+        // Fortran: JCOMP = NTIM+1-JJ (1-based JJ=1..MORN)
+        // Converting to 0-based: JJ = jj+1, so JCOMP_0based = (NTIM+1-(jj+1))-1 = ntim-jj-1
+        let jcomp = ntim - 1 - jj;
         if jcomp > morn {
             s.utime[jcomp] = s.utime[jj];
             s.ztime[jcomp] = s.ztime[jj];
@@ -1246,5 +1263,269 @@ pub fn hystat(s: &mut ModelState, logp: i32) {
             s.dm[ii]   = s.pstd[ii] / (cboltz * s.t[ii]);
             s.theta[ii] = s.t[ii] * (1000.0 / s.pstd[ii]).powf(0.2857);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::ModelState;
+
+    // ── parse_e_field ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_e_field_standard() {
+        assert!((parse_e_field("1.80E-11") - 1.80e-11).abs() < 1e-20);
+        assert!((parse_e_field("3.50E+02") - 350.0).abs() < 1e-10);
+        assert!((parse_e_field("0.0      ") - 0.0).abs() < 1e-30);
+    }
+
+    #[test]
+    fn test_parse_e_field_bare_exponent() {
+        // Fortran sometimes omits 'E': "1.80-11" means 1.80×10⁻¹¹
+        assert!((parse_e_field("1.80-11") - 1.80e-11).abs() < 1e-20);
+        assert!((parse_e_field("3.50+02") - 350.0).abs() < 1e-10);
+        assert!((parse_e_field("2.997+08") - 2.997e8).abs() < 1e-0);
+    }
+
+    #[test]
+    fn test_parse_e_field_zero() {
+        assert_eq!(parse_e_field(""), 0.0);
+        assert_eq!(parse_e_field("   "), 0.0);
+    }
+
+    // ── parse_fixed_i32s ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_fixed_i32s_boxdo() {
+        // Typical BOXDO line: "A5,25I3" → 5-char label then 3-char ints
+        let line = "BOXDO-30-29-28-27-26";
+        let vals = parse_fixed_i32s(line, 5, 3, 5);
+        assert_eq!(vals, vec![-30, -29, -28, -27, -26]);
+    }
+
+    #[test]
+    fn test_parse_fixed_i32s_positive() {
+        let line = "     001002003004";
+        let vals = parse_fixed_i32s(line, 5, 3, 4);
+        assert_eq!(vals, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_parse_fixed_i32s_truncated() {
+        // Line shorter than requested — remainder should be 0
+        let line = "LABEL  1  2";
+        let vals = parse_fixed_i32s(line, 5, 3, 5);
+        assert_eq!(vals[0], 1);
+        assert_eq!(vals[1], 2);
+        assert_eq!(vals[2], 0);
+    }
+
+    // ── parse_fixed_f64s_fw ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_fixed_f64s_atime() {
+        // "A10,14F5.2" → skip 10 chars, then 5-char floats
+        let line = "DAY INTVAL 0.15 0.30 0.45 0.60 0.70";
+        let vals = parse_fixed_f64s_fw(line, 10, 5, 5);
+        assert!((vals[0] - 0.15).abs() < 1e-6, "vals[0]={}", vals[0]);
+        assert!((vals[2] - 0.45).abs() < 1e-6, "vals[2]={}", vals[2]);
+        assert!((vals[4] - 0.70).abs() < 1e-6, "vals[4]={}", vals[4]);
+    }
+
+    // ── hystat ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_hystat_logp_surface_pressure() {
+        let mut s = ModelState::new();
+        s.nc = 5;
+        for i in 0..5 { s.t[i] = 250.0; }
+        hystat(&mut s, 1);
+        // Surface pressure is always 1000 hPa in log-p mode
+        assert!((s.pstd[0] - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_hystat_logp_pressure_ratio() {
+        // 16 levels in log-p spans exactly 2 decades: p[16] = 1000 × 10^(-2) = 10 hPa
+        let mut s = ModelState::new();
+        s.nc = 17;
+        for i in 0..17 { s.t[i] = 250.0; }
+        hystat(&mut s, 1);
+        let ratio = s.pstd[16] / s.pstd[0];
+        assert!((ratio - 0.01).abs() < 1e-9, "pstd ratio = {ratio}");
+    }
+
+    #[test]
+    fn test_hystat_logp_density_from_ideal_gas() {
+        // DM = p / (k_B × T); verify at level 0
+        let cboltz = 1.38e-19_f64;
+        let mut s = ModelState::new();
+        s.nc = 3;
+        s.t[0] = 300.0; s.t[1] = 280.0; s.t[2] = 260.0;
+        hystat(&mut s, 1);
+        let expected_dm0 = 1000.0 / (cboltz * 300.0);
+        assert!((s.dm[0] - expected_dm0).abs() / expected_dm0 < 1e-10);
+    }
+
+    #[test]
+    fn test_hystat_logp_z_increases() {
+        // Altitude must increase monotonically
+        let mut s = ModelState::new();
+        s.nc = 10;
+        for i in 0..10 { s.t[i] = 240.0 - i as f64 * 5.0; }
+        hystat(&mut s, 1);
+        for i in 1..10 {
+            assert!(s.z[i] > s.z[i-1],
+                "z not monotone: z[{i}]={} <= z[{}]={}", s.z[i], i-1, s.z[i-1]);
+        }
+    }
+
+    #[test]
+    fn test_hystat_logp_approx_2km_per_level() {
+        // The CLOGP constant is chosen so each level is ~2 km in an isothermal 250 K atmosphere
+        let mut s = ModelState::new();
+        s.nc = 5;
+        for i in 0..5 { s.t[i] = 250.0; }
+        hystat(&mut s, 1);
+        for i in 1..5 {
+            let dz_km = (s.z[i] - s.z[i-1]) * 1e-5;
+            assert!(dz_km > 1.5 && dz_km < 2.5,
+                "dz[{i}] = {dz_km:.2} km, expected ~2 km");
+        }
+    }
+
+    #[test]
+    fn test_hystat_geometric_surface_density() {
+        // DM(0) formula: (7.340e21 / T(0)) × (PRESS0 / 1013.25)
+        let mut s = ModelState::new();
+        s.nc = 3;
+        s.press0 = 1013.25;
+        s.grav   = 980.665;
+        s.rad    = 6.371e8;
+        s.t[0] = 288.0; s.t[1] = 275.0; s.t[2] = 260.0;
+        s.z[0] = 0.0; s.z[1] = 2.0e5; s.z[2] = 4.0e5;
+        hystat(&mut s, 0);
+        let expected = 7.340e21 / 288.0;
+        assert!((s.dm[0] - expected).abs() / expected < 1e-9);
+    }
+
+    // ── setday ───────────────────────────────────────────────────────────────
+
+    fn standard_setday_state() -> Box<ModelState> {
+        let mut s = ModelState::new();
+        let deg = std::f64::consts::PI / 180.0;
+        s.xlat   = 60.0 * deg;
+        s.xdec   = -1.689 * deg;   // March 16 declination
+        s.gmu0   = -0.12;
+        s.daysec = 86400.0;
+        // ATIME from fort01.x (index 0 unused; indices 1..13 active)
+        s.atime[1]  = 0.15; s.atime[2]  = 0.30; s.atime[3]  = 0.45;
+        s.atime[4]  = 0.60; s.atime[5]  = 0.70; s.atime[6]  = 0.80;
+        s.atime[7]  = 0.88; s.atime[8]  = 0.92; s.atime[9]  = 0.96;
+        s.atime[10] = 0.98; s.atime[11] = 1.00; s.atime[12] = 1.02;
+        s.atime[13] = 1.05;
+        // BTIME from fort01.x (6 night steps)
+        s.btime[0] = 0.05; s.btime[1] = 0.10; s.btime[2] = 0.30;
+        s.btime[3] = 0.50; s.btime[4] = 0.70; s.btime[5] = 0.90;
+        s
+    }
+
+    #[test]
+    fn test_setday_ntim_standard() {
+        // Standard 60°N March 16 run must produce ntim = ntimdo = 34
+        let mut s = standard_setday_state();
+        setday(&mut s);
+        assert_eq!(s.ntim,   34, "ntim={}", s.ntim);
+        assert_eq!(s.ntimdo, 34, "ntimdo={}", s.ntimdo);
+    }
+
+    #[test]
+    fn test_setday_noon_is_dtime0() {
+        // Noon is always defined as dtime[0] = 0.0 seconds from midnight
+        let mut s = standard_setday_state();
+        setday(&mut s);
+        assert_eq!(s.dtime[0], 0.0);
+    }
+
+    #[test]
+    fn test_setday_sunset_60n_march() {
+        // At 60°N March 16, sunset should be ~6.6–6.8 hours from noon
+        let mut s = standard_setday_state();
+        setday(&mut s);
+        assert!(s.sunset > 6.5 && s.sunset < 7.0,
+            "sunset = {:.3} h (expected 6.5–7.0 h)", s.sunset);
+    }
+
+    #[test]
+    fn test_setday_last_mirror_is_daysec() {
+        // The last mirrored dtime (at index ntim) must equal DAYSEC
+        let mut s = standard_setday_state();
+        setday(&mut s);
+        let ntim = s.ntim;
+        assert!((s.dtime[ntim] - s.daysec).abs() < 1.0,
+            "dtime[ntim={ntim}] = {} ≠ DAYSEC", s.dtime[ntim]);
+    }
+
+    #[test]
+    fn test_setday_dtime_monotone() {
+        // After WTIME adjustment, dtime must be strictly increasing
+        let mut s = standard_setday_state();
+        setday(&mut s);
+        let ntim = s.ntim;
+        for j in 1..=ntim {
+            assert!(s.dtime[j] > s.dtime[j-1],
+                "dtime not monotone at j={j}: {} <= {}", s.dtime[j], s.dtime[j-1]);
+        }
+    }
+
+    #[test]
+    fn test_setday_weights_sum_to_one() {
+        // wtime[1..=ntim] must sum to 1.0 (they partition the day)
+        let mut s = standard_setday_state();
+        setday(&mut s);
+        let sum: f64 = (1..=s.ntim).map(|j| s.wtime[j]).sum();
+        assert!((sum - 1.0).abs() < 1e-10, "wtime sum = {sum}");
+    }
+
+    #[test]
+    fn test_setday_utime_mirror_symmetry() {
+        // Morning and afternoon utime values should be symmetric about noon.
+        // utime[33] mirrors utime[0] (noon), utime[20] mirrors utime[13].
+        let mut s = standard_setday_state();
+        setday(&mut s);
+        // With jcomp = ntim-1-jj and ntim=34: jj=0 → jcomp=33, jj=13 → jcomp=20.
+        assert!((s.utime[33] - s.utime[0]).abs() < 1e-12,
+            "utime[33]={} ≠ utime[0]={}", s.utime[33], s.utime[0]);
+        assert!((s.utime[20] - s.utime[13]).abs() < 1e-12,
+            "utime[20]={} ≠ utime[13]={}", s.utime[20], s.utime[13]);
+    }
+
+    #[test]
+    fn test_setday_nday3_gives_2_steps() {
+        // NDAY=3 (1-step day) must set NTIMDO=2
+        let mut s = standard_setday_state();
+        s.nday = 3;
+        setday(&mut s);
+        assert_eq!(s.ntimdo, 2, "ntimdo should be 2 for nday=3");
+        assert!(!s.ldiurn);
+    }
+
+    #[test]
+    fn test_setday_polar_night() {
+        // At winter pole (90°N, dec=-23.5°), gmu0=-0.12 keeps sun below horizon
+        // all day; SNIT ≈ DAYSEC and all wtime concentrated in night
+        let mut s = ModelState::new();
+        let deg = std::f64::consts::PI / 180.0;
+        s.xlat   = 90.0 * deg;
+        s.xdec   = -23.5 * deg;
+        s.gmu0   = -0.12;
+        s.daysec = 86400.0;
+        s.atime[1] = 0.5;  // single afternoon step
+        s.btime[0] = 0.5;  // single night step
+        setday(&mut s);
+        // Should still produce a valid time grid
+        assert!(s.ntim >= 2);
+        assert!(s.ntimdo >= 2);
     }
 }

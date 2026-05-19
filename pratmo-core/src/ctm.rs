@@ -278,9 +278,9 @@ pub fn ctmlfq(s: &mut ModelState) -> Result<()> {
             s.dn2oref[i] = interp2(wm, wj, &s.dn2oinp,  mm1, mm2, jj1, jj2, i);
         }
 
-        // Hydrostatic balance and timing (must come before unit conversion, DM needed)
-        let logp = if s.cinpdir.contains('P') { 1 } else { 0 };
-        hystat(s, logp);
+        // CTM mode always uses log-pressure coordinates: CALL HYSTAT(1) in bctmx.f line 352.
+        // HYSTAT(1) computes Z from T: Z[ii] = Z[ii-1] + (T[ii-1]+T[ii]) * CLOGP (~2 km/level)
+        hystat(s, 1);
         s.xlat = xlat.to_radians();
         s.xlatd = xlat;
         // XDECD and FLSCAL already set from boxin_gui.dat jdaydo computation above
@@ -738,4 +738,112 @@ fn read_f8_4(r: &mut impl std::io::BufRead, count: usize) -> Result<Vec<f64>> {
         }
     }
     Ok(vals)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array3;
+
+    // ── interp2 ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_interp2_at_corners() {
+        let mut arr = Array3::<f64>::zeros((12, 18, 5));
+        arr[[0, 0, 2]] = 1.0;
+        arr[[0, 1, 2]] = 2.0;
+        arr[[1, 0, 2]] = 3.0;
+        arr[[1, 1, 2]] = 4.0;
+
+        assert_eq!(interp2(0.0, 0.0, &arr, 0, 1, 0, 1, 2), 1.0, "(mm1,jj1)");
+        assert_eq!(interp2(1.0, 0.0, &arr, 0, 1, 0, 1, 2), 3.0, "(mm2,jj1)");
+        assert_eq!(interp2(0.0, 1.0, &arr, 0, 1, 0, 1, 2), 2.0, "(mm1,jj2)");
+        assert_eq!(interp2(1.0, 1.0, &arr, 0, 1, 0, 1, 2), 4.0, "(mm2,jj2)");
+    }
+
+    #[test]
+    fn test_interp2_midpoint() {
+        let mut arr = Array3::<f64>::zeros((12, 18, 5));
+        arr[[0, 0, 0]] = 10.0;
+        arr[[0, 1, 0]] = 20.0;
+        arr[[1, 0, 0]] = 30.0;
+        arr[[1, 1, 0]] = 40.0;
+        // Midpoint of all four corners = average = 25.0
+        assert_eq!(interp2(0.5, 0.5, &arr, 0, 1, 0, 1, 0), 25.0, "midpoint");
+    }
+
+    #[test]
+    fn test_interp2_linear_in_wm() {
+        let mut arr = Array3::<f64>::zeros((12, 18, 3));
+        arr[[2, 5, 1]] = 0.0;
+        arr[[2, 6, 1]] = 0.0;
+        arr[[3, 5, 1]] = 100.0;
+        arr[[3, 6, 1]] = 100.0;
+        // Varying wm only (wj=0): expect 100*wm
+        assert!((interp2(0.3, 0.0, &arr, 2, 3, 5, 6, 1) - 30.0).abs() < 1e-10);
+        assert!((interp2(0.7, 0.0, &arr, 2, 3, 5, 6, 1) - 70.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_interp2_uniform_field() {
+        // Uniform field: result must equal that value everywhere
+        let mut arr = Array3::<f64>::zeros((12, 18, 4));
+        for m in 0..2 { for j in 0..2 { arr[[m, j, 3]] = 42.0; } }
+        for &wm in &[0.0, 0.25, 0.5, 0.75, 1.0] {
+            for &wj in &[0.0, 0.5, 1.0] {
+                assert_eq!(interp2(wm, wj, &arr, 0, 1, 0, 1, 3), 42.0);
+            }
+        }
+    }
+
+    // ── read_f8_4 ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_read_f8_4_single_line() {
+        use std::io::Cursor;
+        // F8.4 format: 3-char prefix "   ", then 8-char fields right-justified.
+        // " 0.3162" is 7 chars; " 0.3162 " would be 8. Typical: "  0.3162".
+        // Build exactly 6 × 8-char fields = 48 chars after the 3-char prefix.
+        let data = "     0.3162  0.0631  0.0126  0.0025  0.0005  0.0001\n";
+        //          ^--- 3 spaces then 6 × " Xx.xxxx" (8 chars each)
+        let mut cur = Cursor::new(data);
+        let vals = read_f8_4(&mut cur, 6).unwrap();
+        assert_eq!(vals.len(), 6, "expected 6 values, got {}", vals.len());
+        assert!((vals[0] - 0.3162).abs() < 1e-4, "vals[0]={}", vals[0]);
+        assert!((vals[1] - 0.0631).abs() < 1e-4, "vals[1]={}", vals[1]);
+        assert!((vals[5] - 0.0001).abs() < 1e-5, "vals[5]={}", vals[5]);
+    }
+
+    #[test]
+    fn test_read_f8_4_multiline() {
+        use std::io::Cursor;
+        // Standard fort51.x "3X,11F8.4": 11 values per line, 8 chars each.
+        // 11 × 8 = 88 chars of data per line after 3-char prefix.
+        let line1 = "     0.3162  0.0631  0.0126  0.0025  0.0005  0.0001  0.3162  0.0631  0.0126  0.0025  0.0005\n";
+        let line2 = "     0.0001  0.3162\n";
+        let data = format!("{line1}{line2}");
+        let mut cur = Cursor::new(data.as_str());
+        let vals = read_f8_4(&mut cur, 13).unwrap();
+        assert_eq!(vals.len(), 13);
+        assert!((vals[0]  - 0.3162).abs() < 1e-4, "vals[0]={}", vals[0]);
+        assert!((vals[11] - 0.0001).abs() < 1e-5, "vals[11]={}", vals[11]);
+        assert!((vals[12] - 0.3162).abs() < 1e-4, "vals[12]={}", vals[12]);
+    }
+
+    // ── read_f7_1 ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_read_f7_1_temperature() {
+        use std::io::Cursor;
+        // "3X,11F7.1" — T profiles use 1 decimal place, 7 chars per field.
+        // Fields: "  250.0"  "  240.5"  "  230.1" (each 7 chars, right-justified).
+        let data = "     250.0  240.5  230.1\n";
+        //          ^3X^ then each "  nnn.d" = 7 chars
+        let mut cur = Cursor::new(data);
+        let vals = read_f7_1(&mut cur, 3).unwrap();
+        assert_eq!(vals.len(), 3, "expected 3 values, got {}", vals.len());
+        assert!((vals[0] - 250.0).abs() < 0.05, "vals[0]={}", vals[0]);
+        assert!((vals[1] - 240.5).abs() < 0.05, "vals[1]={}", vals[1]);
+        assert!((vals[2] - 230.1).abs() < 0.05, "vals[2]={}", vals[2]);
+    }
 }

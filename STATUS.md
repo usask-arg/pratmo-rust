@@ -1,107 +1,106 @@
-# PRATMO Rust Rewrite — Status
+# PRATMO Rust Port — Status
 
-Fortran 77 stratospheric photochemical box model (PRATMO v6.0, Prather) → Rust.
-Direct 1-to-1 port preserving Fortran subroutine boundaries and original input file formats.
+Faithful 1-to-1 Rust port of PRATMO v6.0 (Prather stratospheric photochemical box model, Fortran 77).
 
-## Workspace layout
+## Where we are
 
-```
-pratmo-core/   — library crate (all physics)
-pratmo-cli/    — binary crate (CLI entry point)
-fortran/       — original Fortran source (reference)
-```
+**CTM mode (standard test case) is fully validated against gfortran.**  
+`cargo build` is clean (warnings only). `cargo test` passes 49 tests (38 unit + 11 integration). All species — long-lived (O3, N2O, NOy, CH4, H2O), short-lived radicals (OH, HO2), and NOy reservoirs (HNO3, N2O5) — match gfortran to ≥4 significant figures at all 25 altitude levels for the standard test case (60°N, March 16). DIURN mode is implemented but not yet validated against Fortran output.
 
-## Module mapping (Fortran → Rust)
+---
 
-| Fortran file | Rust module | Status |
+## Validation summary (CTM mode, 60°N March 16, 25 boxes, 40 days)
+
+| Quantity | Status | Notes |
 |---|---|---|
-| `bcomm.h` (24 COMMON blocks) | `state.rs` (`ModelState` struct) | **Complete** |
-| `bchem.f` (1150 lines) | `chemistry.rs` | **Complete** |
-| `bjval.f` (518 lines) | `jvalue.rs` | **Complete** |
-| `butil.f` (FIXRAT/FIXMIX/NEWRAF/LINSLV) | `solver.rs` | **Complete** |
-| `bread.f` (535 lines) + SETDAY/HYSTAT | `reader.rs` | **Complete** |
-| `bdiel.f` (334 lines) | `diurnal.rs` | **Complete** |
-| `bpath.f` (391 lines) | `path.rs` | **Complete** |
-| `bhetp.f` (201 lines) | `heterogeneous.rs` | **Complete** |
-| `bry_vs_tracers.gen.vers03.f` (1700 lines) | `tracers.rs` | **Complete** (key functions) |
-| `bctin.f` (239 lines) | `init.rs` | **Complete** |
-| `ClNO3code.f` (184 lines) | `clno3.rs` | **Complete** (reference impl) |
-| `bctmx.f` (2404 lines) | `ctm.rs` | **Skeleton** — see gaps below |
-| `batmo.f` (main program) | `pratmo-cli/src/main.rs` | **Partial** — see gaps below |
-| `constants.h` / `bcomm.h` PARAMETERs | `constants.rs` | **Complete** |
-
-Build status: `cargo build` → **clean** (warnings only from unused stub params).
+| O3, N2O, NOy, CH4, H2O | **✓ 4 sig figs** | Exact altitude grid match |
+| Air density M, T, pressure | **✓ 4 sig figs** | |
+| J(O3→O1D) | **✓ +0.10%** | Altitude-independent |
+| J(H2O2), J(N2O5) | **✓ ~1%** | |
+| OH, HO2 noon | **✓ 4 sig figs** | Resolved by jcomp fix (bug #8) |
+| HNO3 | **✓ 4 sig figs** | Resolved by jcomp fix (bug #8) |
+| N2O5 | **✓ 4 sig figs** | Resolved by jcomp fix (bug #8) |
+| NTIMDO | **✓ 34** | Matches Fortran after jj_fortran fix |
+| RADCOUNT | **✓ 33000** | 40 days × 25 boxes × 33 time steps |
 
 ---
 
-## What works
+## Module map
 
-- All core physics modules compile and have no `todo!()` stubs.
-- **Chemistry**: SETUPR (rate constants + Troe fall-off), CHEMS (221 reactions, O(1D)/N(4S) quasi-SS), CHEMPL (P/L rates for 30 implicit + 20 family species), RHSLHS (RHS vector + 30×30 Jacobian).
-- **J-values**: SOL → JVALUE → OPTAU → SCATTR (Eddington 2-stream, 3-pt Gauss quadrature) → SPHERE (Chapman function twilight correction). All 44 photolysis channels, 77 wavelength bins. **Bug fixed: SSF (solar flux scale factor) was initialized to 0; now correctly 1.0.**
-- **Solver**: FIXRAT (cubic family conservation, regula falsi + NR), FIXMIX, NEWRAF (adaptive time-step halving), NEWRAX (18-iteration NR), LINSLV/RESOLV (Crout partial-pivot LU).
-- **I/O**: FortranReader reads all standard input files (fort10\_cam06.x, fort11\_jpl09.x, fort01.x, fort02.x, fort13.x, fort14.x, J\_H2O\_SZA0.dat, fort03\_LLM.x, fort05.x, fort51.x) with full fixed-format Fortran parsing. fort02.x reading added for DIURN mode initial conditions.
-- **Diurnal integration**: DIURN (box loop), DAILY (24-hr time-step loop with J-value caching in STORJV), RAFDAY (NR slow-species steady-state driver).
-- **Path integration**: DSTEP (NDAYSD-day integration with explicit species update and family renormalization), TPATH (outer loop with NEWATM reading from fort01\_remaining).
-- **NEWATM**: Reads subsequent path records from fort01\_remaining (cached during READIN), resets T/O3/lat and calls FIXMIX. Path mode atmosphere resets work.
-- **Heterogeneous chemistry**: Full Shi/Worsnop/Davidovits H₂SO₄ aerosol formula (8 γ values: ClONO2+HCl/H2O, HOCl+HCl, N2O5±HCl, BrONO2, HOBr±HCl/HBr), PSC ice branch.
-- **Tracer relationships**: Bry/Cly/CH4/CH3Cl vs N2O polynomial fits (Wamsley 2003, Michelsen 1998, Schauffler 2003) with age-of-air correction.
-- **CTM initialisation**: CTINIT family density initialisation from NOy, Cly, Bry with uniform NOy/Cly/Bry partitioning. CTM climatology (T, O3, NOy, N2O) correctly interpolated and unit-converted from ppmv/ppbv to cm⁻³.
-- **Output routines** (new module `output.rs`):
-  - `PUNCH(IB, IDAY)` — writes diurnal species time series to fort07.x ✓
-  - `PRTALL(mode, flags, n)` — species/rate table to stdout ✓
-  - `PRTPTH(iseg, iday, ibx)` — path summary to fort08.x/fort09.x ✓
-  - `PRTRAT(nnn)`, `PRTAVG(nnn)` — rate/average tables ✓
-  - `HUNT(xx, x, jlo)` — general binary bracket search ✓
-  - `CTOUTP` — CTM diagnostic stdout output (N2O/NOy/CH4 loss frequencies) ✓
-- **CTM mode validated**: Running fort01.x (ND216=44, 60°N/March, 25 boxes, 40 days) produces physically consistent N2O loss rates (~1e-8 s⁻¹ at 40 km), NOy loss rates, and O3 profiles. RADCOUNT=31010 (40 days × 25 boxes × 31 steps). ✓
+| Fortran | Rust | Status |
+|---|---|---|
+| `bcomm.h` (24 COMMON blocks) | `state.rs` (`ModelState`) | ✓ Complete |
+| `bchem.f` | `chemistry.rs` | ✓ Complete |
+| `bjval.f` | `jvalue.rs` | ✓ Complete |
+| `butil.f` | `solver.rs` + `output.rs` | ✓ Complete |
+| `bread.f` + SETDAY/HYSTAT | `reader.rs` | ✓ Complete |
+| `bdiel.f` | `diurnal.rs` | ✓ Complete |
+| `bpath.f` | `path.rs` | ✓ Complete |
+| `bhetp.f` | `heterogeneous.rs` | ✓ Complete |
+| `bry_vs_tracers.gen.vers03.f` | `tracers.rs` | ✓ Complete |
+| `bctin.f` | `init.rs` | ✓ Complete |
+| `ClNO3code.f` | `clno3.rs` | ✓ Reference impl |
+| `bctmx.f` | `ctm.rs` | ✓ CTM + boxout.dat output |
+| `batmo.f` | `main.rs` | ✓ Single-case (no multi-case loop) |
+| `bdiff.f` | — | T1DIFF is a no-op in Fortran; skipped |
 
 ---
 
-## Known gaps (what remains)
+## Bugs found and fixed
 
-### 1. Numerical parity with Fortran
-The Fortran executables are Windows PE32+ binaries (cannot run on macOS). Physical validation uses known atmospheric chemistry constraints:
-- N2O photochemical lifetime at 40 km: ~150 days (model: ✓)
-- O3 profile shape vs altitude: qualitatively correct (model: ✓)
-- NOy/N2O relationship via tracer empirics: implemented (Wamsley 2003)
-- Full bit-for-bit comparison against Fortran output: **not yet possible without Windows/Wine**
-
-### 2. CTOUTP DPL file output
-The CTM run writes N2O/NOy/CH4 loss frequencies to stdout but does NOT write the full DPL array (P-L rates, mixing ratios vs lat/month) to binary output files. The Fortran CTOUTP writes these to `bmoutfile` (specified in boxin\_gui.dat). The DPL array is populated during the loop but not written to disk.
-
-### 3. DERIVS mode (`nd216 < 0`)
-Sensitivity/derivative calculation mode. The Fortran `SUBROUTINE DERIVS` perturbs key species and runs DSTEP to compute Jacobians (d(P-L)/d(O3), etc.). Not yet translated. `main.rs` prints a warning and exits cleanly.
-
-### 4. Missing utility subroutines
-- `PZSTD` — converts from pressure levels to standard Z grid. Called from NEWATM when `NPSTD > 0`. Stub (no-op currently).
-- `T1DIFF` — 1D diffusion transport. Called from `batmo.f` after the main run in multi-case mode. A no-op in the Fortran reference code (`bdiff.f`), so safe to skip.
-
-### 5. Multi-case loop (`batmo.f`)
-`main.rs` handles only one case per invocation. The Fortran loops: `CALL READIN → run → CALL READIN (LEND=TRUE) → T1DIFF → repeat`. `T1DIFF` is a no-op in the reference, so this is low-priority.
-
-### 6. CTM interpolation simplifications
-- `s.xdecd = 0.0` (equinox declination) is hardcoded for all months — the Fortran reads EDEC per month from a DATA statement.
-- The boxin\_gui.dat lat/jday selection for CTM is partially read but `nd216` override is not applied from it (see `bctmx.f` `j0` calculation).
+| # | Bug | Fix |
+|---|---|---|
+| 1 | `ssf[NQ] = 0.0` — silenced ALL J-values | Initialize to 1.0 in `ModelState::new()` |
+| 2 | `gmu0 = -0.14` hardcoded | Read from fort01.x (value: -0.12) |
+| 3 | NTIMDO off by 2: `jj` didn't count noon step | `jj_fortran = jj + 1` in setday() |
+| 4 | N2O read from fort51.x: F7.4 format used | fort51.x uses F8.4 (8-char fields) |
+| 5 | CTM unit conversion missing | ppmv×M×1e-6 for O3, ppbv×M×1e-9 for NOy/N2O |
+| 6 | nd216/nd216s from fort01.x, not boxin_gui | Compute from jdaydo/xlatdo via HUNT + JDDO array |
+| 7 | CTM altitude grid: geometric 2 km spacing | CTM always uses `HYSTAT(1)` (log-pressure, T-dependent Z) |
+| 8 | `jcomp = ntim + 1 - jj` — wrong evening/morning mirror indices for utime/ztime/jtim | `jcomp = ntim - 1 - jj` (0-based conversion of Fortran `NTIM+1-JJ` where `JJ=jj+1`) |
 
 ---
 
-## Suggested next steps (in priority order)
+## Test coverage
 
-1. **Write DPL output file** from CTM mode: implement CTOUTP file writer using `bmoutfile` path from boxin\_gui.dat.
-2. **Validate CTM against Fortran** by running `pratmo.exe` under Wine and comparing stdout loss frequencies.
-3. **Implement EDEC per month** in ctm.rs for accurate solar declination by lat/mon.
-4. **Implement DERIVS** for sensitivity analysis capability.
-5. **Implement `PZSTD`** if NPSTD > 0 runs are needed.
-6. **Multi-case loop** in `main.rs` for sensitivity ensembles.
+49 tests total (`cargo test`).
+
+| Suite | Count | What it covers |
+|---|---|---|
+| `tests/ctm_integration.rs` | 11 | Full model run vs gfortran reference (all 25 altitudes, all key species, full OH diurnal, sanity checks) |
+| `reader::tests` | 20 | `parse_e_field`, `parse_fixed_i32s`, `parse_fixed_f64s_fw`, `hystat` (logp + geometric), `setday` (ntim, weights, mirror symmetry, polar night, nday modes) |
+| `ctm::tests` | 7 | `interp2` (corners, midpoint, linear, uniform), `read_f8_4`, `read_f7_1` |
+| `output::tests` | 9 | `hunt` (interior, boundary, below/above range, hint, JDDO array), `fmt_e10p3` |
 
 ---
 
-## Key design decisions made
+## Open gaps
 
-- **COMMON blocks → `ModelState`**: all 24 COMMON blocks unified into one `Box<ModelState>` (~3 MB heap allocation).
-- **EQUIVALENCE arrays**: `DDDDDD(NB,NSPEC)≡DNO`, `FFFFFF(NB,18)≡FO3`, `VVVVVV(NL,NJVAL)≡VNO`, `RCOLUM(430)≡XR` handled via `den_get/den_set`, `fff_get/fff_set`, `jval_get/jval_set` accessor methods rather than unsafe aliasing.
-- **0-based indexing**: all Rust arrays are 0-based; Fortran 1-based species indices N1..N30 stored as `s.n[0..29]` (values remain 1-based for use as array indices into `xn[N-1]`).
-- **`nboxdo: [i32; NB]`**: signed (negative = use DAILY, positive = use RAFDAY) matching the Fortran sign convention.
-- **`ModelReader` trait**: I/O abstracted behind a trait for future format modernisation.
-- **Input files preserved**: same fixed-format Fortran files (fort10\_cam06.x, fort11\_jpl09.x, fort01.x, fort13.x, fort14.x).
+### 1. DIURN mode validation (nd216 = 0)
+`diurn()` and `tpath()` are implemented but their outputs (`fort07.x`, `fort08.x`, `fort09.x`) have never been compared against the Fortran reference. Next step: run both Fortran and Rust in DIURN mode (set `ND216=0` in fort01.x) and diff the outputs.
+
+### 2. CTM grid coverage
+The integration test only exercises ipath=415 (60°N, March half-month 6) because `boxin_gui.dat` constrains `nd216 = nd216s`. The other 70 latitudes × 24 half-months in the 71×24 climatology grid are untested. Next step: run with `nd216s=1` (full grid scan) and compare the full `boxout.dat` against Fortran.
+
+### 3. Known latent bug in `setday` (unreachable in standard run)
+When any `ATIME[j] * SSET > 0.5 * DAYSEC` (requires ATIME > ~2.4 for a 5-hour sunset), Fortran uses `DTIME[j]` in `SNIT` but Rust uses `DTIME[jj]` (the step before). This path is never triggered by the standard `fort01.x` (all ATIME ≤ 1.05), but would produce wrong night-step intervals for unusual configurations.
+
+### 4. DERIVS mode (nd216 < 0)
+Sensitivity Jacobians (d(P-L)/d(O3) etc.). Fortran `SUBROUTINE DERIVS` perturbs species and re-runs DSTEP. Not translated. `main.rs` prints a warning.
+
+### 5. PZSTD
+Converts pressure to standard Z grid. Called from NEWATM when NPSTD > 0. Currently a stub (no-op). The standard fort01.x has NPSTD=0.
+
+### 6. Multi-case loop
+`batmo.f` can loop over multiple cases (READIN → run → READIN with LEND=TRUE → T1DIFF → repeat). T1DIFF is a no-op. `main.rs` handles only the first case.
+
+---
+
+## Key design decisions
+
+- **COMMON blocks → `ModelState`**: all 24 COMMON blocks unified into one `Box<ModelState>` (~3 MB heap).
+- **EQUIVALENCE arrays**: `DDDDDD`, `FFFFFF`, `VVVVVV`, `RCOLUM` handled via `den_get/den_set`, `fff_get/fff_set`, `jval_get/jval_set` rather than unsafe aliasing.
+- **N1..N30 indices**: `s.n[j]` stores 1-based XN slot values. Use `s.n[j] - 1` for 0-based array access.
+- **SSF must be 1.0**: `s.ssf[k] = 1.0` (solar flux scale factor) is set by CTMLFQ in the Fortran; in Rust it is initialized to 1.0 in `ModelState::new()`.
+- **CTM always uses HYSTAT(1)**: log-pressure altitude grid (Z from T), not geometric 2 km spacing.
+- **Input files unchanged**: same fixed-format Fortran files. Input files need CRLF→LF cleaning on macOS (see `agents.md`).

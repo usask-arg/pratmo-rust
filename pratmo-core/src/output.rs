@@ -615,3 +615,102 @@ pub fn hunt(xx: &[f64], x: f64, jlo: &mut usize) {
     // Convert back to 0-based: jlo_f is 1-based lower bracket
     *jlo = jlo_f.max(0) as usize;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── hunt ─────────────────────────────────────────────────────────────────
+
+    fn hunt_result(xx: &[f64], x: f64) -> usize {
+        let mut jlo = 0;
+        hunt(xx, x, &mut jlo);
+        jlo
+    }
+
+    // hunt uses strictly-greater bisection and stores the 1-based result
+    // directly as usize without subtracting 1. So for xx=[a,b,c,...]:
+    //   jlo=k means x is in the open-upper interval (xx[k-1], xx[k]] (0-based).
+
+    #[test]
+    fn test_hunt_interior() {
+        let xx = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        // 2.5 in (xx[1]=2, xx[2]=3] → 1-based jlo=2
+        assert_eq!(hunt_result(&xx, 2.5), 2);
+        // 3.0 exactly at xx[2]=3 (upper end of bracket) → jlo=2
+        assert_eq!(hunt_result(&xx, 3.0), 2);
+        // 4.9 in (xx[3]=4, xx[4]=5] → jlo=4
+        assert_eq!(hunt_result(&xx, 4.9), 4);
+    }
+
+    #[test]
+    fn test_hunt_exact_boundary() {
+        let xx = vec![0.0, 10.0, 20.0, 30.0];
+        // 10.0 at the upper end of (0, 10] → jlo=1
+        assert_eq!(hunt_result(&xx, 10.0), 1);
+        // 20.0 at the upper end of (10, 20] → jlo=2
+        assert_eq!(hunt_result(&xx, 20.0), 2);
+    }
+
+    #[test]
+    fn test_hunt_below_range() {
+        let xx = vec![5.0, 10.0, 15.0];
+        let jlo = hunt_result(&xx, 1.0);
+        // Below range: jlo = 0 (standard NR behavior)
+        assert_eq!(jlo, 0);
+    }
+
+    #[test]
+    fn test_hunt_above_range() {
+        let xx = vec![1.0, 2.0, 3.0];
+        let jlo = hunt_result(&xx, 99.0);
+        assert_eq!(jlo, 3); // beyond last element
+    }
+
+    #[test]
+    fn test_hunt_hint_used() {
+        // With a good hint the algorithm converges to the same answer
+        let xx: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        let mut jlo = 50_usize; // hint near the answer
+        hunt(&xx, 73.5, &mut jlo);
+        // 73.5 in (xx[73]=73, xx[74]=74] → jlo=74
+        assert_eq!(jlo, 74, "jlo={jlo}");
+    }
+
+    #[test]
+    fn test_hunt_consistent_with_fortran_jddo() {
+        // Replicate the JDDO array lookup in ctmlfq: find bracket for jdaydo=75
+        let jddo: Vec<f64> = [
+            1.,16.,32.,47.,60.,75.,91.,106.,121.,137.,152.,167.,
+            182.,197.,213.,228.,244.,259.,274.,289.,305.,320.,335.,350.,
+        ].to_vec();
+        let mut jlo = 0;
+        hunt(&jddo, 75.0, &mut jlo);
+        // 75 is at index 5 exactly; HUNT should place jlo = 5 (the exact hit)
+        assert_eq!(jlo, 5, "jlo={jlo}");
+    }
+
+    // ── fmt_e10p3 ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fmt_e10p3_width() {
+        // Output must always be exactly 10 characters
+        for v in &[0.0, 1.234e-5, -3.14e10, 9.999e99, 1.0e-99] {
+            let s = fmt_e10p3(*v);
+            assert_eq!(s.len(), 10, "fmt_e10p3({v}) = {s:?}, len={}", s.len());
+        }
+    }
+
+    #[test]
+    fn test_fmt_e10p3_value() {
+        let s = fmt_e10p3(1.234e-5);
+        let parsed: f64 = s.trim().parse().expect("not a number: {s:?}");
+        assert!((parsed - 1.234e-5).abs() / 1.234e-5 < 1e-3);
+    }
+
+    #[test]
+    fn test_fmt_e10p3_zero() {
+        let s = fmt_e10p3(0.0);
+        assert_eq!(s.len(), 10);
+    }
+}

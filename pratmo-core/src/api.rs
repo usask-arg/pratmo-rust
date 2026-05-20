@@ -483,29 +483,43 @@ impl CtmOutput {
 
 // ── PratmoModel ────────────────────────────────────────────────────────────────
 
-/// Handle to the PRATMO model data directory.
+/// Entry point for the PRATMO photochemical box model.
 ///
-/// The directory must contain the standard input files:
-/// `fort01.x`, `fort10_cam06.x`, `fort11_jpl09.x`, `fort13.x`, `fort14.x`, `fort15.x`.
-/// For CTM runs, `boxin_gui.dat` and `fort03_LLM.x` / `fort05.x` / `fort51.x` are also needed.
+/// Construct with [`PratmoModel::with_defaults()`] for a self-contained run using
+/// compiled-in science data, or [`PratmoModel::new(data_dir)`] to load from the
+/// original Fortran-format files (useful for backwards-compatibility testing or
+/// overriding individual files).
+///
+/// For file-based runs the directory must contain:
+/// `fort01.x`, `fort10_cam06.x`, `fort11_jpl09.x`, `fort13.x`, `fort14.x`, `J_H2O_SZA0.dat`.
+/// CTM climatology runs additionally need `fort03_LLM.x`, `fort05.x`, `fort51.x`.
 pub struct PratmoModel {
-    data_dir: PathBuf,
+    /// `None` → use compiled-in embedded data; `Some(path)` → read from files.
+    data_dir: Option<PathBuf>,
 }
 
 impl PratmoModel {
+    /// Create a model using only compiled-in default science data.
+    /// No data files on disk are required.
+    pub fn with_defaults() -> Self {
+        Self { data_dir: None }
+    }
+
+    /// Create a model that reads science data from `data_dir` at runtime.
+    /// Keeps the original Fortran-file workflow intact for backwards-compatibility
+    /// testing and for overriding individual data files.
     pub fn new(data_dir: impl AsRef<Path>) -> Self {
-        Self { data_dir: data_dir.as_ref().to_owned() }
+        Self { data_dir: Some(data_dir.as_ref().to_owned()) }
     }
 
     /// Run the diurnal cycle (DIURN + TPATH) mode.
     ///
-    /// Reads base chemistry from `fort01.x`, then overrides geographic/temporal/box
+    /// Loads base chemistry setup, then overrides geographic/temporal/box
     /// parameters from `cfg`. Returns structured output without writing any files.
     pub fn run_diurn(&self, cfg: &DiurnConfig) -> Result<DiurnOutput> {
         let mut s = self.load_base_state()?;
         apply_diurn_config(&mut s, cfg);
 
-        // Disable file output — results returned as data
         s.out_unit7 = None;
         s.out_unit8 = None;
         s.out_unit9 = None;
@@ -518,9 +532,10 @@ impl PratmoModel {
 
     /// Run the CTM climatological mode.
     ///
-    /// Reads base chemistry from `fort01.x` and climatology from `fort03_LLM.x` /
-    /// `fort05.x` / `fort51.x`, overriding geographic/temporal/box parameters from
-    /// `cfg`. Returns structured output without writing any files.
+    /// Loads base chemistry setup, then overrides geographic/temporal/box
+    /// parameters from `cfg`. Returns structured output without writing any files.
+    /// Climatology data (fort03_LLM.x / fort05.x / fort51.x) is only available
+    /// when using [`PratmoModel::new`] with a directory that contains those files.
     pub fn run_ctm(&self, cfg: &CtmConfig) -> Result<CtmOutput> {
         let mut s = self.load_base_state()?;
         apply_ctm_config(&mut s, cfg);
@@ -534,12 +549,15 @@ impl PratmoModel {
         Ok(extract_ctm_output(&s))
     }
 
-    /// Read all base data (spectral, kinetics, chemistry setup, atmosphere) from fort01.x
-    /// and associated files. The caller then overrides run-specific parameters.
     fn load_base_state(&self) -> Result<Box<ModelState>> {
         let mut s = ModelState::new();
-        s.cinpdir = self.data_dir.to_string_lossy().into_owned();
-        let mut reader = FortranReader::new(&self.data_dir);
+        let mut reader = match &self.data_dir {
+            Some(dir) => {
+                s.cinpdir = dir.to_string_lossy().into_owned();
+                FortranReader::new(dir)
+            }
+            None => FortranReader::embedded(),
+        };
         reader.read_all(&mut s)?;
         Ok(s)
     }

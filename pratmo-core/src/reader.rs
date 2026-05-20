@@ -1,7 +1,8 @@
 // bread.f → I/O module
 // ModelReader trait + FortranReader implementation
 
-use std::io::{BufRead, BufReader};
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Cursor};
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -54,23 +55,57 @@ pub trait ModelReader {
 
 // ── FortranReader ─────────────────────────────────────────────────────────────
 
-/// Reads the original Fortran fixed-format files.
+// ── Embedded default data ─────────────────────────────────────────────────────
+
+static EMBEDDED_FORT01:  &[u8] = include_bytes!("../data/fort01.x");
+static EMBEDDED_FORT02:  &[u8] = include_bytes!("../data/fort02.x");
+static EMBEDDED_FORT10:  &[u8] = include_bytes!("../data/fort10_cam06.x");
+static EMBEDDED_FORT11:  &[u8] = include_bytes!("../data/fort11_jpl09.x");
+static EMBEDDED_FORT13:  &[u8] = include_bytes!("../data/fort13.x");
+static EMBEDDED_FORT14:  &[u8] = include_bytes!("../data/fort14.x");
+static EMBEDDED_JH2O:    &[u8] = include_bytes!("../data/J_H2O_SZA0.dat");
+
+// ── FortranReader ─────────────────────────────────────────────────────────────
+
+/// Reads Fortran fixed-format files from a directory, with optional per-file
+/// byte overrides (used by [`FortranReader::embedded`] to serve compiled-in data).
 pub struct FortranReader {
     pub input_dir: std::path::PathBuf,
+    overrides: HashMap<&'static str, &'static [u8]>,
 }
 
 impl FortranReader {
+    /// File-based reader: all files are read from `input_dir`.
     pub fn new(input_dir: impl AsRef<Path>) -> Self {
         Self {
             input_dir: input_dir.as_ref().to_owned(),
+            overrides: HashMap::new(),
         }
     }
 
-    fn open(&self, name: &str) -> Result<BufReader<std::fs::File>> {
+    /// Embedded reader: core science data is served from compiled-in bytes.
+    /// Falls back to `input_dir` (empty) for any file not in the override set,
+    /// which is the right behaviour for optional files (fort03, fort05, fort51).
+    pub fn embedded() -> Self {
+        let mut overrides: HashMap<&'static str, &'static [u8]> = HashMap::new();
+        overrides.insert("fort01.x",        EMBEDDED_FORT01);
+        overrides.insert("fort02.x",        EMBEDDED_FORT02);
+        overrides.insert("fort10_cam06.x",  EMBEDDED_FORT10);
+        overrides.insert("fort11_jpl09.x",  EMBEDDED_FORT11);
+        overrides.insert("fort13.x",        EMBEDDED_FORT13);
+        overrides.insert("fort14.x",        EMBEDDED_FORT14);
+        overrides.insert("J_H2O_SZA0.dat",  EMBEDDED_JH2O);
+        Self { input_dir: std::path::PathBuf::new(), overrides }
+    }
+
+    fn open(&self, name: &str) -> Result<Box<dyn BufRead>> {
+        if let Some(bytes) = self.overrides.get(name) {
+            return Ok(Box::new(BufReader::new(Cursor::new(*bytes))));
+        }
         let path = self.input_dir.join(name);
         let f = std::fs::File::open(&path)
             .with_context(|| format!("cannot open {}", path.display()))?;
-        Ok(BufReader::new(f))
+        Ok(Box::new(BufReader::new(f)))
     }
 }
 

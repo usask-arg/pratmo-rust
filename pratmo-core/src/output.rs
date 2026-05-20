@@ -131,9 +131,9 @@ pub fn diurn_unit7_header(s: &mut ModelState) {
     write_i5_line(w, &[s.ntot as i32, s.ntotx as i32]);
 
     // WRITE(7,201) (NT(JJ),JJ=1,NTOTX)
-    // NT(J) = N(J) = species slot index (1-based Fortran); in Rust s.n[j] is 0-based, so +1
+    // NT(J) = N(J) = 1-based species slot index; s.n[j] is already 1-based in Rust
     let nt_vals: Vec<i32> = (0..s.ntotx)
-        .map(|j| if j < 30 { s.n[j] as i32 + 1 } else { s.ntotx as i32 })
+        .map(|j| if j < 30 { s.n[j] as i32 } else { s.ntotx as i32 })
         .collect();
     write_i5_line(w, &nt_vals);
 

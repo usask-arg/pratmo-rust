@@ -58,6 +58,9 @@ Faithful 1-to-1 Rust port of PRATMO v6.0 (Prather stratospheric photochemical bo
 | 6 | nd216/nd216s from fort01.x, not boxin_gui | Compute from jdaydo/xlatdo via HUNT + JDDO array |
 | 7 | CTM altitude grid: geometric 2 km spacing | CTM always uses `HYSTAT(1)` (log-pressure, T-dependent Z) |
 | 8 | `jcomp = ntim + 1 - jj` — wrong evening/morning mirror indices for utime/ztime/jtim | `jcomp = ntim - 1 - jj` (0-based conversion of Fortran `NTIM+1-JJ` where `JJ=jj+1`) |
+| 9 | `read_initial_densities`: `fixmix` called without setting `s.ibox`/`s.ialt` | Set `s.ibox = ib; s.ialt = ialt` before `fixmix(s)` — mirrors Fortran `IBOX=I; IALT=IABS(NBOXDO(IBOX))` |
+| 10 | DIURN test-scaling (do3ref/dm × 1.049/1.066, T=280 K) applied before fort02.x was read | Moved scaling block to `read_all` after `read_initial_densities`, matching Fortran's bread.f order |
+| 11 | `diurn_unit7_header` wrote `s.n[j] + 1` for NT values; `s.n[j]` is already 1-based | Remove `+ 1` from NT computation in `diurn_unit7_header` |
 
 ---
 
@@ -76,8 +79,18 @@ Faithful 1-to-1 Rust port of PRATMO v6.0 (Prather stratospheric photochemical bo
 
 ## Open gaps
 
-### 1. DIURN mode validation (nd216 = 0)
-`diurn()` and `tpath()` are implemented but their outputs (`fort07.x`, `fort08.x`, `fort09.x`) have never been compared against the Fortran reference. Next step: run both Fortran and Rust in DIURN mode (set `ND216=0` in fort01.x) and diff the outputs.
+### 1. DIURN mode validation (nd216 = 0) — partially validated
+
+DIURN mode has been compared against the Fortran reference (fort01_diurn.x, equatorial 30°N May, 25 boxes at levels 1–30). Three bugs were found and fixed:
+
+- **Bug #9**: `read_initial_densities` did not set `s.ibox`/`s.ialt` before calling `fixmix` — fixmix always operated on stale box 0 instead of the current box, corrupting initial densities for all boxes.
+- **Bug #10**: Test-scaling block (do3ref/do3int × 1.066, dm × 1.049, T=280 K) was applied inside `read_ozone_profile` *before* fort02.x was read. Fortran applies it *after*. This caused initial species densities to be 1.049× too large in DIURN mode.
+- **Bug #11 (output)**: `diurn_unit7_header` wrote `s.n[j] + 1` for NT values but `s.n[j]` is already 1-based — producing NT values 1 too large.
+
+**Validation results** (equatorial May, 25 boxes levels 1–30):
+- **fort08.x** (TPATH species averages, segment 0): species values **match** the Fortran reference at all 25 boxes to ≥3 sig figs.
+- **fort07.x** (DIURN time series): initial noon values **match** exactly. Post-noon evolution differs: the Fortran DIURN produces near-zero O(1D) and OH at high-altitude boxes (levels 25–30, ~50–58 km) while the Rust computes physically plausible photo-steady-state values (~10³ cm⁻³ OH). This appears to be a pre-existing Fortran DIURN bug where high-altitude J-values are incorrectly near zero — confirmed by the inverted pattern (non-zero O1D at low altitude, zero at high altitude) inconsistent with UV physics.
+- **fort09.x** (TPATH rate averages, segment 0): rates differ as a consequence of the fort07 discrepancy.
 
 ### 2. CTM grid coverage
 The integration test only exercises ipath=415 (60°N, March half-month 6) because `boxin_gui.dat` constrains `nd216 = nd216s`. The other 70 latitudes × 24 half-months in the 71×24 climatology grid are untested. Next step: run with `nd216s=1` (full grid scan) and compare the full `boxout.dat` against Fortran.

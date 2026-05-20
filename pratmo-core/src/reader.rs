@@ -32,9 +32,21 @@ pub trait ModelReader {
         self.read_atmosphere(s)?;
         self.read_ozone_profile(s)?;
         self.read_jh2o(s)?;
-        // Fort02.x: initial mixing ratios for DIURN/TPATH mode (skipped in CTM mode)
+        // Fort02.x: initial mixing ratios for DIURN/TPATH mode (skipped in CTM mode).
+        // Fortran bread.f reads fort02.x BEFORE the 1.049/1.066/280K test-scaling block,
+        // so initial densities are rescaled by the pre-1.049 DM.
         if s.nd216 <= 0 {
             let _ = self.read_initial_densities(s); // optional — fort02.x may not exist
+        }
+        // Apply test scaling (bread.f lines 396–402): AFTER fort02.x initial densities.
+        // Fortran: do3ref/do3int *= 1.066; dm/do2int *= 1.049; t = 280.0
+        let nc = s.nc;
+        for j in 0..nc {
+            s.do3ref[j] *= 1.066;
+            s.do3int[j] *= 1.066;
+            s.dm[j]     *= 1.049;
+            s.do2int[j] *= 1.049;
+            s.t[j]       = 280.0;
         }
         Ok(())
     }
@@ -472,15 +484,6 @@ impl ModelReader for FortranReader {
                 + 0.5 * (s.z[j + 1] - s.z[j]) * (s.do3ref[j + 1] + s.do3ref[j]);
             s.do2int[j] = s.do2int[j + 1]
                 + 0.5 * (s.z[j + 1] - s.z[j]) * (s.dm[j + 1] + s.dm[j]) * po2;
-        }
-
-        // Apply temporary test scaling (bread.f lines 396–402 — preserve exactly)
-        for j in 0..nc {
-            s.do3ref[j] *= 1.066;
-            s.do3int[j] *= 1.066;
-            s.dm[j]     *= 1.049;
-            s.do2int[j] *= 1.049;
-            s.t[j]       = 280.0;
         }
 
         // O3 column rescaling (bread.f lines 388–393)
@@ -937,7 +940,8 @@ impl ModelReader for FortranReader {
             }
         }
 
-        // Rescale implicit species from mixing ratio to number density, call FIXMIX per box
+        // Rescale implicit species from mixing ratio to number density, call FIXMIX per box.
+        // Fortran: IBOX=I; IALT=IABS(NBOXDO(IBOX)); ...; CALL FIXMIX
         for ib in 0..nbox {
             let ialt = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1);
             let dm = s.dm[ialt];
@@ -945,6 +949,8 @@ impl ModelReader for FortranReader {
                 let v = s.den_get(ib, id);
                 s.den_set(ib, id, v * dm);
             }
+            s.ibox = ib;
+            s.ialt = ialt;
             fixmix(s);
         }
 

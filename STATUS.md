@@ -4,8 +4,8 @@ Faithful 1-to-1 Rust port of PRATMO v6.0 (Prather stratospheric photochemical bo
 
 ## Where we are
 
-**CTM mode (standard test case) is fully validated against gfortran.**  
-`cargo build` is clean (warnings only). `cargo test` passes 49 tests (38 unit + 11 integration). All species — long-lived (O3, N2O, NOy, CH4, H2O), short-lived radicals (OH, HO2), and NOy reservoirs (HNO3, N2O5) — match gfortran to ≥4 significant figures at all 25 altitude levels for the standard test case (60°N, March 16). DIURN mode is implemented but not yet validated against Fortran output.
+**CTM mode is fully validated; DIURN mode is partially validated.**  
+`cargo build` is clean (warnings only). `cargo test` passes 49 tests (38 unit + 11 integration). CTM: all species match gfortran to ≥4 sig figs at all 25 altitude levels (60°N, March 16, 40 days). DIURN: fort08 species output matches Fortran at all 25 boxes; fort07 post-noon time series diverges due to a suspected pre-existing Fortran J-value bug at high altitude (physically correct in Rust).
 
 ---
 

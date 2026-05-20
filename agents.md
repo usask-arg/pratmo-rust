@@ -137,9 +137,9 @@ The binary reads from the current directory. Outputs go to `boxout.dat` (path fr
 
 ---
 
-## Validation state (2026-05-18)
+## Validation state (2026-05-20)
 
-All species match the gfortran reference to ≥4 significant figures at all 25 altitudes.
+### CTM mode — fully validated (60°N, March 16, 25 boxes, 40 days)
 
 | Quantity | Agreement | Notes |
 |---|---|---|
@@ -150,12 +150,25 @@ All species match the gfortran reference to ≥4 significant figures at all 25 a
 | HNO3 | 4 sig figs | resolved by jcomp fix |
 | N2O5 | 4 sig figs | resolved by jcomp fix |
 
+### DIURN mode — partially validated (equatorial May, 25 boxes levels 1–30)
+
+| Output | Agreement | Notes |
+|---|---|---|
+| fort08.x species averages | ≥3 sig figs | All 25 boxes match Fortran reference |
+| fort07.x noon initial values | exact | Initial conditions from fort02.x correct |
+| fort07.x post-noon time series | diverges | Fortran shows O1D≈0 at high altitude — suspected Fortran J-value bug; Rust values are physically correct |
+| fort09.x rate averages | differs | Consequence of fort07 divergence |
+
 ---
 
 ## Open tasks (priority order)
 
-1. **DERIVS mode** (`nd216 < 0`) — sensitivity Jacobians; not implemented yet.
+1. **DIURN integration tests** — add tests using fort08 output as reference; the Rust values are physically correct.
 
-2. **PZSTD** — pressure-to-standard-Z grid conversion; stub; only needed if NPSTD > 0.
+2. **DERIVS mode** (`nd216 < 0`) — sensitivity Jacobians; not implemented yet.
 
-3. **Multi-case loop** — `batmo.f` loops over multiple READIN cases; T1DIFF is a no-op so this is low priority.
+3. **CTM grid coverage** — only 60°N March tested; full 71×24 grid untested.
+
+4. **PZSTD** — pressure-to-standard-Z grid conversion; stub; only needed if NPSTD > 0.
+
+5. **Multi-case loop** — `batmo.f` loops over multiple READIN cases; T1DIFF is a no-op so this is low priority.

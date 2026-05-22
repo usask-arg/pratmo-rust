@@ -2,5 +2,6 @@
 members = [
     "pratmo-core",
     "pratmo-cli",
+    "pratmo-py",
 ]
 resolver = "2"

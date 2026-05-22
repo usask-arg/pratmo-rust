@@ -1,0 +1,18 @@
+[package]
+name = "pratmo-py"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "_pratmo"
+crate-type = ["cdylib"]
+
+[dependencies]
+pratmo-core = { path = "../pratmo-core" }
+pyo3        = { version = "0.24", features = ["extension-module"] }
+numpy       = "0.24"
+ndarray     = "0.16"
+anyhow      = "1"
+
+[features]
+extension-module = ["pyo3/extension-module"]

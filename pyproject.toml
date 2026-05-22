@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "pratmo"
+version = "0.1.0"
+description = "Python bindings for the PRATMO stratospheric photochemical box model"
+requires-python = ">=3.10"
+dependencies = [
+    "maturin>=1.13.3",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+docs = [
+    "sphinx>=8.0",
+    "sphinx-autodoc-typehints>=2.0",
+    "furo>=2024.1",
+    "numpydoc>=1.7",
+]
+dev = [
+    "pytest>=8.0",
+    "numpy>=1.24",
+]
+
+[tool.maturin]
+manifest-path = "pratmo-py/Cargo.toml"
+python-source = "src"
+module-name = "pratmo._pratmo"
+features = ["pratmo-py/extension-module"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

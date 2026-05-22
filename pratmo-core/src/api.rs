@@ -600,8 +600,21 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) {
     s.ndaysd = cfg.integration_days as i32;
     s.lbrom  = cfg.bromine;
 
-    // Box configuration
+    // Box configuration.
+    // fort02.x initial densities were rescaled by dm[ialt_old] during read_all.
+    // Rescale to dm[ialt_new] before changing nboxdo so diurn() starts from
+    // physically consistent densities at the user's requested altitude.
+    let ndval = s.ndval as usize;
     for (ib, spec) in cfg.boxes.iter().take(nbox).enumerate() {
+        let ialt_old = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+        let ialt_new = (spec.altitude_level as usize).saturating_sub(1).min(NL - 1);
+        if ialt_old != ialt_new && s.dm[ialt_old] > 0.0 {
+            let scale = s.dm[ialt_new] / s.dm[ialt_old];
+            for id in 0..ndval {
+                let v = s.den_get(ib, id);
+                s.den_set(ib, id, v * scale);
+            }
+        }
         s.nboxdo[ib]  = spec.altitude_level as i32;
         s.boxaa[ib]   = spec.albedo;
         s.boxtt[ib]   = spec.temp_offset_k;

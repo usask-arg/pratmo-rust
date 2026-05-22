@@ -929,11 +929,10 @@ impl ModelReader for FortranReader {
     /// Values are mixing ratios; the reader rescales to number density later.
     /// Fortran: bread.f DO 34 ID=1,NDDD ... READ(2,113) (DDDDDD(IB,ID), IB=1,N2BOX)
     fn read_initial_densities(&mut self, s: &mut ModelState) -> Result<()> {
-        let path = std::path::Path::new(&self.input_dir.to_str().unwrap_or(".")).join("fort02.x");
-        if !path.exists() {
-            return Ok(()); // optional file — skip gracefully
-        }
-        let mut r = BufReader::new(std::fs::File::open(&path)?);
+        let mut r = match self.open("fort02.x") {
+            Ok(r) => r,
+            Err(_) => return Ok(()), // optional file — skip gracefully
+        };
         let mut line = String::new();
         r.read_line(&mut line)?; // title line
 

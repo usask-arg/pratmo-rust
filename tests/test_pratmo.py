@@ -1,14 +1,8 @@
 """
 Integration tests for the pratmo Python wrapper.
 
-Note on DIURN mode: ``PratmoModel.with_defaults()`` uses embedded science data
-where ``fort01.x`` is a CTM-mode configuration (nd216 > 0). As a result,
-``run_diurn`` with the embedded data starts from uninitialised implicit species
-densities, causing Newton-Raphson non-convergence. DIURN mode works correctly
-when pointed at a data directory that contains a DIURN fort01.x (nd216 = 0)
-and a matching fort02.x with initial species densities; see STATUS.md.
-
-All model-run tests below use CTM mode, which is fully validated.
+Both CTM and DIURN modes work with ``PratmoModel.with_defaults()`` using the
+embedded science data (fort01.x, fort02.x, and the spectral/atmosphere files).
 """
 
 import numpy as np
@@ -263,19 +257,50 @@ def test_diagnostics(ctm_out_1box):
     assert isinstance(diag.radcount, float)
 
 
-# ── DIURN error propagation ───────────────────────────────────────────────────
+# ── DIURN runs ───────────────────────────────────────────────────────────────
 
-def test_diurn_raises_with_embedded_data(model):
-    """run_diurn with with_defaults() raises ValueError because the embedded
-    fort01.x is CTM-mode (nd216>0), so fort02.x initial densities are never
-    loaded, leaving implicit species at zero which causes NR divergence.
-    This test verifies the error is correctly surfaced to Python."""
+def test_diurn_basic(model):
+    """DIURN mode works with embedded data: fort02.x provides initial conditions."""
     cfg = DiurnConfig(
+        latitude_deg=0.0,
+        julian_day=120,
+        integration_days=20,
         boxes=[DiurnBoxSpec(altitude_level=20)],
-        integration_days=1,
     )
-    with pytest.raises(ValueError, match="converge"):
-        model.run_diurn(cfg)
+    out = model.run_diurn(cfg)
+    assert len(out.boxes) == 1
+    assert len(out.time_series) == 1
+    snap = out.boxes[0]
+    assert snap.altitude_km > 0
+    assert snap.implicit.o3 > 0
+    assert snap.implicit.oh > 0
+
+
+def test_diurn_time_series(model):
+    cfg = DiurnConfig(
+        latitude_deg=0.0,
+        julian_day=120,
+        integration_days=20,
+        boxes=[DiurnBoxSpec(altitude_level=20)],
+    )
+    out = model.run_diurn(cfg)
+    ts = out.time_series[0]
+    assert len(ts.steps) == 34   # standard 24-hour DIURN grid
+    assert all(isinstance(step.time_hhmm, int) for step in ts.steps)
+
+
+def test_diurn_species_grid(model):
+    cfg = DiurnConfig(
+        latitude_deg=0.0,
+        julian_day=120,
+        integration_days=20,
+        boxes=[DiurnBoxSpec(altitude_level=15), DiurnBoxSpec(altitude_level=20)],
+    )
+    out = model.run_diurn(cfg)
+    o3 = out.species_grid("o3")
+    assert isinstance(o3, np.ndarray)
+    assert o3.shape == (2, 34)
+    assert np.all(o3 >= 0)
 
 
 # ── PratmoModel repr ──────────────────────────────────────────────────────────

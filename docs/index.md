@@ -10,6 +10,7 @@ provides PyO3 bindings to the Rust core, giving direct access to the CTM
 
 quickstart
 diurn
+explorer
 api
 ```
 

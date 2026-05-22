@@ -32,5 +32,11 @@ features = ["pratmo-py/extension-module"]
 
 [dependency-groups]
 dev = [
+    "furo>=2025.12.19",
+    "ipykernel>=7.2.0",
+    "myst-nb>=1.4.0",
+    "numpydoc>=1.10.0",
     "pytest>=9.0.3",
+    "sphinx>=8.1.3",
+    "sphinx-autodoc-typehints>=3.0.1",
 ]

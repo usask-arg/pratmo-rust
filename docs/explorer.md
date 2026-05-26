@@ -102,9 +102,8 @@ for level in ALT_LEVELS:
     sp_data = {sp: [getattr(step.implicit, sp) for step in steps_sorted]
                for sp in ALL_SPECIES}
 
-    # Fixed ticks every 2 h within the plotted range
-    tick_vals = [h for h in range(0, 24, 2)
-                 if hours[0] - 0.25 <= h <= hours[-1] + 0.25]
+    # Fixed ticks every 2 h over the full 0–24 h window
+    tick_vals = list(range(0, 25, 2))
     tick_text = [f"{h:02d}:00" for h in tick_vals]
 
     # Nighttime spans in decimal hours: contiguous runs where OH < 0.1 % of daily max
@@ -121,8 +120,8 @@ for level in ALT_LEVELS:
             night_spans.append([span_start_h, hours[i-1] + half])
             in_night = False
     if in_night:
-        last_half = dt[-1] if dt else 0.5
-        night_spans.append([span_start_h, hours[-1] + last_half])
+        # Extend the trailing night band to midnight so both nights are symmetric
+        night_spans.append([span_start_h, 24.5])
 
     payload[str(level)] = {
         "alt_km":      round(snap.altitude_km, 0),
@@ -289,7 +288,7 @@ widget = f"""
         tickangle: -40,
         tickfont: {{ size: 11 }},
         showgrid: true, gridcolor: "#f0f0f0",
-        range: [-0.5, d.x[d.x.length - 1] + 0.5],
+        range: [-0.5, 24.5],
       }},
       yaxis: {{
         title: {{ text: "Number density (cm⁻³)", standoff: 10 }},
@@ -324,7 +323,7 @@ widget = f"""
     Plotly.relayout("dx-chart", {{
       "xaxis.tickvals": d.tick_idx,
       "xaxis.ticktext": d.tick_text,
-      "xaxis.range": [-0.5, d.x[d.x.length - 1] + 0.5],
+      "xaxis.range": [-0.5, 24.5],
       shapes: nightShapes(altKey),
     }});
   }};

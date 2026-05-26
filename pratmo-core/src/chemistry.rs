@@ -651,9 +651,7 @@ pub fn chems(s: &mut ModelState) {
         r[230] = jvio    * xio;                         // IO + hν → I + O
         r[231] = jvhoi   * xhoi;                       // HOI + hν → I + OH
         r[232] = jviono2 * xiono2;                     // IONO2 + hν → products
-        // CH3I photolysis as Iy source: rate = J(CH3I) × [CH3I]
-        // We approximate [CH3I] ≈ fiodx × zdnum (all Iy sourced from CH3I)
-        r[233] = jvch3i * s.fiodx[ib] * zdnum;
+        r[233] = 0.0; // CH3I source suppressed: fiodx is inorganic Iy, not CH3I
     }
 
     // ── O(1D) instant steady-state ───────────────────────────────────────────
@@ -810,7 +808,7 @@ pub fn chempl(s: &mut ModelState) {
     if s.liod {
         // I (atomic iodine)
         if n[30] > 0 {
-            rp[idx(n[30])] = r[222]+r[223]+r[227]+r[228]+r[229]+r[230]+r[231]+r[233];
+            rp[idx(n[30])] = r[222]+r[223]+r[227]+r[228]+r[229]+r[230]+r[231];
             rl[idx(n[30])] = r[221]+r[226];
         }
 

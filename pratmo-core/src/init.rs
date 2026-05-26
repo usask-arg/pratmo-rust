@@ -1,7 +1,7 @@
 // bctin.f → box density initialisation module
 // CTINIT, GEM_SP
 
-use anyhow::bail;
+use anyhow::Result;
 use crate::{
     constants::NDEN,
     solver::rplace,

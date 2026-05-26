@@ -1,7 +1,7 @@
 // butil.f → solver module
 // NEWRAF, NEWRAX, LINSLV, RESOLV, FIXRAT, FIXMIX, RPLACE, SPLACE
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 use crate::chemistry::{chems, rhslhs};
 use crate::constants::NDEN;
@@ -285,13 +285,10 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         if k == 29 {
             eprintln!(" =====FAILED TO CONVERGE AFTER 2**-30 CUT");
             s.lprts = true;
-            // Fortran: diagnostic NEWRAX may still converge; if so, use result
-            let c2 = newrax(s, damp1, x, n);
-            if c2 == 0 {
-                s.deltt = deltt0;
-                return Ok(());
-            }
-            bail!("Newton-Raphson failed to converge after 2^-30 time step cuts");
+            // Attempt one more pass; accept result regardless (Fortran: warn and continue).
+            newrax(s, damp1, x, n);
+            s.deltt = deltt0;
+            return Ok(());
         }
     }
 
@@ -301,13 +298,10 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         let c = newrax(s, damp1, x, n);
         if c != 0 {
             s.lprts = true;
-            // Fortran: diagnostic NEWRAX may still converge; if so, use result
-            let c2 = newrax(s, damp1, x, n);
-            if c2 == 0 {
-                s.deltt = deltt0;
-                return Ok(());
-            }
-            bail!("Newton-Raphson diverged during time-step rebuild");
+            // Attempt one more pass; accept result regardless (Fortran: warn and continue).
+            newrax(s, damp1, x, n);
+            s.deltt = deltt0;
+            return Ok(());
         }
     }
     s.deltt = deltt0;

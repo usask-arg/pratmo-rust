@@ -46,6 +46,11 @@ fn implicit_field_by_name(s: &ImplicitSpecies, name: &str) -> Option<f64> {
         "oclo" => Some(s.oclo),
         "cl2o2" => Some(s.cl2o2),
         "brcl" => Some(s.brcl),
+        "i" => Some(s.i),
+        "io" => Some(s.io),
+        "hoi" => Some(s.hoi),
+        "iono2" => Some(s.iono2),
+        "hi" => Some(s.hi),
         _ => None,
     }
 }
@@ -96,6 +101,9 @@ fn jvalue_field_by_name(j: &JValues, name: &str) -> Option<f64> {
         "ch3i" => Some(j.ch3i),
         "cf3i" => Some(j.cf3i),
         "ocs" => Some(j.ocs),
+        "io" => Some(j.io),
+        "hoi" => Some(j.hoi),
+        "iono2" => Some(j.iono2),
         _ => None,
     }
 }
@@ -103,14 +111,15 @@ fn jvalue_field_by_name(j: &JValues, name: &str) -> Option<f64> {
 fn implicit_valid_names() -> &'static str {
     "no, no2, no3, n2o5, hno3, h, oh, ho2, h2o2, o, o3, bro, br, hbr, hno2, \
      hcl, cl, cl2, clo, clono2, hno4, hocl, brono2, hobr, h2co, ch3o2, ch3o2h, \
-     oclo, cl2o2, brcl"
+    oclo, cl2o2, brcl, i, io, hoi, iono2, hi"
 }
 
 fn jvalue_valid_names() -> &'static str {
     "no, o2, o3, o3_o1d, h2co_a, h2co_b, h2o2, rooh, no2, no3_x, no3_l, n2o5, \
      hno2, hno3, hno4, clono2, cl2, hocl, oclo, cl2o2, clo, bro, brono2, hobr, \
      n2o, cfc11, cfc12, cfc113, cfc114, cfc115, ccl4, ch3cl, ch3ccl3, ch3br, \
-     h1211, h1301, h2402, hcfc22, hcfc123, hcfc141b, chbr3, ch3i, cf3i, ocs"
+     h1211, h1301, h2402, hcfc22, hcfc123, hcfc141b, chbr3, ch3i, cf3i, ocs, \
+     io, hoi, iono2"
 }
 
 // ── ImplicitSpecies ────────────────────────────────────────────────────────────
@@ -183,8 +192,18 @@ impl PyImplicitSpecies {
     fn cl2o2(&self) -> f64 { self.inner.cl2o2 }
     #[getter]
     fn brcl(&self) -> f64 { self.inner.brcl }
+    #[getter]
+    fn i(&self) -> f64 { self.inner.i }
+    #[getter]
+    fn io(&self) -> f64 { self.inner.io }
+    #[getter]
+    fn hoi(&self) -> f64 { self.inner.hoi }
+    #[getter]
+    fn iono2(&self) -> f64 { self.inner.iono2 }
+    #[getter]
+    fn hi(&self) -> f64 { self.inner.hi }
 
-    /// Return all 30 species as a ``{name: value}`` dict (cm⁻³).
+    /// Return all 35 species as a ``{name: value}`` dict (cm⁻³).
     fn to_dict(&self) -> HashMap<&'static str, f64> {
         [
             ("no", self.inner.no),
@@ -217,6 +236,11 @@ impl PyImplicitSpecies {
             ("oclo", self.inner.oclo),
             ("cl2o2", self.inner.cl2o2),
             ("brcl", self.inner.brcl),
+            ("i", self.inner.i),
+            ("io", self.inner.io),
+            ("hoi", self.inner.hoi),
+            ("iono2", self.inner.iono2),
+            ("hi", self.inner.hi),
         ]
         .into_iter()
         .collect()
@@ -246,19 +270,19 @@ impl PyLongLivedMixingRatios {
         o3=0.0, n2o=0.0, noy=0.0, ch4=0.0, co=0.0,
         clx=0.0, cf2cl2=0.0, cfcl3=0.0, ccl4=0.0, ch3cl=0.0,
         ch3ccl3=0.0, h2=0.0, h2o=0.0, nh3=0.0, c5h8=0.0,
-        brx=0.0, ch3br=0.0, ocs=0.0
+        brx=0.0, ch3br=0.0, ocs=0.0, iodx=0.0
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         o3: f64, n2o: f64, noy: f64, ch4: f64, co: f64,
         clx: f64, cf2cl2: f64, cfcl3: f64, ccl4: f64, ch3cl: f64,
         ch3ccl3: f64, h2: f64, h2o: f64, nh3: f64, c5h8: f64,
-        brx: f64, ch3br: f64, ocs: f64,
+        brx: f64, ch3br: f64, ocs: f64, iodx: f64,
     ) -> Self {
         Self {
             inner: LongLivedMixingRatios {
                 o3, n2o, noy, ch4, co, clx, cf2cl2, cfcl3, ccl4,
-                ch3cl, ch3ccl3, h2, h2o, nh3, c5h8, brx, ch3br, ocs,
+                ch3cl, ch3ccl3, h2, h2o, nh3, c5h8, brx, ch3br, ocs, iodx,
             },
         }
     }
@@ -353,7 +377,12 @@ impl PyLongLivedMixingRatios {
     #[setter]
     fn set_ocs(&mut self, v: f64) { self.inner.ocs = v; }
 
-    /// Return all 18 species as a ``{name: value}`` dict (dimensionless mixing ratios).
+    #[getter]
+    fn iodx(&self) -> f64 { self.inner.iodx }
+    #[setter]
+    fn set_iodx(&mut self, v: f64) { self.inner.iodx = v; }
+
+    /// Return all 19 species as a ``{name: value}`` dict (dimensionless mixing ratios).
     fn to_dict(&self) -> HashMap<&'static str, f64> {
         [
             ("o3", self.inner.o3),
@@ -374,6 +403,7 @@ impl PyLongLivedMixingRatios {
             ("brx", self.inner.brx),
             ("ch3br", self.inner.ch3br),
             ("ocs", self.inner.ocs),
+            ("iodx", self.inner.iodx),
         ]
         .into_iter()
         .collect()
@@ -485,8 +515,14 @@ impl PyJValues {
     fn cf3i(&self) -> f64 { self.inner.cf3i }
     #[getter]
     fn ocs(&self) -> f64 { self.inner.ocs }
+    #[getter]
+    fn io(&self) -> f64 { self.inner.io }
+    #[getter]
+    fn hoi(&self) -> f64 { self.inner.hoi }
+    #[getter]
+    fn iono2(&self) -> f64 { self.inner.iono2 }
 
-    /// Return all 44 J-values as a ``{name: value}`` dict (s⁻¹).
+    /// Return all 47 J-values as a ``{name: value}`` dict (s⁻¹).
     fn to_dict(&self) -> HashMap<&'static str, f64> {
         [
             ("no", self.inner.no),
@@ -533,6 +569,9 @@ impl PyJValues {
             ("ch3i", self.inner.ch3i),
             ("cf3i", self.inner.cf3i),
             ("ocs", self.inner.ocs),
+            ("io", self.inner.io),
+            ("hoi", self.inner.hoi),
+            ("iono2", self.inner.iono2),
         ]
         .into_iter()
         .collect()
@@ -910,7 +949,7 @@ impl PyDiurnOutput {
     /// species_name:
     ///     One of: no, no2, no3, n2o5, hno3, h, oh, ho2, h2o2, o, o3, bro, br,
     ///     hbr, hno2, hcl, cl, cl2, clo, clono2, hno4, hocl, brono2, hobr,
-    ///     h2co, ch3o2, ch3o2h, oclo, cl2o2, brcl
+    ///     h2co, ch3o2, ch3o2h, oclo, cl2o2, brcl, i, io, hoi, iono2, hi
     fn species_grid<'py>(
         &self,
         py: Python<'py>,

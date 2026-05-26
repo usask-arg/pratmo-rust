@@ -5,7 +5,7 @@ use nalgebra::{DMatrix, DVector};
 
 use crate::state::ModelState;
 
-// ── Index helpers (Fortran 1-based N1..N30 stored as s.n[0]..s.n[29]) ────────
+// ── Index helpers (Fortran 1-based N1..N35 stored as s.n[0]..s.n[34]) ────────
 
 /// Read XR for species Ni (where ni = s.n[i-1], 1-based Fortran value).
 #[inline(always)]
@@ -225,6 +225,19 @@ pub fn setupr(s: &mut ModelState) {
         s.ratek[220] = fk(tt, 220);    // ClO+BrO (third channel)
     }
 
+    // Iodine reactions (221–229, bimolecular; 225 termolecular)
+    if s.liod {
+        s.ratek[221] = fk(tt, 221);                     // I + O3 → IO + O2
+        s.ratek[222] = fk(tt, 222);                     // IO + O → I + O2
+        s.ratek[223] = fk(tt, 223);                     // IO + NO → I + NO2
+        s.ratek[224] = fk(tt, 224);                     // IO + HO2 → HOI + O2
+        s.ratek[225] = fknasa(tt300, zdnum, 225, s);    // IO + NO2 + M → IONO2
+        s.ratek[226] = fk(tt, 226);                     // I + HO2 → HI + O2
+        s.ratek[227] = fk(tt, 227);                     // HI + OH → I + H2O
+        s.ratek[228] = fk(tt, 228);                     // IO + ClO → Cl + I + O2
+        s.ratek[229] = fk(tt, 229);                     // IO + BrO → Br + I + O2
+    }
+
     // Heterogeneous reactions 170–177 via hetprob
     apply_het_rates_setupr(s, zaersl);
 }
@@ -340,6 +353,12 @@ pub fn chems(s: &mut ModelState) {
     let xbrno3 = xr(s, n[22]);
     let xhobr  = xr(s, n[23]);
     let xbrcl  = xr(s, n[29]);
+    // Iodine species are optional in some legacy configurations; guard slot 0.
+    let xi_    = if s.liod && n[30] > 0 { xr(s, n[30]) } else { 0.0 };
+    let xio    = if s.liod && n[31] > 0 { xr(s, n[31]) } else { 0.0 };
+    let xhoi   = if s.liod && n[32] > 0 { xr(s, n[32]) } else { 0.0 };
+    let xiono2 = if s.liod && n[33] > 0 { xr(s, n[33]) } else { 0.0 };
+    let xhi    = if s.liod && n[34] > 0 { xr(s, n[34]) } else { 0.0 };
     let _xtbr  = s.fbrx[ib] * xnum;
     let _xch3br = s.fch3br[ib] * xnum;
     let xxxx   = s.fxxx[ib] * xnum;
@@ -400,7 +419,10 @@ pub fn chems(s: &mut ModelState) {
     let jvch3i  = s.vch3i[iv];
     let jvcf3i  = s.vcf3i[iv];
     let jvocs   = s.vocs[iv];
-    let _ = (jvchbr3, jvch3i, jvcf3i); // not used in CHEMS directly
+    let jvio    = s.vio[iv];
+    let jvhoi   = s.vhoi[iv];
+    let jviono2 = s.viono2[iv];
+    let _ = (jvchbr3, jvcf3i); // not used in CHEMS directly
 
     // ── Reaction rates (0-based: r[0]=R(1), r[1]=R(2), ...) ─────────────────
     let r = &mut s.r;
@@ -614,6 +636,26 @@ pub fn chems(s: &mut ModelState) {
         r[220] = s.ratek[220] * xclo * xbro;
     }
 
+    // Iodine reactions (221–233)
+    if s.liod {
+        let zdnum = s.zdnum;
+        r[221] = s.ratek[221] * xi_    * xo3;         // I + O3 → IO + O2
+        r[222] = s.ratek[222] * xio    * xo;           // IO + O → I + O2
+        r[223] = s.ratek[223] * xio    * xno;          // IO + NO → I + NO2
+        r[224] = s.ratek[224] * xio    * xho2;         // IO + HO2 → HOI + O2
+        r[225] = s.ratek[225] * xio    * xno2;         // IO + NO2 + M → IONO2
+        r[226] = s.ratek[226] * xi_    * xho2;         // I + HO2 → HI + O2
+        r[227] = s.ratek[227] * xhi    * xoh;          // HI + OH → I + H2O
+        r[228] = s.ratek[228] * xio    * xclo;         // IO + ClO → Cl + I + O2
+        r[229] = s.ratek[229] * xio    * xbro;         // IO + BrO → Br + I + O2
+        r[230] = jvio    * xio;                         // IO + hν → I + O
+        r[231] = jvhoi   * xhoi;                       // HOI + hν → I + OH
+        r[232] = jviono2 * xiono2;                     // IONO2 + hν → products
+        // CH3I photolysis as Iy source: rate = J(CH3I) × [CH3I]
+        // We approximate [CH3I] ≈ fiodx × zdnum (all Iy sourced from CH3I)
+        r[233] = jvch3i * s.fiodx[ib] * zdnum;
+    }
+
     // ── O(1D) instant steady-state ───────────────────────────────────────────
     let tempp = r[1]; // R(2) = jO3→O1D * O3
     let templ = r[3] + r[4] + r[5] + r[6] + r[7] + r[8] + r[9] + r[21] + r[112];
@@ -653,9 +695,11 @@ pub fn chempl(s: &mut ModelState) {
 
     // O
     rp[idx(n[9])]  = r[0]+r[0]+r[19]+r[38]+r[76]+r[116]+r[209]+r[161]
-                    +r[2]-r[4]-r[5]-r[6]-r[7]-r[8]-r[9]-r[21]-r[112];
+                    +r[2]-r[4]-r[5]-r[6]-r[7]-r[8]-r[9]-r[21]-r[112]
+                    +r[230];   // IO + hν → I + O
     rl[idx(n[9])]  = r[12]+r[12]+r[15]+r[16]+r[18]+r[10]+r[11]+r[35]
-                    +r[22]+r[23]+r[17]+r[13]+r[100]+r[114]+r[125]+r[201]+r[205]+r[148];
+                    +r[22]+r[23]+r[17]+r[13]+r[100]+r[114]+r[125]+r[201]+r[205]+r[148]
+                    +r[222];   // IO + O → I + O2
 
     // CH3O2 = ROO
     rp[idx(n[25])] = r[6]+r[48]+r[54]+r[103]+r[141]+r[143]+r[146];
@@ -709,12 +753,14 @@ pub fn chempl(s: &mut ModelState) {
                     +r[161]+r[162]+r[164]+r[164]+r[166]+r[102];
     rl[idx(n[18])] = r[114]+r[115]+r[116]+r[117]+r[117]+r[119]+r[120]+r[121]
                     +r[127]+r[216]+r[218]+r[160]+r[160]+r[220]
-                    +2.0*(r[198]+r[199]);
+                    +2.0*(r[198]+r[199])
+                    +r[228];  // IO + ClO → Cl + I + O2
 
     // Cl
     rp[idx(n[16])] = r[99]+r[100]+r[115]+r[116]+r[114]+r[124]+r[220]+r[172]
                     +r[219]+r[112]+r[128]+r[157]+r[157]+r[159]+r[159]+r[160]
-                    +2.0*r[198];
+                    +2.0*r[198]
+                    +r[228];  // IO + ClO → Cl + I + O2
     rl[idx(n[16])] = r[96]+r[103]+r[104]+r[105]+r[106]+r[107]+r[108]+r[113]
                     +r[158]+r[158]+r[164]+r[165]+r[166]+r[102];
 
@@ -746,12 +792,14 @@ pub fn chempl(s: &mut ModelState) {
         // BrO
         rp[idx(n[11])] = r[204]+r[212]+r[214] +r[148];
         rl[idx(n[11])] = r[205]+r[206]+r[213]+2.0*r[208]+r[207]+r[210]+r[216]
-                        +r[209]+r[218]+r[220] +r[149];
+                        +r[209]+r[218]+r[220] +r[149]
+                        +r[229];  // IO + BrO → Br + I + O2
 
         // Br
         rp[idx(n[12])] = r[205]+r[206]+2.0*r[208]+r[207]+r[200]+r[201]
                         +r[211]+r[209]+r[215]+r[218]+r[219]+r[220]
-                        +2.0*r[175] +r[149];
+                        +2.0*r[175] +r[149]
+                        +r[229];  // IO + BrO → Br + I + O2
         rl[idx(n[12])] = r[204]+r[203]+r[217];
 
         // BrCl
@@ -759,16 +807,51 @@ pub fn chempl(s: &mut ModelState) {
         rl[idx(n[29])] = r[219];
     }
 
+    if s.liod {
+        // I (atomic iodine)
+        if n[30] > 0 {
+            rp[idx(n[30])] = r[222]+r[223]+r[227]+r[228]+r[229]+r[230]+r[231]+r[233];
+            rl[idx(n[30])] = r[221]+r[226];
+        }
+
+        // IO — IONO2+hν→IO+NO2 is the main photolysis channel (JPL 2019, by analogy with BrONO2)
+        if n[31] > 0 {
+            rp[idx(n[31])] = r[221]+r[232];
+            rl[idx(n[31])] = r[222]+r[223]+r[224]+r[225]+r[228]+r[229]+r[230];
+        }
+
+        // HOI
+        if n[32] > 0 {
+            rp[idx(n[32])] = r[224];
+            rl[idx(n[32])] = r[231];
+        }
+
+        // IONO2
+        if n[33] > 0 {
+            rp[idx(n[33])] = r[225];
+            rl[idx(n[33])] = r[232];
+        }
+
+        // HI
+        if n[34] > 0 {
+            rp[idx(n[34])] = r[226];
+            rl[idx(n[34])] = r[227];
+        }
+    }
+
     // NO
     rp[idx(n[0])]  = r[79]+r[77]+r[19]+r[18]+r[68]     +r[177];
-    rl[idx(n[0])]  = r[22]+r[78]+r[41]+r[20]+r[66]+r[50]+r[206]+r[115]+r[162];
+    rl[idx(n[0])]  = r[22]+r[78]+r[41]+r[20]+r[66]+r[50]+r[206]+r[115]+r[162]
+                    +r[223];   // IO + NO → I + NO2
 
     // NO2
     rp[idx(n[1])]  = r[62]+r[22]+r[78]+r[78]+r[76]+r[83]+r[82]+r[122]
                     +r[35]+r[41]+r[20]+r[69]+r[50]+r[75]+r[104]+r[206]
-                    +r[72]+r[214]+r[115]+r[123]+r[162]+r[166]+r[172]+r[178];
+                    +r[72]+r[214]+r[115]+r[123]+r[162]+r[166]+r[172]+r[178]
+                    +r[223]+r[232];   // IO+NO→I+NO2 and IONO2 photolysis
     rl[idx(n[1])]  = r[27]+r[23]+r[81]+r[19]+r[18]+r[67]+r[71]+r[121]+r[213]
-                    +r[61];
+                    +r[61]
+                    +r[225];   // IO + NO2 + M → IONO2
 
     // NO3
     rp[idx(n[2])]  = r[27]+r[23]+r[83]+r[82]+r[73]+r[215]+r[125]+r[126]+r[124]
@@ -783,23 +866,27 @@ pub fn chempl(s: &mut ModelState) {
     rp[idx(n[6])]  = r[5]+r[24]+2.0*(r[32]+r[30]+r[4])
                     +r[17]+r[16]+r[62]+r[41]+r[26]
                     +r[6]+r[13]+r[68]+r[53]+r[73]
-                    +r[100]+r[201]+r[211]+r[128]+r[112] + r[42]+r[102]+r[14];
+                    +r[100]+r[201]+r[211]+r[128]+r[112] + r[42]+r[102]+r[14]
+                    +r[231];   // HOI + hν → I + OH
     rl[idx(n[6])]  = r[15]+r[46]+r[47]+r[25]+r[38]+r[38]+r[40]
                     +r[39]+r[61]+r[63]+r[48]+r[54]+r[57]+r[66]+r[69]
                     +r[94]+r[119]+r[75]+r[200]+r[212]+r[147]
-                    +r[99]+r[142]+r[144]+r[126]+r[129]+r[163] +r[149];
+                    +r[99]+r[142]+r[144]+r[126]+r[129]+r[163] +r[149]
+                    +r[227];   // HI + OH → I + H2O
 
     // HO2
     rp[idx(n[7])]  = r[31]+r[17]+r[25]+r[40]+r[72]+r[108] +r[149]
                     +rpch3o+rpcho;
     rl[idx(n[7])]  = r[33]+r[32]+r[16]+r[41]+r[39]+r[43]+r[43]+r[26]
                     +r[67]+r[51]+r[71]+r[42]+r[210]+r[203]+r[127]+r[107]+r[120]
-                    +r[102];
+                    +r[102]
+                    +r[224]+r[226];   // IO + HO2 and I + HO2
 
     // O3
     rp[idx(n[10])] = r[10]+r[167]+r[120];
     rl[idx(n[10])] = r[24]+r[25]+r[2]+r[11]+r[20]+r[26]+r[27]+r[113]+r[204]
-                    +r[207]+r[21];
+                    +r[207]+r[21]
+                    +r[221];   // I + O3 → IO + O2
 
     // ── Diagnostic rates ─────────────────────────────────────────────────────
 
@@ -941,12 +1028,11 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
         fxo
     } else {
         // Build Jacobian A(NTOT×NTOT)
-        let a = &mut s.a_mat;
         for j in 0..ntot {
             for i in 0..ntot {
-                a[[i, j]] = 0.0;
+                s.a_mat[[i, j]] = 0.0;
             }
-            a[[j, j]] = -s.deltt * s.xr[j];
+            s.a_mat[[j, j]] = -s.deltt * s.xr[j];
         }
 
         let r = s.r;
@@ -1119,13 +1205,31 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
 
         // Divide by species densities to get d/dX out of loss
         let ntot = s.ntot;
-        let a = &mut s.a_mat;
+        if s.liod {
+            rct!(r[221], n[30] as i32, n[10] as i32, 0, n[31] as i32, 0);         // I + O3 → IO + O2
+            rct!(r[222], n[31] as i32, n[9]  as i32, 0, n[30] as i32, 0);         // IO + O → I + O2
+            rct!(r[223], n[31] as i32, n[0]  as i32, 0, n[30] as i32, n[1] as i32); // IO + NO → I + NO2
+            rct!(r[224], n[31] as i32, n[7]  as i32, 0, n[32] as i32, 0);         // IO + HO2 → HOI + O2
+            rct!(r[225], n[31] as i32, n[1]  as i32, 0, n[33] as i32, 0);         // IO + NO2 + M → IONO2
+            rct!(r[226], n[30] as i32, n[7]  as i32, 0, n[34] as i32, 0);         // I + HO2 → HI + O2
+            rct!(r[227], n[34] as i32, n[6]  as i32, 0, n[30] as i32, 0);         // HI + OH → I + H2O
+            rct!(r[228], n[31] as i32, n[18] as i32, 0, n[16] as i32, n[30] as i32); // IO + ClO → Cl + I + O2
+            if s.lbrom {
+                rct!(r[229], n[31] as i32, n[11] as i32, 0, n[12] as i32, n[30] as i32); // IO + BrO → Br + I + O2
+            }
+            rct!(r[230], n[31] as i32, 0, 0, n[30] as i32, n[9] as i32);          // IO + hν → I + O
+            rct!(r[231], n[32] as i32, 0, 0, n[30] as i32, n[6] as i32);          // HOI + hν → I + OH
+            rct!(r[232], n[33] as i32, 0, 0, n[30] as i32, n[1] as i32);          // IONO2 + hν → I + NO2
+            // r[233] is a constant source (no variable reactant); no Jacobian entry
+        }
+
+        // Divide by species densities to get d/dX out of loss
         for icol in 0..ntot {
             let xc = s.xr[icol];
             if xc != 0.0 {
                 for irow in 0..ntot {
-                    if a[[irow, icol]] != 0.0 {
-                        a[[irow, icol]] /= xc;
+                    if s.a_mat[[irow, icol]] != 0.0 {
+                        s.a_mat[[irow, icol]] /= xc;
                     }
                 }
             }

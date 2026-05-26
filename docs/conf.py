@@ -21,7 +21,7 @@ extensions = [
 # MyST-NB / MyST-Parser settings
 myst_enable_extensions = ["colon_fence", "dollarmath"]
 nb_execution_mode = "cache"
-nb_execution_timeout = 120
+nb_execution_timeout = 600
 nb_execution_raise_on_error = True
 
 exclude_patterns = ["_build", "**.ipynb_checkpoints"]

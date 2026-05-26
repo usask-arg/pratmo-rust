@@ -3,6 +3,7 @@
 
 use anyhow::bail;
 use crate::{
+    constants::NDEN,
     solver::rplace,
     state::ModelState,
     tracers::{
@@ -117,6 +118,17 @@ pub fn ctinit(s: &mut ModelState, ib: usize, densbx: f64, lat: i32, _mon: i32) {
     s.dhbr[ib]   = 0.100 * xxxbry;
     s.dhobr[ib]  = 0.050 * xxxbry;
 
+    // Iy — total inorganic iodine from fiodx (default 1 ppt)
+    // Partition following midday lower-stratosphere estimates
+    if s.liod {
+        let xxxiody = (s.fiodx[ib] * densbx).max(0.0);
+        s.di_[ib]    = 0.200 * xxxiody;  // I
+        s.dio[ib]    = 0.500 * xxxiody;  // IO
+        s.dhoi[ib]   = 0.150 * xxxiody;  // HOI
+        s.diono2[ib] = 0.100 * xxxiody;  // IONO2
+        s.dhi[ib]    = 0.050 * xxxiody;  // HI
+    }
+
     let xxxppt = 1.0e-12 * densbx;
     s.dh[ib]    = 0.000_001 * xxxppt;
     s.doh[ib]   = 0.010 * xxxppt;
@@ -129,7 +141,7 @@ pub fn ctinit(s: &mut ModelState, ib: usize, densbx: f64, lat: i32, _mon: i32) {
     s.do_[ib]   = 0.0001 * s.do3[ib];
 
     // Initialise all diurnal time steps with first-guess values
-    let mut xn = [0.0f64; 30];
+    let mut xn = [0.0f64; NDEN];
     rplace(s, &mut xn, ib);
     let ntotx = s.ntotx;
     let ntimdo = s.ntimdo;

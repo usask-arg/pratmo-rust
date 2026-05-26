@@ -7,6 +7,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
+use crate::constants::NDEN;
 use crate::solver::fixmix;
 use crate::state::ModelState;
 
@@ -39,15 +40,17 @@ pub trait ModelReader {
         if s.nd216 <= 0 {
             let _ = self.read_initial_densities(s); // optional — fort02.x may not exist
         }
-        // Apply test scaling (bread.f lines 396–402): AFTER fort02.x initial densities.
-        // Fortran: do3ref/do3int *= 1.066; dm/do2int *= 1.049; t = 280.0
+        // Apply calibration scaling (bread.f lines 396–402): AFTER fort02.x initial densities.
+        // Fortran: do3ref/do3int *= 1.066; dm/do2int *= 1.049
+        // NOTE: the original Fortran test block also set t = 280.0 (a flat override for
+        // sensitivity testing only). That line was ported unconditionally, clobbering the
+        // real US STD temperature profile loaded from fort13.x. It is removed here.
         let nc = s.nc;
         for j in 0..nc {
             s.do3ref[j] *= 1.066;
             s.do3int[j] *= 1.066;
             s.dm[j]     *= 1.049;
             s.do2int[j] *= 1.049;
-            s.t[j]       = 280.0;
         }
         Ok(())
     }
@@ -336,9 +339,18 @@ impl ModelReader for FortranReader {
             }
         }
 
-        // NQQQ additional species: 2 temperature points each
-        for jq in 0..nqqq {
-            let idx = jq + 4; // J-value index (0-based): first 4 are NO, O2, O3, O3_1D
+        // fort10 has NTAB=40 standard species, then 16 extra organics, then 3 iodine species.
+        // NQQQ in the file header counts organics as part of the total (=43), so a naive loop
+        // over nqqq would fill slots 40-42 with organics instead of iodine cross-sections.
+        // Fix: read exactly NTAB standard species, then scan remaining entries by title to find
+        // J(IO), J(HOI), J(IONO2) and store them at jq = NTAB, NTAB+1, NTAB+2.
+        let ntab = crate::constants::NTAB; // 40 standard tabulated species
+        let nxs  = crate::constants::NXS;  // 43 = 40 standard + 3 iodine
+        s.njval  = nxs + 4;               // 47 total J-values (overrides nqqq+4 from header)
+
+        // Phase 1: read NTAB standard QQQ species
+        for jq in 0..ntab {
+            let idx = jq + 4;
             for k in 0..2 {
                 let line = next_line(&mut r)?;
                 let title = line.get(..20).unwrap_or("").trim().to_owned();
@@ -348,6 +360,44 @@ impl ModelReader for FortranReader {
                 let qqq = read_f64_array(&mut r, nwww)?;
                 for (iw, v) in qqq.iter().enumerate() {
                     s.qqq[[iw, k, jq]] = *v;
+                }
+            }
+        }
+
+        // Phase 2: scan remaining species pairs (organics then iodine) looking for
+        // J(IO), J(HOI), J(IONO2) by title. Organics are read and discarded.
+        let iodine_keys: &[(&str, usize)] = &[
+            ("J(IO)",    ntab),
+            ("J(HOI)",   ntab + 1),
+            ("J(IONO2)", ntab + 2),
+        ];
+        let n_iodine = nxs - ntab;
+        let mut iod_found = 0usize;
+        'scan: loop {
+            let mut hdr = String::new();
+            if r.read_line(&mut hdr)? == 0 { break; }
+            let title_250 = hdr.get(..20).unwrap_or("").trim().to_owned();
+            let tqq_250: f64 = hdr.get(20..25).unwrap_or("").trim().parse().unwrap_or(0.0);
+            let data_250 = read_f64_array(&mut r, nwww)?;
+
+            let mut hdr = String::new();
+            if r.read_line(&mut hdr)? == 0 { break; }
+            let title_298 = hdr.get(..20).unwrap_or("").trim().to_owned();
+            let tqq_298: f64 = hdr.get(20..25).unwrap_or("").trim().parse().unwrap_or(0.0);
+            let data_298 = read_f64_array(&mut r, nwww)?;
+
+            for &(tag, jq) in iodine_keys {
+                if title_250.contains(tag) {
+                    let idx = jq + 4;
+                    s.tqq[[0, idx]] = tqq_250;
+                    if idx < s.titlej.len() { s.titlej[idx][0] = title_250.clone(); }
+                    for (iw, v) in data_250.iter().enumerate() { s.qqq[[iw, 0, jq]] = *v; }
+                    s.tqq[[1, idx]] = tqq_298;
+                    if idx < s.titlej.len() { s.titlej[idx][1] = title_298; }
+                    for (iw, v) in data_298.iter().enumerate() { s.qqq[[iw, 1, jq]] = *v; }
+                    iod_found += 1;
+                    if iod_found >= n_iodine { break 'scan; }
+                    break;
                 }
             }
         }
@@ -789,12 +839,18 @@ impl ModelReader for FortranReader {
         s.lprty  = bools[3];
         s.lprt8  = bools[4];
 
-        // Long-lived (flow) species: `A8,I2,1X,4I1` header then NFL entries
-        let line = next_line(&mut r)?; // "L-LIVED 18 ..." header: `A8,I2,1X,4I1`
-        let nfl_str = line.get(8..10).unwrap_or("0").trim();
-        let nfl: usize = nfl_str.parse().unwrap_or(0);
-        if nfl != s.nfval as usize {
-            bail!("NFL ({}) != NFVAL ({})", nfl, s.nfval);
+        // Long-lived (flow) species: `A8,I2,1X,4I1` header then entries.
+        // Some legacy files have a stale header count (e.g., "L-LIVED 18") while
+        // NFVAL and the listed records include iodine families. Trust NFVAL.
+        let line = next_line(&mut r)?; // "L-LIVED xx ..." header: `A8,I2,1X,4I1`
+        let nfl_hdr_str = line.get(8..10).unwrap_or("0").trim();
+        let nfl_hdr: usize = nfl_hdr_str.parse().unwrap_or(0);
+        let nfl = s.nfval as usize;
+        if nfl_hdr != nfl {
+            eprintln!(
+                "Warning: L-LIVED header count ({}) != NFVAL ({}); using NFVAL",
+                nfl_hdr, nfl
+            );
         }
 
         for j in 0..nfl {
@@ -837,7 +893,7 @@ impl ModelReader for FortranReader {
             let nxdiff:i32 = line.get(14..15).unwrap_or("0").trim().parse().unwrap_or(0);
 
             jxsum -= jx as i32;
-            if jx > 0 && jx <= 30 {
+            if jx > 0 && jx <= NDEN {
                 s.tname[jx - 1] = name.clone();
                 s.titles[jx - 1] = name;
                 s.ndiff[jx - 1] = nxdiff;
@@ -845,10 +901,10 @@ impl ModelReader for FortranReader {
 
             let effective_diu = if nxslo > 0 { 1 } else { nxdiu };
             if effective_diu > 0 {
-                if jx > 0 && jx <= 31 { s.ntsav[jx - 1] = nts1; }
+                if jx > 0 && jx <= NDEN { s.ntsav[jx - 1] = nts1; }
                 nts1 += 1;
             } else {
-                if jx > 0 && jx <= 31 { s.ntsav[jx - 1] = nts2; }
+                if jx > 0 && jx <= NDEN { s.ntsav[jx - 1] = nts2; }
                 nts2 = nts2.saturating_sub(1);
             }
 
@@ -861,12 +917,12 @@ impl ModelReader for FortranReader {
             }
         }
 
-        // Save NTSAV(31) = NTS2 (the boundary between implicit and explicit)
-        s.ntsav[30] = nts2;
+        // Save NTSAV(NDEN+1) = NTS2 (the boundary between implicit and explicit)
+        s.ntsav[NDEN] = nts2;
         s.ntot = nts2;
 
-        // Build NT array: NT(J) = NTSAV(J) for J=1..30
-        for j in 0..30 {
+        // Build NT array: NT(J) = NTSAV(J) for J=1..NDEN
+        for j in 0..NDEN {
             s.n[j] = s.ntsav[j];
             s.tnamet[s.ntsav[j].saturating_sub(1)] = s.tname[j].clone();
         }
@@ -877,6 +933,11 @@ impl ModelReader for FortranReader {
         if !s.lbrom {
             s.nrates = s.nrate1;
         }
+
+        // Iodine flag — species at n[30..34] (1-based N31..N35)
+        s.liod = s.ntotx > 30
+            && (s.n[30] <= s.ntot || s.n[31] <= s.ntot || s.n[32] <= s.ntot
+                || s.n[33] <= s.ntot || s.n[34] <= s.ntot);
 
         // Initialise XR to zero
         s.xr.iter_mut().for_each(|v| *v = 0.0);

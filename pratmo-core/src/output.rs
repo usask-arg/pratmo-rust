@@ -399,8 +399,9 @@ pub fn prtavg(s: &mut ModelState, nnn: i32) {
     let zdnum = s.zdnum;
 
     // Compute averages across boxes (trapezoid rule)
-    let mut avgs = vec![0.0f64; 51];
-    for j in 0..ndval + s.nfval as usize {
+    let n_species = ndval + s.nfval as usize;
+    let mut avgs = vec![0.0f64; n_species.max(50) + 1];
+    for j in 0..n_species {
         let j1 = j + 1;
         avgs[j] = 0.5 * (dddddd(s, 0, j1) + dddddd(s, nbox - 1, j1));
         if nbox >= 3 {
@@ -426,7 +427,7 @@ pub fn prtavg(s: &mut ModelState, nnn: i32) {
     // Print titles if needed
     if nnn == 0 || (!s.lprt8 && (s.lprtx || s.lprty)) {
         let titles: String = (0..ndxq)
-            .map(|k| { let idx = s.ndxqq[k]; if idx > 0 && idx <= 50 { format!("{:>10}", &s.titles[idx-1][..s.titles[idx-1].len().min(8)]) } else { " ".repeat(10) } })
+            .map(|k| { let idx = s.ndxqq[k]; if idx > 0 && idx < avgs.len() { format!("{:>10}", &s.titles[idx-1][..s.titles[idx-1].len().min(8)]) } else { " ".repeat(10) } })
             .collect();
         if to_unit8 {
             if let Some(ref mut w) = s.out_unit8 { let _ = writeln!(w, "     {}", titles); }
@@ -434,7 +435,7 @@ pub fn prtavg(s: &mut ModelState, nnn: i32) {
     }
 
     let row: String = (0..ndxq)
-        .map(|k| { let idx = s.ndxqq[k]; if idx > 0 && idx <= 50 { fmt_e10p3(avgs[idx-1]) } else { " ".repeat(10) } })
+        .map(|k| { let idx = s.ndxqq[k]; if idx > 0 && idx < avgs.len() { fmt_e10p3(avgs[idx-1]) } else { " ".repeat(10) } })
         .collect();
     let line = format!("{:3}{}", nnn, row);
     if to_unit8 {
@@ -471,8 +472,9 @@ pub fn prtpth(s: &mut ModelState, iseg: i32, iday: i32, ibx: usize) {
     let ndval = s.ndval as usize;
     let nfval = s.nfval as usize;
 
-    // Build AVGS(1..50)
-    let mut avgs = vec![0.0f64; 51];
+    // Build AVGS with room for all requested species and legacy derived columns.
+    let n_species = ndval + nfval;
+    let mut avgs = vec![0.0f64; n_species.max(50) + 1];
     for j in 1..=ndval {
         avgs[j - 1] = s.den_get(ib0, j - 1) / densty;
     }
@@ -506,7 +508,7 @@ pub fn prtpth(s: &mut ModelState, iseg: i32, iday: i32, ibx: usize) {
         let _ = write!(w8, " {:2}{:2}{:2}", iseg, iday, ibx);
         for k in 0..ndxq {
             let idx = s.ndxqq[k];
-            let val = if idx > 0 && idx <= 50 { avgs[idx - 1] } else { 0.0 };
+            let val = if idx > 0 && idx < avgs.len() { avgs[idx - 1] } else { 0.0 };
             let _ = write!(w8, "{}", fmt_e10p3(val));
         }
         let _ = writeln!(w8);

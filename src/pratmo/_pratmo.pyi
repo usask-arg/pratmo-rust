@@ -5,7 +5,7 @@ from typing import Optional
 import numpy as np
 
 class ImplicitSpecies:
-    """Number densities (cm⁻³) for the 30 implicit Newton-Raphson species."""
+    """Number densities (cm⁻³) for the 35 implicit Newton-Raphson species."""
 
     @property
     def no(self) -> float: ...
@@ -67,8 +67,18 @@ class ImplicitSpecies:
     def cl2o2(self) -> float: ...
     @property
     def brcl(self) -> float: ...
+    @property
+    def i(self) -> float: ...
+    @property
+    def io(self) -> float: ...
+    @property
+    def hoi(self) -> float: ...
+    @property
+    def iono2(self) -> float: ...
+    @property
+    def hi(self) -> float: ...
     def to_dict(self) -> dict[str, float]:
-        """Return all 30 species as a ``{name: value}`` dict (cm⁻³)."""
+        """Return all 35 species as a ``{name: value}`` dict (cm⁻³)."""
         ...
 
 class LongLivedMixingRatios:
@@ -95,6 +105,7 @@ class LongLivedMixingRatios:
         brx: float = 0.0,
         ch3br: float = 0.0,
         ocs: float = 0.0,
+        iodx: float = 0.0,
     ) -> None: ...
     o3: float
     n2o: float
@@ -114,12 +125,13 @@ class LongLivedMixingRatios:
     brx: float
     ch3br: float
     ocs: float
+    iodx: float
     def to_dict(self) -> dict[str, float]:
-        """Return all 18 species as a ``{name: value}`` dict."""
+        """Return all 19 species as a ``{name: value}`` dict."""
         ...
 
 class JValues:
-    """Photolysis rates (s⁻¹) for all 44 J-value channels."""
+    """Photolysis rates (s⁻¹) for all 47 J-value channels."""
 
     @property
     def no(self) -> float: ...
@@ -209,8 +221,14 @@ class JValues:
     def cf3i(self) -> float: ...
     @property
     def ocs(self) -> float: ...
+    @property
+    def io(self) -> float: ...
+    @property
+    def hoi(self) -> float: ...
+    @property
+    def iono2(self) -> float: ...
     def to_dict(self) -> dict[str, float]:
-        """Return all 44 J-values as a ``{name: value}`` dict (s⁻¹)."""
+        """Return all 47 J-values as a ``{name: value}`` dict (s⁻¹)."""
         ...
 
 class Diagnostics:

@@ -4,18 +4,19 @@
 use anyhow::{bail, Result};
 
 use crate::chemistry::{chems, rhslhs};
+use crate::constants::NDEN;
 use crate::state::ModelState;
 
 // ── RPLACE / SPLACE — scatter/gather species arrays ──────────────────────────
 
-/// Load XN[0..30] from named density arrays at box j (0-based).
+/// Load XN[0..NDEN] from named density arrays at box j (0-based).
 /// Fortran: SUBROUTINE RPLACE(XN, J)
-pub fn rplace(s: &ModelState, xn: &mut [f64; 30], j: usize) {
+pub fn rplace(s: &ModelState, xn: &mut [f64; NDEN], j: usize) {
     let n = s.n;
     xn.iter_mut().for_each(|v| *v = 1.0e-36);
 
-    let put = |xn: &mut [f64; 30], ni: usize, val: f64| {
-        if ni >= 1 && ni <= 30 { xn[ni - 1] = val; }
+    let put = |xn: &mut [f64; NDEN], ni: usize, val: f64| {
+        if ni >= 1 && ni <= NDEN { xn[ni - 1] = val; }
     };
 
     put(xn, n[0],  s.dno[j]);
@@ -48,14 +49,21 @@ pub fn rplace(s: &ModelState, xn: &mut [f64; 30], j: usize) {
     put(xn, n[25], s.droo[j]);
     put(xn, n[26], s.drooh[j]);
     put(xn, n[29], s.dbrcl[j]);
+    if s.liod {
+        put(xn, n[30], s.di_[j]);
+        put(xn, n[31], s.dio[j]);
+        put(xn, n[32], s.dhoi[j]);
+        put(xn, n[33], s.diono2[j]);
+        put(xn, n[34], s.dhi[j]);
+    }
 }
 
-/// Store XN[0..30] back into named density arrays at box j (0-based).
+/// Store XN[0..NDEN] back into named density arrays at box j (0-based).
 /// Fortran: SUBROUTINE SPLACE(XN, J)
-pub fn splace(s: &mut ModelState, xn: &[f64; 30], j: usize) {
+pub fn splace(s: &mut ModelState, xn: &[f64; NDEN], j: usize) {
     let n = s.n;
-    let get = |xn: &[f64; 30], ni: usize| -> f64 {
-        if ni >= 1 && ni <= 30 { xn[ni - 1] } else { 0.0 }
+    let get = |xn: &[f64; NDEN], ni: usize| -> f64 {
+        if ni >= 1 && ni <= NDEN { xn[ni - 1] } else { 0.0 }
     };
 
     s.dno[j]    = get(xn, n[0]);
@@ -88,6 +96,13 @@ pub fn splace(s: &mut ModelState, xn: &[f64; 30], j: usize) {
     s.droo[j]   = get(xn, n[25]);
     s.drooh[j]  = get(xn, n[26]);
     s.dbrcl[j]  = get(xn, n[29]);
+    if s.liod {
+        s.di_[j]    = get(xn, n[30]);
+        s.dio[j]    = get(xn, n[31]);
+        s.dhoi[j]   = get(xn, n[32]);
+        s.diono2[j] = get(xn, n[33]);
+        s.dhi[j]    = get(xn, n[34]);
+    }
 }
 
 // ── FIXRAT — family conservation cubic solve ──────────────────────────────────
@@ -95,13 +110,14 @@ pub fn splace(s: &mut ModelState, xn: &[f64; 30], j: usize) {
 /// Rescale species X[0..30] so NOy, Cly, Bry families match target totals.
 /// Solves a cubic equation (regula falsi + Newton-Raphson) for the NOy scale factor.
 /// Fortran: SUBROUTINE FIXRAT(X, I) — I is the box index (1-based in Fortran)
-pub fn fixrat(x: &mut [f64; 30], s: &ModelState, ib: usize) {
+pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
     let n  = s.n;
     let dm = s.dm[s.ialt];
 
     let totnoy = s.fnoy[ib] * dm;
     let totclx = s.fclx[ib] * dm;
     let totbrx = s.fbrx[ib] * dm;
+    let totiyx = s.fiodx[ib] * dm;
 
     // BrCl cap
     let n30 = n[29];
@@ -217,6 +233,20 @@ pub fn fixrat(x: &mut [f64; 30], s: &ModelState, ib: usize) {
         x[ni - 1] *= rbrx;
     }
     x[n[22] - 1] *= rbrx * rnoy;    // BrONO2
+
+    // Iodine family closure (Iy linked to NOy via IONO2, analogous to BrONO2/ClONO2).
+    if s.liod && n[30] > 0 && n[31] > 0 && n[32] > 0 && n[33] > 0 && n[34] > 0 {
+        let xxi = x[n[30] - 1] + x[n[31] - 1] + x[n[32] - 1] + x[n[34] - 1];
+        let xxin = x[n[33] - 1];
+        let denom = xxi + rnoy * xxin;
+        if denom > 1.0e-30 {
+            let riyx = totiyx / denom;
+            for ni in [n[30], n[31], n[32], n[34]] {
+                x[ni - 1] *= riyx;
+            }
+            x[n[33] - 1] *= riyx * rnoy; // IONO2
+        }
+    }
 }
 
 /// Wrapper: rplace → fixrat → splace → update FO3.
@@ -224,7 +254,7 @@ pub fn fixrat(x: &mut [f64; 30], s: &ModelState, ib: usize) {
 pub fn fixmix(s: &mut ModelState) {
     let ib   = s.ibox;
     let ialt = s.ialt;
-    let mut xn = [0.0f64; 30];
+    let mut xn = [0.0f64; NDEN];
     rplace(s, &mut xn, ib);
     fixrat(&mut xn, s, ib);
     splace(s, &xn, ib);
@@ -236,7 +266,7 @@ pub fn fixmix(s: &mut ModelState) {
 
 /// Newton-Raphson driver: halves DELTT until NEWRAX converges, then rebuilds.
 /// Fortran: SUBROUTINE NEWRAF(DAMP1, X, N, NDXRAF)
-pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; 30], n: usize) -> Result<()> {
+pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> Result<()> {
     let code = newrax(s, damp1, x, n);
     if code == 0 || s.deltt < 1.0e-20 {
         return Ok(());
@@ -255,7 +285,12 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; 30], n: usize) -> Re
         if k == 29 {
             eprintln!(" =====FAILED TO CONVERGE AFTER 2**-30 CUT");
             s.lprts = true;
-            newrax(s, damp1, x, n);
+            // Fortran: diagnostic NEWRAX may still converge; if so, use result
+            let c2 = newrax(s, damp1, x, n);
+            if c2 == 0 {
+                s.deltt = deltt0;
+                return Ok(());
+            }
             bail!("Newton-Raphson failed to converge after 2^-30 time step cuts");
         }
     }
@@ -266,7 +301,12 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; 30], n: usize) -> Re
         let c = newrax(s, damp1, x, n);
         if c != 0 {
             s.lprts = true;
-            newrax(s, damp1, x, n);
+            // Fortran: diagnostic NEWRAX may still converge; if so, use result
+            let c2 = newrax(s, damp1, x, n);
+            if c2 == 0 {
+                s.deltt = deltt0;
+                return Ok(());
+            }
             bail!("Newton-Raphson diverged during time-step rebuild");
         }
     }
@@ -278,7 +318,7 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; 30], n: usize) -> Re
 
 /// Inner NR loop. Returns 0=converged, 1=negative density, 2=non-convergence.
 /// Fortran: SUBROUTINE NEWRAX(DAMP1, X, N, NDXRAF)
-pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; 30], n: usize) -> i32 {
+pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> i32 {
     const NUMITR: usize = 18;
     s.radcount += 1.0;
 
@@ -294,7 +334,9 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; 30], n: usize) -> i3
         chems(s);
 
         if errxo < s.raferr { break; }
-        if iter == NUMITR - 1 { return 2; }
+        if iter == NUMITR - 1 {
+            return 2;
+        }
 
         // RHS
         let fxo = rhslhs(s, 0);
@@ -309,7 +351,7 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; 30], n: usize) -> i3
         if errpl < s.rafpml { break; }
 
         // Jacobian + solve
-        let mut xoo = [0.0f64; 30];
+        let mut xoo = [0.0f64; NDEN];
         if s.lsvjac {
             resolv_in_place(s, &fxo.as_slice()[..n], &mut xoo[..n]);
         } else {
@@ -322,7 +364,8 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; 30], n: usize) -> i3
         for j in 0..n.min(ntot) {
             let dx = if iter == 0 { damp1 * xoo[j] } else { xoo[j] };
             if dx.abs() > 1.0e-16 {
-                errxo = errxo.max((dx / s.xr[j]).abs());
+                let rel = (dx / s.xr[j]).abs();
+                errxo = errxo.max(rel);
             }
             let mut temp = s.xr[j] + dx;
             if iter < 6 {
@@ -355,7 +398,7 @@ pub fn linslv(s: &mut ModelState, b: &[f64], x: &mut [f64], n: usize) {
     // Crout decomposition with partial pivoting on the A matrix
     // (Fortran stores A column-major; we use row-major Array2 but the algorithm
     //  applies to the same logical matrix)
-    let mut s_col = [0.0f64; 30];
+    let mut s_col = [0.0f64; NDEN];
 
     for kr in 0..n {
         // Copy column KR of A into S
@@ -406,7 +449,7 @@ pub fn linslv(s: &mut ModelState, b: &[f64], x: &mut [f64], n: usize) {
 /// Fortran: SUBROUTINE RESOLV(B, X, N)
 pub fn resolv_in_place(s: &ModelState, b: &[f64], x: &mut [f64]) {
     let n = b.len();
-    let mut sv = [0.0f64; 30];
+    let mut sv = [0.0f64; NDEN];
     for i in 0..n { sv[i] = b[i]; }
 
     // Forward substitution with pivoting

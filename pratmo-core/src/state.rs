@@ -110,7 +110,13 @@ pub struct ModelState {
     pub doclo: [f64; NB],
     pub dcl2o2: [f64; NB],
     pub dbrcl: [f64; NB],
-    // Long-lived species mixing ratios (dimensionless) — FFFFFF(NB,18)
+    // Iodine species (N31..N35)
+    pub di_:    [f64; NB],         // I  (atomic iodine; `i` is a keyword)
+    pub dio:    [f64; NB],         // IO
+    pub dhoi:   [f64; NB],         // HOI
+    pub diono2: [f64; NB],         // IONO2
+    pub dhi:    [f64; NB],         // HI
+    // Long-lived species mixing ratios (dimensionless) — FFFFFF(NB,19)
     pub fo3: [f64; NB],
     pub fn2o: [f64; NB],
     pub fnoy: [f64; NB],
@@ -129,6 +135,7 @@ pub struct ModelState {
     pub fbrx: [f64; NB],
     pub fch3br: [f64; NB],
     pub focs: [f64; NB],
+    pub fiodx: [f64; NB],          // total inorganic iodine mixing ratio
     pub fxxx: [f64; NB],
     /// Species name labels (CHARACTER*8)
     pub titler: [String; 5],
@@ -217,34 +224,37 @@ pub struct ModelState {
     pub vch3i: [f64; NL],
     pub vcf3i: [f64; NL],
     pub vocs: [f64; NL],
+    pub vio:    [f64; NL],         // J(IO)
+    pub vhoi:   [f64; NL],         // J(HOI)
+    pub viono2: [f64; NL],         // J(IONO2)
     /// Actinic flux per wavelength bin at each level; FFF(NQ, NL)
     pub fff: Array2<f64>,       // shape [NQ, NL]
     pub njval: usize,           // number of J-values computed
 
     // ── COMMON/CCNNN/ ───────────────────────────────────────────────────────
-    // Species index mapping: N1..N30 are the 0-based indices for each of the
-    // 30 implicit species in the Newton-Raphson solve (NTOT = N30).
-    pub n: [usize; 30],         // N1..N30 mapped to n[0]..n[29]
+    // Species index mapping: N1..N35 are the 1-based indices for each of the
+    // NDEN implicit species in the Newton-Raphson solve (NTOT = N35).
+    pub n: [usize; NDEN],       // N1..N35 mapped to n[0]..n[34]
     pub ntot: usize,
     pub ntotx: usize,
     pub nnrt: [usize; NSLOWM],
     pub nnr: usize,
-    pub ntsav: [usize; 31],
+    pub ntsav: [usize; NDEN + 1],
     pub nflo: [i32; 20],        // explicit integration flags per species
-    pub tname: [String; 30],    // species names for Newton-Raphson set
-    pub tnamet: [String; 30],   // transient species names
+    pub tname: [String; NDEN],  // species names for Newton-Raphson set
+    pub tnamet: [String; NDEN], // transient species names
     pub tnomf: [String; 20],    // long-lived species names
 
     // ── COMMON/CCRTS/ ───────────────────────────────────────────────────────
-    // Equivalence: RCOLUM(430) = XR(30) ++ R(250) ++ RP(30) ++ RL(30)
-    //              ++ RPF(30) ++ RLF(30) ++ RQF(30)  (total = 430)
-    pub xr: [f64; 30],          // species densities passed to solver
+    // Equivalence: RCOLUM = XR(NDEN) ++ R(NR) ++ RP(NDEN) ++ RL(NDEN)
+    //              ++ RPF(NDEN) ++ RLF(NDEN) ++ RQF(NDEN)
+    pub xr: [f64; NDEN],        // species densities passed to solver
     pub r: [f64; NR],           // reaction rates (cm⁻³ s⁻¹ or s⁻¹)
-    pub rp: [f64; 30],          // production rates
-    pub rl: [f64; 30],          // loss rates
-    pub rpf: [f64; 30],         // production rates (family)
-    pub rlf: [f64; 30],         // loss rates (family)
-    pub rqf: [f64; 30],         // quasi-steady-state rates (family)
+    pub rp: [f64; NDEN],        // production rates
+    pub rl: [f64; NDEN],        // loss rates
+    pub rpf: [f64; NDEN],       // production rates (family)
+    pub rlf: [f64; NDEN],       // loss rates (family)
+    pub rqf: [f64; NDEN],       // quasi-steady-state rates (family)
 
     // ── COMMON/DMEANS/ ──────────────────────────────────────────────────────
     /// Daily mean diagnostic storage; PMEAN(490)
@@ -353,6 +363,7 @@ pub struct ModelState {
     pub ldiurn: bool,
     pub ljzer: bool,
     pub lbrom: bool,
+    pub liod: bool,
     pub lsvjac: bool,
     pub lsvday: bool,
     pub lend: bool,
@@ -539,6 +550,11 @@ impl ModelState {
             doclo: [0.0; NB],
             dcl2o2: [0.0; NB],
             dbrcl: [0.0; NB],
+            di_:    [0.0; NB],
+            dio:    [0.0; NB],
+            dhoi:   [0.0; NB],
+            diono2: [0.0; NB],
+            dhi:    [0.0; NB],
             fo3: [0.0; NB],
             fn2o: [0.0; NB],
             fnoy: [0.0; NB],
@@ -557,6 +573,7 @@ impl ModelState {
             fbrx: [0.0; NB],
             fch3br: [0.0; NB],
             focs: [0.0; NB],
+            fiodx: [0.0; NB],
             fxxx: [0.0; NB],
             titler: [
                 String::new(), String::new(), String::new(),
@@ -631,27 +648,30 @@ impl ModelState {
             vch3i: [0.0; NL],
             vcf3i: [0.0; NL],
             vocs: [0.0; NL],
+            vio:    [0.0; NL],
+            vhoi:   [0.0; NL],
+            viono2: [0.0; NL],
             fff: Array2::zeros((NQ, NL)),
             njval: NJVAL,
 
-            n: [0; 30],
+            n: [0; NDEN],
             ntot: 0,
             ntotx: 0,
             nnrt: [0; NSLOWM],
             nnr: 0,
-            ntsav: [0; 31],
+            ntsav: [0; NDEN + 1],
             nflo: [0; 20],
             tname: core::array::from_fn(|_| String::new()),
             tnamet: core::array::from_fn(|_| String::new()),
             tnomf: core::array::from_fn(|_| String::new()),
 
-            xr: [0.0; 30],
+            xr: [0.0; NDEN],
             r: [0.0; NR],
-            rp: [0.0; 30],
-            rl: [0.0; 30],
-            rpf: [0.0; 30],
-            rlf: [0.0; 30],
-            rqf: [0.0; 30],
+            rp: [0.0; NDEN],
+            rl: [0.0; NDEN],
+            rpf: [0.0; NDEN],
+            rlf: [0.0; NDEN],
+            rqf: [0.0; NDEN],
 
             pmean: [0.0; NPMEAN],
             xnoft: Array2::zeros((NDEN, NXNOFT)),
@@ -734,6 +754,7 @@ impl ModelState {
             ldiurn: false,
             ljzer: false,
             lbrom: false,
+            liod: false,
             lsvjac: false,
             lsvday: false,
             lend: false,
@@ -804,11 +825,12 @@ impl ModelState {
 
     // ── Convenience accessors for the CCDEN species arrays ──────────────────
     // These provide a 2D view compatible with Fortran's DDDDDD(IB, ISPEC) access.
-    // The 30 implicit species in order (0-based):
+    // The 35 implicit species in order (0-based):
     //   0=NO, 1=NO2, 2=NO3, 3=N2O5, 4=HNO3, 5=H, 6=OH, 7=HO2, 8=H2O2,
     //   9=O, 10=O3, 11=BrO, 12=Br, 13=HBr, 14=HNO2, 15=HCl, 16=Cl,
     //   17=Cl2, 18=ClO, 19=ClONO2, 20=HNO4, 21=HOCl, 22=BrONO2, 23=HOBr,
-    //   24=H2CO, 25=CH3O2, 26=CH3O2H, 27=OClO, 28=Cl2O2, 29=BrCl
+    //   24=H2CO, 25=CH3O2, 26=CH3O2H, 27=OClO, 28=Cl2O2, 29=BrCl,
+    //   30=I, 31=IO, 32=HOI, 33=IONO2, 34=HI
     pub fn den_get(&self, ib: usize, ispec: usize) -> f64 {
         match ispec {
             0 => self.dno[ib],   1 => self.dno2[ib],  2 => self.dno3[ib],
@@ -821,6 +843,8 @@ impl ModelState {
             21 => self.dhocl[ib],22 => self.dbrno3[ib],23 => self.dhobr[ib],
             24 => self.dh2co[ib],25 => self.droo[ib], 26 => self.drooh[ib],
             27 => self.doclo[ib],28 => self.dcl2o2[ib],29 => self.dbrcl[ib],
+            30 => self.di_[ib],  31 => self.dio[ib],  32 => self.dhoi[ib],
+            33 => self.diono2[ib],34 => self.dhi[ib],
             _ => panic!("den_get: species index {} out of range", ispec),
         }
     }
@@ -842,6 +866,9 @@ impl ModelState {
             24 => self.dh2co[ib] = val,25 => self.droo[ib] = val,
             26 => self.drooh[ib] = val,27 => self.doclo[ib] = val,
             28 => self.dcl2o2[ib] = val,29 => self.dbrcl[ib] = val,
+            30 => self.di_[ib] = val,  31 => self.dio[ib] = val,
+            32 => self.dhoi[ib] = val, 33 => self.diono2[ib] = val,
+            34 => self.dhi[ib] = val,
             _ => panic!("den_set: species index {} out of range", ispec),
         }
     }
@@ -856,6 +883,7 @@ impl ModelState {
             10 => self.fch3cl[ib], 11 => self.fmecl[ib], 12 => self.fh2[ib],
             13 => self.fh2o[ib],   14 => self.fnh3[ib],  15 => self.fc5h8[ib],
             16 => self.fbrx[ib],   17 => self.fch3br[ib],18 => self.focs[ib],
+            19 => self.fiodx[ib],
             _ => 0.0,
         }
     }
@@ -872,6 +900,7 @@ impl ModelState {
             13 => self.fh2o[ib] = val,   14 => self.fnh3[ib] = val,
             15 => self.fc5h8[ib] = val,  16 => self.fbrx[ib] = val,
             17 => self.fch3br[ib] = val, 18 => self.focs[ib] = val,
+            19 => self.fiodx[ib] = val,
             _ => {}
         }
     }
@@ -895,6 +924,7 @@ impl ModelState {
             36 => self.vh2402[il],37 => self.vh22[il],  38 => self.vh123[il],
             39 => self.vh141b[il],40 => self.vchbr3[il],41 => self.vch3i[il],
             42 => self.vcf3i[il], 43 => self.vocs[il],
+            44 => self.vio[il],   45 => self.vhoi[il],  46 => self.viono2[il],
             _ => panic!("jval_get: J-value index {} out of range", k),
         }
     }
@@ -923,6 +953,8 @@ impl ModelState {
             38 => self.vh123[il] = val, 39 => self.vh141b[il] = val,
             40 => self.vchbr3[il] = val,41 => self.vch3i[il] = val,
             42 => self.vcf3i[il] = val, 43 => self.vocs[il] = val,
+            44 => self.vio[il] = val,   45 => self.vhoi[il] = val,
+            46 => self.viono2[il] = val,
             _ => panic!("jval_set: J-value index {} out of range", k),
         }
     }

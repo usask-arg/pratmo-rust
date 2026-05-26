@@ -10,7 +10,7 @@ use crate::{
     reader::{hystat, setday},
     solver::{rplace, splace, fixmix},
     state::ModelState,
-    constants::NJH2O,
+    constants::{NJH2O, NDEN},
 };
 
 // ── TPATH ────────────────────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
         }
 
         // Load starting values from DDDDDD arrays for this box
-        let mut xnoft_col0 = [0.0f64; 30];
+        let mut xnoft_col0 = [0.0f64; NDEN];
         rplace(s, &mut xnoft_col0, ib);
         for j in 0..ntotx {
             s.xnoft[[j, 0]] = xnoft_col0[j];
@@ -177,7 +177,7 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
             s.deltt = 1.0 / tdelt;
 
             // Load guess from stored diurnal cycle
-            let mut xn = [0.0f64; 30];
+            let mut xn = [0.0f64; NDEN];
             for j in 0..ntotx {
                 xn[j] = s.xnoft[[j, it]];
                 s.xnold[j] = s.xnoft[[j, it - 1]];
@@ -227,7 +227,7 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
         // ── End of day: save noon values and update long-lived species ─────
 
         // Store noon values back into DDDDDD arrays
-        let mut xn_final = [0.0f64; 30];
+        let mut xn_final = [0.0f64; NDEN];
         for j in 0..ntotx {
             xn_final[j] = s.xnoft[[j, ntimdo - 1]];
         }
@@ -285,7 +285,7 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
         // Renormalize family mixing ratios from current box densities
         // s.n[] contains 1-based XN slot indices; convert to 0-based with -1
         {
-            let mut xn_tmp = [0.0f64; 30];
+            let mut xn_tmp = [0.0f64; NDEN];
             rplace(s, &mut xn_tmp, ib);
 
             // Helper: get xn_tmp by 1-based slot index

@@ -1,5 +1,5 @@
 (unit=11): JPL00   RATES         (rxns ver 6.0b)   (mjp 3/00)
-RATES-----  200  221 RATE COEFFs 
+RATES-----  200  230 RATE COEFFs
 RATE/    1        0.               jO2+*=O+O
 RATE/    2        0.               jO3+*=O(1D)+O2
 RATE/    3        0.               jO3+*=O(ALL)+O2
@@ -243,3 +243,14 @@ RATE/  218  1.70E-11      800.     BR+H2CO=HBR+HCO  --NASA92--
 RATE/  219  9.50E-13     -550.     CLO+BRO=BR+OCLO  --NASA00++
 RATE/  220       10.        0.     jBRCL+*=BR+CL    --scale j:CL2
 RATE/  221  2.30E-12     -260.     CLO+BRO=BR+CL(O2)--NASA00++
+RATE/  222  2.10E-11      830.     I+O3=IO+O2         --JPL19--
+RATE/  223  1.40E-10        0.     IO+O=I+O2          --JPL19--
+RATE/  224  9.90E-12     -200.     IO+NO=I+NO2        --JPL19--
+RATE/  225  1.40E-11     -540.     IO+HO2=HOI+O2      --JPL19--
+RATE/2 226  7.70E-31       5.0     IO+NO2+M=IONO2     --JPL19--(k0)
+       226  1.60E-11       0.0     IONO2              (kinf)
+       226    -.5108        0.     IONO2 EXP=LN(0.6)
+RATE/  227  1.50E-11     1090.     I+HO2=HI+O2        --JPL19--
+RATE/  228  3.00E-11     1120.     HI+OH=I+H2O        --JPL19--
+RATE/  229  5.10E-12     -280.     IO+CLO=CL+I+O2     --JPL19--
+RATE/  230  1.50E-11        0.     IO+BRO=BR+I+O2     --JPL19--

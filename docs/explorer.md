@@ -15,6 +15,7 @@ species in the legend to add or remove them. Grey bands mark nighttime (J = 0).
 
 ```{code-cell} ipython3
 :tags: [hide-input]
+:execution_timeout: 600
 
 from pratmo import PratmoModel, DiurnConfig, DiurnBoxSpec
 import json
@@ -27,6 +28,7 @@ ALL_SPECIES = [
     "o3", "bro", "br", "hbr", "hno2", "hcl", "cl", "cl2", "clo", "clono2",
     "hno4", "hocl", "brono2", "hobr", "h2co", "ch3o2", "ch3o2h", "oclo",
     "cl2o2", "brcl",
+    "i", "io", "hoi", "iono2", "hi",
 ]
 
 LABELS = {
@@ -39,6 +41,8 @@ LABELS = {
     "brono2": "BrONO₂", "hobr": "HOBr", "h2co": "H₂CO",
     "ch3o2": "CH₃O₂", "ch3o2h": "CH₃O₂H",
     "oclo": "OClO", "cl2o2": "Cl₂O₂", "brcl": "BrCl",
+    # Iodine
+    "i": "I", "io": "IO", "hoi": "HOI", "iono2": "IONO₂", "hi": "HI",
 }
 
 COLORS = {
@@ -57,6 +61,9 @@ COLORS = {
     "o":     "#784212", "o3":    "#9c640c",
     # Organics — pinks
     "h2co":  "#c71585", "ch3o2": "#e91e8c", "ch3o2h": "#ff69b4",
+    # IOx — teals
+    "i":     "#0077b6", "io":    "#00b4d8", "hoi":  "#48cae4",
+    "iono2": "#023e8a", "hi":    "#90e0ef",
 }
 
 PRESETS = {
@@ -64,6 +71,7 @@ PRESETS = {
     "HOx":      ["oh", "ho2", "h2o2", "h"],
     "ClOx":     ["cl", "clo", "cl2", "cl2o2", "hocl", "hcl", "clono2", "oclo"],
     "BrOx":     ["bro", "br", "hbr", "hobr", "brono2", "brcl"],
+    "IOx":      ["i", "io", "hoi", "iono2", "hi"],
     "Ozone":    ["o", "o3"],
     "Organics": ["h2co", "ch3o2", "ch3o2h"],
 }
@@ -73,7 +81,7 @@ DEFAULT_PRESET = "NOx"
 # ── Run model for multiple altitudes ──────────────────────────────────────────
 
 model = PratmoModel.with_defaults()
-ALT_LEVELS = [8, 12, 15, 18, 22]   # 14, 22, 28, 34, 42 km
+ALT_LEVELS = [8, 12, 18, 22]   # ~14, ~22, ~34, ~42 km
 
 payload = {}
 for level in ALT_LEVELS:
@@ -85,9 +93,9 @@ for level in ALT_LEVELS:
     ts  = out.time_series[0]
     snap = out.boxes[0]
 
-    hhmm   = [s.time_hhmm for s in ts.steps]
+    hhmm    = [s.time_hhmm for s in ts.steps]
     xlabels = [f"{h//100:02d}:{h%100:02d}" for h in hhmm]
-    xidx    = list(range(len(hhmm)))          # integer indices — avoids duplicate "12:00"
+    xidx    = list(range(len(hhmm)))
     sp_data = {sp: [getattr(step.implicit, sp) for step in ts.steps]
                for sp in ALL_SPECIES}
 
@@ -104,7 +112,6 @@ for level in ALT_LEVELS:
     if in_night:
         night_spans.append([span_start - 0.5, len(oh) - 0.5])
 
-    # Tick marks every ~4 steps, always include first and last
     tick_idx  = sorted(set([0] + list(range(0, len(xlabels), 4)) + [len(xlabels)-1]))
     tick_text = [xlabels[i] for i in tick_idx]
 
@@ -194,6 +201,13 @@ widget = f"""
       <label>Altitude:</label>
       <select id="dx-alt" onchange="dxUpdateAlt(this.value)">{alt_options}</select>
     </div>
+    <div>
+      <label>Scale:</label>
+      <select id="dx-scale" onchange="dxUpdateScale(this.value)">
+        <option value="log" selected>Log</option>
+        <option value="linear">Linear</option>
+      </select>
+    </div>
     <div class="dx-group">
       <label>Preset:</label>
       {preset_btns}
@@ -216,6 +230,7 @@ widget = f"""
 
   var curAlt    = "{ALT_LEVELS[0]}";
   var curPreset = DEFAULT;
+  var curScale  = "log";
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -268,7 +283,8 @@ widget = f"""
       }},
       yaxis: {{
         title: {{ text: "Number density (cm⁻³)", standoff: 10 }},
-        type: "log", exponentformat: "power",
+        type: curScale,
+        exponentformat: "power",
         showgrid: true, gridcolor: "#f0f0f0",
       }},
       legend: {{
@@ -312,6 +328,13 @@ widget = f"""
     }});
   }};
 
+  window.dxUpdateScale = function (scale) {{
+    curScale = scale;
+    Plotly.relayout("dx-chart", {{
+      "yaxis.type": curScale,
+    }});
+  }};
+
   // ── init ──────────────────────────────────────────────────────────────────
 
   function init() {{
@@ -325,8 +348,7 @@ widget = f"""
     // Mark default preset button active
     document.querySelectorAll(".px-btn").forEach(function (b) {{
       if (b.dataset.preset === DEFAULT) b.classList.add("active");
-    }});
-  }}
+    }});    dxUpdateAlt(curAlt);  }}
 
   if (typeof Plotly !== "undefined") {{
     init();

@@ -10,7 +10,7 @@ use crate::{
     output,
     solver::{rplace, splace, fixrat, fixmix, linslv},
     state::ModelState,
-    constants::{NPMEAN, NSLOWM, NNDXPQ},
+    constants::{NPMEAN, NSLOWM, NNDXPQ, NDEN},
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -191,7 +191,7 @@ pub fn daily(s: &mut ModelState, id: i32) -> Result<()> {
     }
 
     // Load starting guess from XNOLD
-    let mut xn = [0.0f64; 30];
+    let mut xn = [0.0f64; NDEN];
     for j in 0..s.ntotx {
         xn[j] = s.xnold[j];
     }
@@ -278,7 +278,7 @@ pub fn daily(s: &mut ModelState, id: i32) -> Result<()> {
         for j in 0..30usize {
             s.pmean[430 + j] += weight * (s.rpf[j] - s.rlf[j]);
         }
-        for j in 0..30usize {
+        for j in 0..NDEN {
             s.pmean[460 + j] += weight * (s.rp[j] - s.rl[j]);
         }
     }
@@ -299,7 +299,7 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
     let mut fxdder = Array2::<f64>::zeros((NSLOWM, NSLOWM));
     let mut fxo = [0.0f64; NSLOWM];
     let mut xo  = [0.0f64; NSLOWM];
-    let mut xoo = [0.0f64; 30];
+    let mut xoo = [0.0f64; NDEN];
 
     let mut lcnvrg = false;
     let lpsave = s.lprtx;
@@ -346,9 +346,13 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
 
         // Store 24h-mean P-L in FXO (RHS of NR system)
         for j in 0..nnr {
-            let jn   = s.nnrt[j];          // 1-based species slot
-            let ntjn = s.n[jn - 1];        // maps slot → 0-based density index
-            fxo[j] = s.pmean[460 + ntjn];
+            let jn = s.nnrt[j]; // 1-based species id in NNRT
+            let ntjn1 = s.n[jn - 1]; // 1-based NR slot index (Fortran NT)
+            if ntjn1 == 0 {
+                continue;
+            }
+            // Fortran PMEAN(460+NTJN) => 0-based index (459 + ntjn1)
+            fxo[j] = s.pmean[459 + ntjn1];
         }
 
         // Build finite-difference Jacobian
@@ -356,15 +360,19 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
         s.lprtx = false;
 
         for j in 0..nnr {
-            let jn   = s.nnrt[j];
-            let ntjn = s.n[jn - 1];
+            let jn = s.nnrt[j];
+            let ntjn1 = s.n[jn - 1];
+            if ntjn1 == 0 {
+                continue;
+            }
+            let ntjn0 = ntjn1 - 1; // 0-based slot for XNOLD
 
             let mut xnold = s.xnold;
             rplace(s, &mut xnold, s.ibox);
             s.xnold = xnold;
 
-            let epslon = s.dayeps * s.xnold[ntjn];
-            s.xnold[ntjn] += epslon;
+            let epslon = s.dayeps * s.xnold[ntjn0];
+            s.xnold[ntjn0] += epslon;
 
             {
                 let xnold_snap = s.xnold;
@@ -373,9 +381,12 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
             daily(s, 102)?;
 
             for jj in 0..nnr {
-                let jjn   = s.nnrt[jj];
-                let ntjjn = s.n[jjn - 1];
-                fxdder[[jj, j]] = (s.pmean[460 + ntjjn] - fxo[jj]) / epslon;
+                let jjn = s.nnrt[jj];
+                let ntjjn1 = s.n[jjn - 1];
+                if ntjjn1 == 0 {
+                    continue;
+                }
+                fxdder[[jj, j]] = (s.pmean[459 + ntjjn1] - fxo[jj]) / epslon;
             }
         }
 
@@ -387,7 +398,9 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
                 s.a_mat[[jj, j]] = fxdder[[jj, j]];
             }
         }
-        linslv(s, &fxo[..nnr].to_vec(), &mut xo[..nnr].to_vec(), nnr);
+        let mut xo_vec = vec![0.0f64; nnr];
+        linslv(s, &fxo[..nnr], &mut xo_vec, nnr);
+        xo[..nnr].copy_from_slice(&xo_vec);
 
         // Apply correction to slow species with clamping
         {
@@ -399,9 +412,13 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
         let mut lneg = false;
         let mut relerr = 0.0f64;
         for j in 0..nnr {
-            let jn   = s.nnrt[j];
-            let ntjn = s.n[jn - 1];
-            xoo[j] = s.xnold[ntjn];
+            let jn = s.nnrt[j];
+            let ntjn1 = s.n[jn - 1];
+            if ntjn1 == 0 {
+                continue;
+            }
+            let ntjn0 = ntjn1 - 1;
+            xoo[j] = s.xnold[ntjn0];
             let mut temp = xoo[j] - xo[j];
             if itrraf < 7 {
                 let lo = s.rafmin * xoo[j];
@@ -413,7 +430,7 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
             }
             relerr = relerr.max(xo[j].abs() / xoo[j].max(1e-100));
             xoo[j] = temp;
-            s.xnold[ntjn] = temp;
+            s.xnold[ntjn0] = temp;
         }
 
         lcnvrg = relerr < s.dayerr;

@@ -56,6 +56,12 @@ pub struct ImplicitSpecies {
     pub oclo: f64,
     pub cl2o2: f64,
     pub brcl: f64,
+    // Iodine family
+    pub i:     f64,
+    pub io:    f64,
+    pub hoi:   f64,
+    pub iono2: f64,
+    pub hi:    f64,
 }
 
 impl ImplicitSpecies {
@@ -91,6 +97,11 @@ impl ImplicitSpecies {
             oclo:   s.doclo[ib],
             cl2o2:  s.dcl2o2[ib],
             brcl:   s.dbrcl[ib],
+            i:      s.di_[ib],
+            io:     s.dio[ib],
+            hoi:    s.dhoi[ib],
+            iono2:  s.diono2[ib],
+            hi:     s.dhi[ib],
         }
     }
 
@@ -117,6 +128,9 @@ impl ImplicitSpecies {
             hno4:   get(20), hocl:   get(21), brono2: get(22), hobr:   get(23),
             h2co:   get(24), ch3o2:  get(25), ch3o2h: get(26), oclo:   get(27),
             cl2o2:  get(28), brcl:   get(29),
+            i:      get(30), io:     get(31),
+            hoi:    get(32), iono2:  get(33),
+            hi:     get(34),
         }
     }
 }
@@ -143,6 +157,7 @@ pub struct LongLivedMixingRatios {
     pub brx: f64,      // total Bry
     pub ch3br: f64,
     pub ocs: f64,
+    pub iodx: f64,     // total Iy
 }
 
 impl LongLivedMixingRatios {
@@ -166,6 +181,7 @@ impl LongLivedMixingRatios {
             brx:     s.fbrx[ib],
             ch3br:   s.fch3br[ib],
             ocs:     s.focs[ib],
+            iodx:    s.fiodx[ib],
         }
     }
 
@@ -188,10 +204,11 @@ impl LongLivedMixingRatios {
         s.fbrx[ib]   = self.brx;
         s.fch3br[ib] = self.ch3br;
         s.focs[ib]   = self.ocs;
+        s.fiodx[ib]  = self.iodx;
     }
 }
 
-/// Photolysis rates (s⁻¹) for all 44 J-value channels.
+/// Photolysis rates (s⁻¹) for all 47 J-value channels.
 #[derive(Debug, Clone, Default)]
 pub struct JValues {
     pub no: f64,
@@ -238,6 +255,9 @@ pub struct JValues {
     pub ch3i: f64,
     pub cf3i: f64,
     pub ocs: f64,
+    pub io: f64,
+    pub hoi: f64,
+    pub iono2: f64,
 }
 
 impl JValues {
@@ -287,6 +307,9 @@ impl JValues {
             ch3i:      s.vch3i[il],
             cf3i:      s.vcf3i[il],
             ocs:       s.vocs[il],
+            io:        s.vio[il],
+            hoi:       s.vhoi[il],
+            iono2:     s.viono2[il],
         }
     }
 }
@@ -696,7 +719,7 @@ fn extract_box_snapshot(s: &ModelState, ib: usize) -> BoxSnapshot {
         air_density_cm3: s.dm[ialt],
         implicit:       ImplicitSpecies::from_state(s, ib),
         long_lived:     LongLivedMixingRatios::from_state(s, ib),
-        jvalues:        JValues::from_state_alt(s, ialt),
+        jvalues:        JValues::from_state_alt(s, ib),
     }
 }
 

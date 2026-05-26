@@ -8,7 +8,7 @@ CLOUD/RAIN 0.20 0.00
 AERSOL----   1.0E-17    1.20E5   1.0E-18     20.E5     0.000      -1.0
 RALERR----      0.10   1.0E+04   1.0E-10   1.0E-04   1.0E-06   1.0E-03   3.0E-05
 XRF/RLX/LB    9    3    1   +2    0    0 change 2 rates, 0=ND216 (no CTMx calc)
-NDAY/NBOX-    1   25   30   18   48   40 NDAY.NBOX.NDVAL.NFVAL.NDDD.NDAYSD
+NDAY/NBOX-    1   25   35   19   54   40 NDAY.NBOX.NDVAL.NFVAL.NDDD.NDAYSD
 BOXDO-30-29-28-27-26-25-24-23-22-21-20-19-18-17-16-15-14-13-12-11-10-09-08-07-06-05-04-03-02-01
 BOXWT  0  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  1  0  0  0  0  0
 BOXPR  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  4  0  0  0  0  0
@@ -27,7 +27,7 @@ NDXPP 37 99 89 62 19115 27 42217221158 78129169 01 12 16170171 00 00 00 00 00  0
 NDXQQ 10 01 02 07 08 49 50 19 00 00 00 00 00  0  0  0  0  0  0  0  0  0  0  0  0
 NPRT-SSSSS    1    1    2  115  115    0    1 NPRT1/2/RR.ITPRTX/R.NPSTD/ITPRTB
  T f f T T   LPRT.LPRTX.LPRTJV.lprty.lprt8
-L-LIVED 18 NFLO DIFF
+L-LIVED 19 NFLO DIFF
 f-O3     1    0    0
 N2O      2    0    0
 NO-y     3    0    0
@@ -46,7 +46,8 @@ C5H8    15    0    0
 BR-y    16    0    0
 CH3BR   17    0    0
 C2H6    18    0    0
-RADICALS30 ISED(implicit/slow/explicit/diff) MIXING RATIOS
+I-y     19    0    0
+RADICALS35 ISED(implicit/slow/explicit/diff) MIXING RATIOS
 BRO     12 1000
 BR      13 1000
 HBR     14 1100
@@ -77,5 +78,10 @@ OCLO    28 1000
 CL2O2   29 1000
 O       10 1000
 O3      11 0000
+I       31 1000
+IO      32 1000
+HOI     33 1000
+IONO2   34 1000
+HI      35 1100
 ..        ..            0
 ----------------------------eof------------------------

@@ -25,7 +25,7 @@ cfg = DiurnConfig(
     latitude_deg=0.0,
     julian_day=120,          # 30 April
     integration_days=20,
-    boxes=[DiurnBoxSpec(altitude_level=20)],
+    boxes=[DiurnBoxSpec(altitude_level=8)],
 )
 out = model.run_diurn(cfg)
 snap = out.boxes[0]
@@ -56,7 +56,7 @@ cfg2 = DiurnConfig(
     latitude_deg=0.0,
     julian_day=120,
     integration_days=20,
-    boxes=[DiurnBoxSpec(altitude_level=15), DiurnBoxSpec(altitude_level=20)],
+    boxes=[DiurnBoxSpec(altitude_level=8), DiurnBoxSpec(altitude_level=12)],
 )
 out2 = model.run_diurn(cfg2)
 
@@ -91,7 +91,7 @@ cfg_custom = DiurnConfig(
     latitude_deg=0.0,
     julian_day=120,
     integration_days=20,
-    boxes=[DiurnBoxSpec(altitude_level=20)],
+    boxes=[DiurnBoxSpec(altitude_level=8)],
     initial_mixing_ratios=[init],  # one entry per box
 )
 out_custom = model.run_diurn(cfg_custom)

@@ -93,8 +93,11 @@ for level in ALT_LEVELS:
     ts  = out.time_series[0]
     snap = out.boxes[0]
 
-    # Sort chronologically (model stores noon-first; we want midnight→noon→midnight)
-    steps_sorted = sorted(ts.steps, key=lambda s: s.time_hhmm)
+    # Skip steps[0]: it is the noon boundary condition (previous day's 11:02 state
+    # relabelled as noon), not an integrated value.  The remaining 33 steps form a
+    # continuous integrated cycle; sorting them puts midnight at the left edge and
+    # late evening at the right, with daytime naturally centred.
+    steps_sorted = sorted(ts.steps[1:], key=lambda s: s.time_hhmm)
     hhmm    = [s.time_hhmm for s in steps_sorted]
     xlabels = [f"{h//100:02d}:{h%100:02d}" for h in hhmm]
     xidx    = list(range(len(hhmm)))
@@ -282,6 +285,7 @@ widget = f"""
         tickangle: -40,
         tickfont: {{ size: 11 }},
         showgrid: true, gridcolor: "#f0f0f0",
+        range: [-0.5, d.x[d.x.length - 1] + 0.5],
       }},
       yaxis: {{
         title: {{ text: "Number density (cm⁻³)", standoff: 10 }},
@@ -316,6 +320,7 @@ widget = f"""
     Plotly.relayout("dx-chart", {{
       "xaxis.tickvals": d.tick_idx,
       "xaxis.ticktext": d.tick_text,
+      "xaxis.range": [-0.5, d.x[d.x.length - 1] + 0.5],
       shapes: nightShapes(altKey),
     }});
   }};

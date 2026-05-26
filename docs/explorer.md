@@ -93,10 +93,12 @@ for level in ALT_LEVELS:
     ts  = out.time_series[0]
     snap = out.boxes[0]
 
-    hhmm    = [s.time_hhmm for s in ts.steps]
+    # Sort chronologically (model stores noon-first; we want midnight→noon→midnight)
+    steps_sorted = sorted(ts.steps, key=lambda s: s.time_hhmm)
+    hhmm    = [s.time_hhmm for s in steps_sorted]
     xlabels = [f"{h//100:02d}:{h%100:02d}" for h in hhmm]
     xidx    = list(range(len(hhmm)))
-    sp_data = {sp: [getattr(step.implicit, sp) for step in ts.steps]
+    sp_data = {sp: [getattr(step.implicit, sp) for step in steps_sorted]
                for sp in ALL_SPECIES}
 
     # Nighttime spans: contiguous runs where OH < 0.1 % of daily max

@@ -24,7 +24,12 @@ nb_execution_mode = "cache"
 nb_execution_timeout = 600
 nb_execution_raise_on_error = True
 
-exclude_patterns = ["_build", "**.ipynb_checkpoints"]
+exclude_patterns = [
+    "_build",
+    "**.ipynb_checkpoints",
+    ".jupyter_cache",
+    "jupyter_execute",
+]
 
 source_suffix = {
     ".md": "myst-nb",

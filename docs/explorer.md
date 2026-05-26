@@ -93,37 +93,41 @@ for level in ALT_LEVELS:
     ts  = out.time_series[0]
     snap = out.boxes[0]
 
-    # Skip steps[0]: it is the noon boundary condition (previous day's 11:02 state
-    # relabelled as noon), not an integrated value.  The remaining 33 steps form a
-    # continuous integrated cycle; sorting them puts midnight at the left edge and
-    # late evening at the right, with daytime naturally centred.
+    # Skip steps[0] (noon boundary condition — previous day's 11:02 state
+    # relabelled as noon).  Sort remaining 33 integrated steps chronologically
+    # and use decimal hours as x so the ~2 h noon gap is proportionally wide.
     steps_sorted = sorted(ts.steps[1:], key=lambda s: s.time_hhmm)
-    hhmm    = [s.time_hhmm for s in steps_sorted]
-    xlabels = [f"{h//100:02d}:{h%100:02d}" for h in hhmm]
-    xidx    = list(range(len(hhmm)))
+    hhmm  = [s.time_hhmm for s in steps_sorted]
+    hours = [h // 100 + (h % 100) / 60.0 for h in hhmm]
     sp_data = {sp: [getattr(step.implicit, sp) for step in steps_sorted]
                for sp in ALL_SPECIES}
 
-    # Nighttime spans: contiguous runs where OH < 0.1 % of daily max
+    # Fixed ticks every 2 h within the plotted range
+    tick_vals = [h for h in range(0, 24, 2)
+                 if hours[0] - 0.25 <= h <= hours[-1] + 0.25]
+    tick_text = [f"{h:02d}:00" for h in tick_vals]
+
+    # Nighttime spans in decimal hours: contiguous runs where OH < 0.1 % of daily max
     oh = sp_data["oh"]
     threshold = max(oh) * 0.001
-    night_spans, in_night, span_start = [], False, 0
+    night_spans, in_night, span_start_h = [], False, 0.0
+    dt = [(hours[i] - hours[i-1]) / 2 for i in range(1, len(hours))]
     for i, v in enumerate(oh):
+        half = dt[i-1] if i > 0 else 0.5
         if v < threshold and not in_night:
-            span_start, in_night = i, True
+            span_start_h = hours[i] - half
+            in_night = True
         elif v >= threshold and in_night:
-            night_spans.append([span_start - 0.5, i - 0.5])
+            night_spans.append([span_start_h, hours[i-1] + half])
             in_night = False
     if in_night:
-        night_spans.append([span_start - 0.5, len(oh) - 0.5])
-
-    tick_idx  = sorted(set([0] + list(range(0, len(xlabels), 4)) + [len(xlabels)-1]))
-    tick_text = [xlabels[i] for i in tick_idx]
+        last_half = dt[-1] if dt else 0.5
+        night_spans.append([span_start_h, hours[-1] + last_half])
 
     payload[str(level)] = {
         "alt_km":      round(snap.altitude_km, 0),
-        "x":           xidx,
-        "tick_idx":    tick_idx,
+        "x":           hours,
+        "tick_idx":    tick_vals,
         "tick_text":   tick_text,
         "species":     sp_data,
         "night_spans": night_spans,

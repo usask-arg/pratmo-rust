@@ -1,8 +1,7 @@
 // bchem.f → chemistry module
 // SETUPR, CHEMS, CHEMPL, RHSLHS, REACT, FKNASA
 
-use nalgebra::{DMatrix, DVector};
-
+use crate::constants::NDEN;
 use crate::state::ModelState;
 
 // ── Index helpers (Fortran 1-based N1..N35 stored as s.n[0]..s.n[34]) ────────
@@ -1056,11 +1055,9 @@ pub fn chempl(s: &mut ModelState) {
 
 // ── RHSLHS — RHS vector and Jacobian ─────────────────────────────────────────
 
-/// Build either:
-///   ido=0: RHS vector fxo[i] = RL[i] - RP[i] + (XR[i] - XNOLD[i]) * DELTT
-///   ido=1: Jacobian A (NTOT×NTOT) via REACT calls
-/// Fortran: SUBROUTINE RHSLHS(FXO, IDO)
-pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
+/// Build RHS vector fxo[i] = RL[i] - RP[i] + (XR[i] - XNOLD[i]) * DELTT.
+/// Fortran: SUBROUTINE RHSLHS(FXO, IDO=0)
+pub fn rhslhs_rhs(s: &mut ModelState) -> [f64; NDEN] {
     let ntot = s.ntot;
     let n    = s.n;
 
@@ -1069,8 +1066,7 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
     let inclx = n[18]; // N19 (ClO)
     let inbrx = n[11]; // N12 (BrO)
 
-    if ido == 0 {
-        // Steady-state closure when DELTT < 1e-20
+    // Steady-state closure when DELTT < 1e-20
         if s.deltt < 1.0e-20 {
             let zdnum = s.zdnum;
             let ib    = s.ibox;
@@ -1094,19 +1090,32 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
                 + s.xr[idx(n[13])] + s.xr[idx(n[22])] + s.xr[idx(n[23])];
         }
 
-        let mut fxo = DVector::zeros(ntot);
-        let deltt = s.deltt;
-        for i in 0..ntot {
-            fxo[i] = s.rl[i] - s.rp[i] + (s.xr[i] - s.xnold[i]) * deltt;
-        }
-        fxo
-    } else {
-        // Build Jacobian A(NTOT×NTOT)
+    let mut fxo = [0.0; NDEN];
+    let deltt = s.deltt;
+    for i in 0..ntot {
+        fxo[i] = s.rl[i] - s.rp[i] + (s.xr[i] - s.xnold[i]) * deltt;
+    }
+    fxo
+}
+
+/// Build Jacobian A(NTOT×NTOT) via REACT calls.
+/// Fortran: SUBROUTINE RHSLHS(FXO, IDO=1)
+pub fn rhslhs_jacobian(s: &mut ModelState) {
+    let ntot = s.ntot;
+    let n = s.n;
+
+    // Closure species row indices (Fortran 1-based; used as rows in A)
+    let innoy = n[1];
+    let inclx = n[18];
+    let inbrx = n[11];
+
+    // Build Jacobian A(NTOT×NTOT)
+        let a = s.a_mat.as_slice_mut().expect("a_mat is contiguous");
         for j in 0..ntot {
             for i in 0..ntot {
-                s.a_mat[[i, j]] = 0.0;
+                a[j * NDEN + i] = 0.0;
             }
-            s.a_mat[[j, j]] = -s.deltt * s.xr[j];
+            a[j * NDEN + j] = -s.deltt * s.xr[j];
         }
 
         let r = s.r;
@@ -1115,7 +1124,7 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
         // Each REACT call: react(s, rrate, nl1, nl2, nl3, np1, np2) with 1-based indices
         macro_rules! rct {
             ($rt:expr, $l1:expr, $l2:expr, $l3:expr, $p1:expr, $p2:expr) => {
-                react(&mut s.a_mat, $rt, $l1, $l2, $l3, $p1, $p2)
+                react(a, $rt, $l1, $l2, $l3, $p1, $p2)
             };
         }
 
@@ -1320,8 +1329,9 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
             let xc = s.xr[icol];
             if xc != 0.0 {
                 for irow in 0..ntot {
-                    if s.a_mat[[irow, icol]] != 0.0 {
-                        s.a_mat[[irow, icol]] /= xc;
+                    let aidx = icol * NDEN + irow;
+                    if a[aidx] != 0.0 {
+                        a[aidx] /= xc;
                     }
                 }
             }
@@ -1331,44 +1341,42 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
         if s.deltt < 1.0e-20 {
             let ntot = s.ntot;
             for icol in 0..ntot {
-                s.a_mat[[idx(innoy), icol]] = 0.0;
+                a[icol * NDEN + idx(innoy)] = 0.0;
             }
-            s.a_mat[[idx(innoy), idx(n[0])]]  = -1.0;
-            s.a_mat[[idx(innoy), idx(n[1])]]  = -1.0;
-            s.a_mat[[idx(innoy), idx(n[2])]]  = -1.0;
-            s.a_mat[[idx(innoy), idx(n[3])]]  = -2.0;
-            s.a_mat[[idx(innoy), idx(n[4])]]  = -1.0;
-            s.a_mat[[idx(innoy), idx(n[14])]] = -1.0;
-            s.a_mat[[idx(innoy), idx(n[19])]] = -1.0;
-            s.a_mat[[idx(innoy), idx(n[20])]] = -1.0;
-            s.a_mat[[idx(innoy), idx(n[22])]] = -1.0;
+            a[idx(n[0]) * NDEN + idx(innoy)]  = -1.0;
+            a[idx(n[1]) * NDEN + idx(innoy)]  = -1.0;
+            a[idx(n[2]) * NDEN + idx(innoy)]  = -1.0;
+            a[idx(n[3]) * NDEN + idx(innoy)]  = -2.0;
+            a[idx(n[4]) * NDEN + idx(innoy)]  = -1.0;
+            a[idx(n[14]) * NDEN + idx(innoy)] = -1.0;
+            a[idx(n[19]) * NDEN + idx(innoy)] = -1.0;
+            a[idx(n[20]) * NDEN + idx(innoy)] = -1.0;
+            a[idx(n[22]) * NDEN + idx(innoy)] = -1.0;
 
             for icol in 0..ntot {
-                s.a_mat[[idx(inclx), icol]] = 0.0;
+                a[icol * NDEN + idx(inclx)] = 0.0;
             }
-            s.a_mat[[idx(inclx), idx(n[15])]] = -1.0;
-            s.a_mat[[idx(inclx), idx(n[16])]] = -1.0;
-            s.a_mat[[idx(inclx), idx(n[17])]] = -2.0;
-            s.a_mat[[idx(inclx), idx(n[18])]] = -1.0;
-            s.a_mat[[idx(inclx), idx(n[19])]] = -1.0;
-            s.a_mat[[idx(inclx), idx(n[21])]] = -1.0;
-            s.a_mat[[idx(inclx), idx(n[27])]] = -1.0;
-            s.a_mat[[idx(inclx), idx(n[28])]] = -2.0;
+            a[idx(n[15]) * NDEN + idx(inclx)] = -1.0;
+            a[idx(n[16]) * NDEN + idx(inclx)] = -1.0;
+            a[idx(n[17]) * NDEN + idx(inclx)] = -2.0;
+            a[idx(n[18]) * NDEN + idx(inclx)] = -1.0;
+            a[idx(n[19]) * NDEN + idx(inclx)] = -1.0;
+            a[idx(n[21]) * NDEN + idx(inclx)] = -1.0;
+            a[idx(n[27]) * NDEN + idx(inclx)] = -1.0;
+            a[idx(n[28]) * NDEN + idx(inclx)] = -2.0;
 
             if s.lbrom {
                 for icol in 0..ntot {
-                    s.a_mat[[idx(inbrx), icol]] = 0.0;
+                    a[icol * NDEN + idx(inbrx)] = 0.0;
                 }
-                s.a_mat[[idx(inbrx), idx(n[11])]] = -1.0;
-                s.a_mat[[idx(inbrx), idx(n[12])]] = -1.0;
-                s.a_mat[[idx(inbrx), idx(n[13])]] = -1.0;
-                s.a_mat[[idx(inbrx), idx(n[22])]] = -1.0;
-                s.a_mat[[idx(inbrx), idx(n[23])]] = -1.0;
+                a[idx(n[11]) * NDEN + idx(inbrx)] = -1.0;
+                a[idx(n[12]) * NDEN + idx(inbrx)] = -1.0;
+                a[idx(n[13]) * NDEN + idx(inbrx)] = -1.0;
+                a[idx(n[22]) * NDEN + idx(inbrx)] = -1.0;
+                a[idx(n[23]) * NDEN + idx(inbrx)] = -1.0;
             }
         }
 
-        DVector::zeros(ntot) // placeholder — caller uses A for Jacobian path
-    }
 }
 
 // ── REACT — accumulate Jacobian entries ──────────────────────────────────────
@@ -1377,28 +1385,28 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
 /// np1, np2 are products (1-based, positive or zero).
 /// Negative nl means: use |nl| as column key, but don't add self-loss for that row.
 /// Fortran: SUBROUTINE REACT(RRATE, ML1, ML2, ML3, MP1, MP2)
-fn react(a: &mut ndarray::Array2<f64>, rrate: f64, nl1: i32, nl2: i32, nl3: i32, np1: i32, np2: i32) {
+fn react(a: &mut [f64], rrate: f64, nl1: i32, nl2: i32, nl3: i32, np1: i32, np2: i32) {
     if nl1 == 0 { return; }
     let kol1 = (nl1.unsigned_abs() as usize).saturating_sub(1);
-    if nl1 > 0 { a[[idx(nl1 as usize), kol1]] -= rrate; }
-    if nl2 > 0 { a[[idx(nl2 as usize), kol1]] -= rrate; }
-    if nl3 > 0 { a[[idx(nl3 as usize), kol1]] -= rrate; }
-    if np1 > 0 { a[[idx(np1 as usize), kol1]] += rrate; }
-    if np2 > 0 { a[[idx(np2 as usize), kol1]] += rrate; }
+    if nl1 > 0 { a[kol1 * NDEN + idx(nl1 as usize)] -= rrate; }
+    if nl2 > 0 { a[kol1 * NDEN + idx(nl2 as usize)] -= rrate; }
+    if nl3 > 0 { a[kol1 * NDEN + idx(nl3 as usize)] -= rrate; }
+    if np1 > 0 { a[kol1 * NDEN + idx(np1 as usize)] += rrate; }
+    if np2 > 0 { a[kol1 * NDEN + idx(np2 as usize)] += rrate; }
 
     if nl2 == 0 { return; }
     let kol2 = (nl2.unsigned_abs() as usize).saturating_sub(1);
-    if nl1 > 0 { a[[idx(nl1 as usize), kol2]] -= rrate; }
-    if nl2 > 0 { a[[idx(nl2 as usize), kol2]] -= rrate; }
-    if nl3 > 0 { a[[idx(nl3 as usize), kol2]] -= rrate; }
-    if np1 > 0 { a[[idx(np1 as usize), kol2]] += rrate; }
-    if np2 > 0 { a[[idx(np2 as usize), kol2]] += rrate; }
+    if nl1 > 0 { a[kol2 * NDEN + idx(nl1 as usize)] -= rrate; }
+    if nl2 > 0 { a[kol2 * NDEN + idx(nl2 as usize)] -= rrate; }
+    if nl3 > 0 { a[kol2 * NDEN + idx(nl3 as usize)] -= rrate; }
+    if np1 > 0 { a[kol2 * NDEN + idx(np1 as usize)] += rrate; }
+    if np2 > 0 { a[kol2 * NDEN + idx(np2 as usize)] += rrate; }
 
     if nl3 == 0 { return; }
     let kol3 = (nl3.unsigned_abs() as usize).saturating_sub(1);
-    if nl1 > 0 { a[[idx(nl1 as usize), kol3]] -= rrate; }
-    if nl2 > 0 { a[[idx(nl2 as usize), kol3]] -= rrate; }
-    if nl3 > 0 { a[[idx(nl3 as usize), kol3]] -= rrate; }
-    if np1 > 0 { a[[idx(np1 as usize), kol3]] += rrate; }
-    if np2 > 0 { a[[idx(np2 as usize), kol3]] += rrate; }
+    if nl1 > 0 { a[kol3 * NDEN + idx(nl1 as usize)] -= rrate; }
+    if nl2 > 0 { a[kol3 * NDEN + idx(nl2 as usize)] -= rrate; }
+    if nl3 > 0 { a[kol3 * NDEN + idx(nl3 as usize)] -= rrate; }
+    if np1 > 0 { a[kol3 * NDEN + idx(np1 as usize)] += rrate; }
+    if np2 > 0 { a[kol3 * NDEN + idx(np2 as usize)] += rrate; }
 }

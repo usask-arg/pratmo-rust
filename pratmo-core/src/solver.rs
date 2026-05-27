@@ -2,8 +2,9 @@
 // NEWRAF, NEWRAX, LINSLV, RESOLV, FIXRAT, FIXMIX, RPLACE, SPLACE
 
 use anyhow::Result;
+use std::sync::OnceLock;
 
-use crate::chemistry::{chems, rhslhs};
+use crate::chemistry::{chems, rhslhs_jacobian, rhslhs_rhs};
 use crate::constants::NDEN;
 use crate::state::ModelState;
 
@@ -282,6 +283,7 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
     if code == 0 || s.deltt < 1.0e-20 {
         return Ok(());
     }
+    retry_probe_newraf(s, "initial", code, 0);
 
     // Time-step halving loop
     let deltt0 = s.deltt;
@@ -291,8 +293,10 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         let c = newrax(s, damp1, x, n);
         if c == 0 {
             kut = k + 1;
+            retry_probe_newraf(s, "cut_success", c, kut);
             break;
         }
+        retry_probe_newraf(s, "cut_retry", c, k + 1);
         if k == 29 {
             eprintln!(" =====FAILED TO CONVERGE AFTER 2**-30 CUT");
             s.lprts = true;
@@ -308,6 +312,7 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         s.deltt /= 2.0;
         let c = newrax(s, damp1, x, n);
         if c != 0 {
+            retry_probe_newraf(s, "rebuild_fail", c, kut);
             s.lprts = true;
             // Attempt one more pass; accept result regardless (Fortran: warn and continue).
             newrax(s, damp1, x, n);
@@ -328,6 +333,8 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
     s.radcount += 1.0;
 
     let mut errxo = 1.0_f64;
+    let mut last_errpl = 0.0_f64;
+    let mut last_errpl_j = 0usize;
 
     // Load XR from X
     for j in 0..s.ntotx {
@@ -340,28 +347,39 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
 
         if errxo < s.raferr { break; }
         if iter == NUMITR - 1 {
+            retry_probe_newrax_nonconverged(s, iter + 1, last_errpl, last_errpl_j, errxo);
             return 2;
         }
 
         // RHS
-        let fxo = rhslhs(s, 0);
+        let fxo = rhslhs_rhs(s);
 
         // Convergence check on P-L residual
         let ntot = s.ntot;
-        let errpl = (0..n.min(ntot)).fold(0.0_f64, |acc, j| {
+        let mut errpl = 0.0_f64;
+        let mut errpl_j = 0usize;
+        for j in 0..n.min(ntot) {
             let denom = s.rp[j] + s.rl[j];
-            if denom > 0.0 { acc.max((fxo[j] / denom).abs()) } else { acc }
-        });
+            if denom > 0.0 {
+                let err = (fxo[j] / denom).abs();
+                if err >= errpl {
+                    errpl = err;
+                    errpl_j = j;
+                }
+            }
+        }
+        last_errpl = errpl;
+        last_errpl_j = errpl_j;
 
         if errpl < s.rafpml { break; }
 
         // Jacobian + solve
         let mut xoo = [0.0f64; NDEN];
         if s.lsvjac {
-            resolv_in_place(s, &fxo.as_slice()[..n], &mut xoo[..n]);
+            resolv_in_place(s, &fxo[..n], &mut xoo[..n]);
         } else {
-            rhslhs(s, 1);
-            linslv(s, &fxo.as_slice()[..n], &mut xoo[..n], n);
+            rhslhs_jacobian(s);
+            linslv(s, &fxo[..n], &mut xoo[..n], n);
         }
 
         // Apply correction
@@ -382,7 +400,8 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         }
 
         // Check for negative densities
-        if (0..n.min(ntot)).any(|j| s.xr[j] <= 0.0) {
+        if let Some(j) = (0..n.min(ntot)).find(|&j| s.xr[j] <= 0.0) {
+            retry_probe_newrax_negative(s, iter + 1, j);
             return 1;
         }
     }
@@ -394,32 +413,149 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
     0
 }
 
+fn retry_probe_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("PRATMO_RETRY_PROBE")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+            .unwrap_or(false)
+    })
+}
+
+fn retry_probe_hhmm(s: &ModelState) -> i32 {
+    if s.ittt <= 0 {
+        return 0;
+    }
+    let idx = (s.ittt as usize).saturating_sub(1);
+    s.nhhmm.get(idx).copied().unwrap_or(0)
+}
+
+fn retry_probe_species(s: &ModelState, j: usize) -> &str {
+    let name = s.tname[j].trim();
+    if !name.is_empty() {
+        return name;
+    }
+    let name = s.tnamet[j].trim();
+    if !name.is_empty() {
+        return name;
+    }
+    "UNKNOWN"
+}
+
+fn retry_probe_slot_value(s: &ModelState, species: usize) -> f64 {
+    let slot = s.n[species];
+    if slot >= 1 && slot <= NDEN {
+        s.xr[slot - 1]
+    } else {
+        f64::NAN
+    }
+}
+
+fn retry_probe_newraf(s: &ModelState, phase: &str, code: i32, cut_depth: usize) {
+    if !retry_probe_enabled() {
+        return;
+    }
+    eprintln!(
+        "PRATMO_RETRY newraf phase={} code={} cut_depth={} box={} alt={} ittt={} hhmm={} deltt={:.6e} gmu={:.6e} no2={:.6e} bro={:.6e}",
+        phase,
+        code,
+        cut_depth,
+        s.ibox + 1,
+        s.ialt + 1,
+        s.ittt,
+        retry_probe_hhmm(s),
+        s.deltt,
+        s.gmu,
+        retry_probe_slot_value(s, 1),
+        retry_probe_slot_value(s, 11),
+    );
+}
+
+fn retry_probe_newrax_negative(s: &ModelState, iter: usize, j: usize) {
+    if !retry_probe_enabled() {
+        return;
+    }
+    eprintln!(
+        "PRATMO_RETRY newrax code=1 reason=negative box={} alt={} ittt={} hhmm={} deltt={:.6e} gmu={:.6e} iter={} slot={} species={} value={:.6e} no2={:.6e} bro={:.6e}",
+        s.ibox + 1,
+        s.ialt + 1,
+        s.ittt,
+        retry_probe_hhmm(s),
+        s.deltt,
+        s.gmu,
+        iter,
+        j + 1,
+        retry_probe_species(s, j),
+        s.xr[j],
+        retry_probe_slot_value(s, 1),
+        retry_probe_slot_value(s, 11),
+    );
+}
+
+fn retry_probe_newrax_nonconverged(
+    s: &ModelState,
+    iter: usize,
+    errpl: f64,
+    errpl_j: usize,
+    errxo: f64,
+) {
+    if !retry_probe_enabled() {
+        return;
+    }
+    eprintln!(
+        "PRATMO_RETRY newrax code=2 reason=nonconverged box={} alt={} ittt={} hhmm={} deltt={:.6e} gmu={:.6e} iter={} errpl={:.6e} errpl_slot={} errpl_species={} errxo={:.6e} no2={:.6e} bro={:.6e}",
+        s.ibox + 1,
+        s.ialt + 1,
+        s.ittt,
+        retry_probe_hhmm(s),
+        s.deltt,
+        s.gmu,
+        iter,
+        errpl,
+        errpl_j + 1,
+        retry_probe_species(s, errpl_j),
+        errxo,
+        retry_probe_slot_value(s, 1),
+        retry_probe_slot_value(s, 11),
+    );
+}
+
 // ── LINSLV — Crout LU decomposition + solve ───────────────────────────────────
 
 /// Partial-pivoting LU decomposition of s.a_mat, then forward/back solve.
 /// Modifies s.a_mat in-place and stores pivots in s.ipa.
 /// Fortran: SUBROUTINE LINSLV(B, X, N)
 pub fn linslv(s: &mut ModelState, b: &[f64], x: &mut [f64], n: usize) {
+    if n == 30 {
+        linslv_fixed::<30>(s, b, x);
+        return;
+    }
+    if n == 40 {
+        linslv_fixed::<40>(s, b, x);
+        return;
+    }
+
     // Crout decomposition with partial pivoting on the A matrix
-    // (Fortran stores A column-major; we use row-major Array2 but the algorithm
-    //  applies to the same logical matrix)
+    // Use the Array2 backing storage as a column-major Newton matrix so the
+    // Crout column updates walk contiguous memory, matching the Fortran access pattern.
     let mut s_col = [0.0f64; NDEN];
+    let a = s.a_mat.as_slice_mut().expect("a_mat is contiguous");
 
     for kr in 0..n {
         // Copy column KR of A into S
-        for k in 0..n {
-            s_col[k] = s.a_mat[[k, kr]];
-        }
+        let kr_col = kr * NDEN;
+        s_col[..n].copy_from_slice(&a[kr_col..kr_col + n]);
 
         // Apply previous eliminations
         if kr > 0 {
             for j in 0..kr {
                 let jp = s.ipa[j];
-                s.a_mat[[j, kr]] = s_col[jp];
+                a[kr_col + j] = s_col[jp];
                 s_col[jp] = s_col[j];
-                let ajkr = s.a_mat[[j, kr]];
+                let ajkr = a[kr_col + j];
+                let j_col = j * NDEN;
                 for i in j + 1..n {
-                    s_col[i] -= s.a_mat[[i, j]] * ajkr;
+                    s_col[i] -= a[j_col + i] * ajkr;
                 }
             }
         }
@@ -434,18 +570,88 @@ pub fn linslv(s: &mut ModelState, b: &[f64], x: &mut [f64], n: usize) {
             }
         }
         s.ipa[kr] = krmax;
-        s.a_mat[[kr, kr]] = s_col[krmax];
+        a[kr_col + kr] = s_col[krmax];
         let div = 1.0 / s_col[krmax];
         s_col[krmax] = s_col[kr];
 
         if kr < n - 1 {
             for i in kr + 1..n {
-                s.a_mat[[i, kr]] = s_col[i] * div;
+                a[kr_col + i] = s_col[i] * div;
             }
         }
     }
 
     resolv_in_place(s, b, x);
+}
+
+fn linslv_fixed<const N: usize>(s: &mut ModelState, b: &[f64], x: &mut [f64]) {
+    let mut s_col = [0.0f64; NDEN];
+    let a = s.a_mat.as_slice_mut().expect("a_mat is contiguous");
+
+    for kr in 0..N {
+        let kr_col = kr * NDEN;
+        s_col[..N].copy_from_slice(&a[kr_col..kr_col + N]);
+
+        if kr > 0 {
+            for j in 0..kr {
+                let jp = s.ipa[j];
+                a[kr_col + j] = s_col[jp];
+                s_col[jp] = s_col[j];
+                let ajkr = a[kr_col + j];
+                let j_col = j * NDEN;
+                for i in j + 1..N {
+                    s_col[i] -= a[j_col + i] * ajkr;
+                }
+            }
+        }
+
+        let mut smax = s_col[kr].abs();
+        let mut krmax = kr;
+        for i in kr..N {
+            if s_col[i].abs() >= smax {
+                krmax = i;
+                smax = s_col[i].abs();
+            }
+        }
+        s.ipa[kr] = krmax;
+        a[kr_col + kr] = s_col[krmax];
+        let div = 1.0 / s_col[krmax];
+        s_col[krmax] = s_col[kr];
+
+        if kr < N - 1 {
+            for i in kr + 1..N {
+                a[kr_col + i] = s_col[i] * div;
+            }
+        }
+    }
+
+    resolv_fixed::<N>(s, b, x);
+}
+
+fn resolv_fixed<const N: usize>(s: &ModelState, b: &[f64], x: &mut [f64]) {
+    let mut sv = [0.0f64; NDEN];
+    let a = s.a_mat.as_slice().expect("a_mat is contiguous");
+    sv[..N].copy_from_slice(&b[..N]);
+
+    for i in 0..N {
+        let ip = s.ipa[i];
+        x[i] = sv[ip];
+        sv[ip] = sv[i];
+        if i < N - 1 {
+            let i_col = i * NDEN;
+            for j in i + 1..N {
+                sv[j] -= a[i_col + j] * x[i];
+            }
+        }
+    }
+
+    for i in (0..N).rev() {
+        let mut sum = x[i];
+        for j in i + 1..N {
+            sum -= a[j * NDEN + i] * x[j];
+        }
+        x[i] = sum / a[i * NDEN + i];
+    }
 }
 
 // ── RESOLV — back-solve with stored LU ───────────────────────────────────────
@@ -455,6 +661,7 @@ pub fn linslv(s: &mut ModelState, b: &[f64], x: &mut [f64], n: usize) {
 pub fn resolv_in_place(s: &ModelState, b: &[f64], x: &mut [f64]) {
     let n = b.len();
     let mut sv = [0.0f64; NDEN];
+    let a = s.a_mat.as_slice().expect("a_mat is contiguous");
     for i in 0..n { sv[i] = b[i]; }
 
     // Forward substitution with pivoting
@@ -463,8 +670,9 @@ pub fn resolv_in_place(s: &ModelState, b: &[f64], x: &mut [f64]) {
         x[i] = sv[ip];
         sv[ip] = sv[i];
         if i < n - 1 {
+            let i_col = i * NDEN;
             for j in i + 1..n {
-                sv[j] -= s.a_mat[[j, i]] * x[i];
+                sv[j] -= a[i_col + j] * x[i];
             }
         }
     }
@@ -473,9 +681,9 @@ pub fn resolv_in_place(s: &ModelState, b: &[f64], x: &mut [f64]) {
     for i in (0..n).rev() {
         let mut sum = x[i];
         for j in i + 1..n {
-            sum -= s.a_mat[[i, j]] * x[j];
+            sum -= a[j * NDEN + i] * x[j];
         }
-        x[i] = sum / s.a_mat[[i, i]];
+        x[i] = sum / a[i * NDEN + i];
     }
 }
 

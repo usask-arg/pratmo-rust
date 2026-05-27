@@ -317,6 +317,8 @@ class DiurnConfig:
     integration_days: int
     boxes: list[DiurnBoxSpec]
     bromine: bool
+    iodine: bool
+    parallel_boxes: bool
     solar_flux_scale: float
     initial_mixing_ratios: Optional[list[LongLivedMixingRatios]]
     def __init__(
@@ -327,6 +329,8 @@ class DiurnConfig:
         integration_days: int = 20,
         boxes: list[DiurnBoxSpec] = [],
         bromine: bool = False,
+        iodine: bool = True,
+        parallel_boxes: bool = False,
         solar_flux_scale: float = 1.0,
         initial_mixing_ratios: Optional[list[LongLivedMixingRatios]] = None,
     ) -> None: ...

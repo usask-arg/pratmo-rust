@@ -15,7 +15,7 @@ use anyhow::Result;
 use crate::{
     constants::{NB, NL},
     ctm::ctmlfq,
-    diurnal::diurn,
+    diurnal::{diurn, diurn_parallel_boxes},
     path::tpath,
     reader::{FortranReader, ModelReader, setday},
     state::ModelState,
@@ -393,6 +393,8 @@ pub struct DiurnConfig {
     pub integration_days: u32,
     pub boxes: Vec<DiurnBoxSpec>,
     pub bromine: bool,
+    pub iodine: bool,
+    pub parallel_boxes: bool,
     pub solar_flux_scale: f64,
     /// One `LongLivedMixingRatios` per box; must match `boxes.len()` if provided.
     pub initial_mixing_ratios: Option<Vec<LongLivedMixingRatios>>,
@@ -406,6 +408,8 @@ impl Default for DiurnConfig {
             integration_days: 20,
             boxes: Vec::new(),
             bromine: false,
+            iodine: true,
+            parallel_boxes: false,
             solar_flux_scale: 1.0,
             initial_mixing_ratios: None,
         }
@@ -570,7 +574,11 @@ impl PratmoModel {
         s.out_unit8 = None;
         s.out_unit9 = None;
 
-        diurn(&mut s)?;
+        if cfg.parallel_boxes {
+            diurn_parallel_boxes(&mut s)?;
+        } else {
+            diurn(&mut s)?;
+        }
         tpath(&mut s)?;
 
         Ok(extract_diurn_output(&s))
@@ -683,6 +691,49 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) {
             let ialt = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
             s.do3[ib] = s.fo3[ib] * s.dm[ialt];
         }
+    }
+
+    if !cfg.iodine {
+        disable_iodine(s);
+    }
+}
+
+fn disable_iodine(s: &mut ModelState) {
+    s.liod = false;
+
+    for j in 30..40 {
+        s.n[j] = 0;
+        s.ntsav[j] = 0;
+    }
+    s.ntotx = s.ntotx.min(30);
+    s.ntot = s.ntot.min(30);
+
+    let mut nnr = 0usize;
+    for j in 0..s.nnr {
+        let species = s.nnrt[j];
+        if species <= 30 {
+            s.nnrt[nnr] = species;
+            nnr += 1;
+        }
+    }
+    for j in nnr..s.nnrt.len() {
+        s.nnrt[j] = 0;
+    }
+    s.nnr = nnr;
+
+    for ib in 0..NB {
+        s.fiodx[ib] = 0.0;
+        s.fi2[ib] = 0.0;
+        s.di_[ib] = 0.0;
+        s.dio[ib] = 0.0;
+        s.dhoi[ib] = 0.0;
+        s.diono2[ib] = 0.0;
+        s.dhi[ib] = 0.0;
+        s.doio[ib] = 0.0;
+        s.di2[ib] = 0.0;
+        s.di2o2[ib] = 0.0;
+        s.di2o3[ib] = 0.0;
+        s.di2o4[ib] = 0.0;
     }
 }
 

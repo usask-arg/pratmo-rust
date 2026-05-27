@@ -787,6 +787,10 @@ struct PyDiurnConfig {
     #[pyo3(get, set)]
     bromine: bool,
     #[pyo3(get, set)]
+    iodine: bool,
+    #[pyo3(get, set)]
+    parallel_boxes: bool,
+    #[pyo3(get, set)]
     solar_flux_scale: f64,
     #[pyo3(get, set)]
     initial_mixing_ratios: Option<Vec<PyLongLivedMixingRatios>>,
@@ -801,6 +805,8 @@ impl PyDiurnConfig {
         integration_days=20,
         boxes=vec![],
         bromine=false,
+        iodine=true,
+        parallel_boxes=false,
         solar_flux_scale=1.0,
         initial_mixing_ratios=None
     ))]
@@ -810,6 +816,8 @@ impl PyDiurnConfig {
         integration_days: u32,
         boxes: Vec<PyDiurnBoxSpec>,
         bromine: bool,
+        iodine: bool,
+        parallel_boxes: bool,
         solar_flux_scale: f64,
         initial_mixing_ratios: Option<Vec<PyLongLivedMixingRatios>>,
     ) -> Self {
@@ -819,6 +827,8 @@ impl PyDiurnConfig {
             integration_days,
             boxes,
             bromine,
+            iodine,
+            parallel_boxes,
             solar_flux_scale,
             initial_mixing_ratios,
         }
@@ -841,6 +851,8 @@ impl PyDiurnConfig {
                 })
                 .collect(),
             bromine: self.bromine,
+            iodine: self.iodine,
+            parallel_boxes: self.parallel_boxes,
             solar_flux_scale: self.solar_flux_scale,
             initial_mixing_ratios: self.initial_mixing_ratios.as_ref().map(|v| {
                 v.iter().map(|mr| mr.inner.clone()).collect()

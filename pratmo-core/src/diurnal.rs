@@ -3,14 +3,15 @@
 
 use anyhow::{bail, Result};
 use ndarray::Array2;
+use rayon::prelude::*;
 
 use crate::{
     chemistry::{chems, setupr},
+    constants::{NDEN, NNDXPQ, NPMEAN, NSLOWM},
     jvalue::sol,
     output,
-    solver::{rplace, splace, fixrat, fixmix, linslv},
+    solver::{fixmix, fixrat, linslv, rplace, splace},
     state::ModelState,
-    constants::{NPMEAN, NSLOWM, NNDXPQ, NDEN},
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -123,6 +124,105 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
     // PRTRAT if NBOXWT(1) != 0
     if s.nboxwt[0] != 0 {
         output::prtrat(s, 1);
+    }
+
+    s.lsvjac = false;
+    s.lsvday = false;
+    Ok(())
+}
+
+struct BoxDiurnResult {
+    ib: usize,
+    state: ModelState,
+}
+
+/// Parallel DIURN variant for structured API runs.
+///
+/// Each active box is solved in an isolated clone of the prepared model state,
+/// then per-box outputs are merged back in deterministic box order. File-backed
+/// Fortran-style output is intentionally not supported here; callers with output
+/// units attached fall back to the sequential DIURN path.
+pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
+    if s.out_unit7.is_some() || s.out_unit8.is_some() || s.out_unit9.is_some() || s.nbox <= 1 {
+        return diurn(s);
+    }
+
+    let jobs: Vec<usize> = (0..s.nbox)
+        .filter(|&ib| {
+            let ialt_abs = s.nboxdo[ib].unsigned_abs() as usize;
+            ialt_abs != 0 && ialt_abs <= s.nc
+        })
+        .collect();
+
+    let base = s.clone();
+    let results: Result<Vec<BoxDiurnResult>> = jobs
+        .into_par_iter()
+        .map(|ib| {
+            let mut worker = base.clone();
+            worker.out_unit7 = None;
+            worker.out_unit8 = None;
+            worker.out_unit9 = None;
+            worker.ibox = ib;
+            worker.izalt = 0;
+            worker.ialt = worker.nboxdo[ib].unsigned_abs() as usize - 1;
+            worker.lresol = true;
+            worker.lsvjac = false;
+            worker.lsvday = false;
+
+            if worker.nboxdo[ib] > 0 {
+                rafday(&mut worker, ib)?;
+            } else {
+                let mut xnold = worker.xnold;
+                rplace(&worker, &mut xnold, ib);
+                worker.xnold = xnold;
+                daily(&mut worker, 1)?;
+            }
+
+            Ok(BoxDiurnResult { ib, state: worker })
+        })
+        .collect();
+
+    let mut results = results?;
+    results.sort_by_key(|r| r.ib);
+
+    s.raxloop = 0.0;
+    s.radcount = 0.0;
+    for result in results {
+        let ib = result.ib;
+        let worker = result.state;
+
+        for spec in 0..NDEN {
+            let val = worker.den_get(ib, spec);
+            s.den_set(ib, spec, val);
+        }
+        for family in 1..=19 {
+            let val = worker.fff_get(ib, family);
+            s.fff_set(ib, family, val);
+        }
+        for jj in 0..s.njval {
+            let val = worker.jval_get(ib, jj);
+            s.jval_set(ib, jj, val);
+        }
+        for kt in 0..s.ntimdo {
+            for kn in 0..s.ntotx {
+                s.xxnoft[[kn, kt, ib]] = worker.xnoft[[kn, kt]];
+            }
+        }
+        for k in 0..30usize {
+            s.ppmean[[k, ib]] = worker.pmean[460 + k];
+        }
+        for k in 0..20usize {
+            s.ppmean[[30 + k, ib]] = worker.pmean[430 + k];
+        }
+        for k in 0..NNDXPQ {
+            let ndx = s.ndxpp[k];
+            if ndx > 0 {
+                s.ppmean[[50 + k, ib]] = worker.pmean[30 + ndx - 1];
+            }
+        }
+
+        s.raxloop += worker.raxloop;
+        s.radcount += worker.radcount;
     }
 
     s.lsvjac = false;
@@ -393,9 +493,10 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
         s.lprtx = save_lprtx;
 
         // Copy FXDDER into A matrix for LINSLV
+        let a = s.a_mat.as_slice_mut().expect("a_mat is contiguous");
         for j in 0..nnr {
             for jj in 0..nnr {
-                s.a_mat[[jj, j]] = fxdder[[jj, j]];
+                a[j * NDEN + jj] = fxdder[[jj, j]];
             }
         }
         let mut xo_vec = vec![0.0f64; nnr];

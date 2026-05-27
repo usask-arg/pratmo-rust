@@ -236,6 +236,22 @@ pub fn setupr(s: &mut ModelState) {
         s.ratek[227] = fk(tt, 227);                     // HI + OH → I + H2O
         s.ratek[228] = fk(tt, 228);                     // IO + ClO → Cl + I + O2
         s.ratek[229] = fk(tt, 229);                     // IO + BrO → Br + I + O2
+        s.ratek[234] = fk(tt, 234);                     // IO + IO → OIO + I
+        s.ratek[235] = fk(tt, 235);                     // IO + IO → I2 + O2
+        s.ratek[236] = fknasa(tt300, zdnum, 236, s);    // IO + IO + M → I2O2
+        s.ratek[237] = fk(tt, 237);                     // OIO + NO → IO + NO2
+        s.ratek[238] = fk(tt, 238);                     // OIO + OH → HOI + O2
+        s.ratek[239] = fk(tt, 239);                     // IO + OIO → I2O3
+        s.ratek[240] = fk(tt, 240);                     // OIO + OIO → I2O4
+        s.ratek[241] = fk(tt, 241);                     // I2 + OH → HOI + I
+        // Saiz-Lopez et al. (2014) Table 3 sea-salt heterogeneous uptake.
+        // PRATMO does not yet carry IBr/ICl, so HOI/IONO2 uptake is folded
+        // back to atomic iodine as an iodine-conserving recycling proxy.
+        s.ratek[91]  = 0.06 * zaersl;                    // HOI → 0.5 IBr + 0.5 ICl
+        s.ratek[92]  = 0.01 * zaersl;                    // IONO2 → 0.5 IBr + 0.5 ICl
+        s.ratek[242] = 0.01 * zaersl;                    // I2O2 sea-salt uptake
+        s.ratek[248] = 0.01 * zaersl;                    // I2O3 sea-salt uptake
+        s.ratek[249] = 0.01 * zaersl;                    // I2O4 sea-salt uptake
     }
 
     // Heterogeneous reactions 170–177 via hetprob
@@ -359,6 +375,11 @@ pub fn chems(s: &mut ModelState) {
     let xhoi   = if s.liod && n[32] > 0 { xr(s, n[32]) } else { 0.0 };
     let xiono2 = if s.liod && n[33] > 0 { xr(s, n[33]) } else { 0.0 };
     let xhi    = if s.liod && n[34] > 0 { xr(s, n[34]) } else { 0.0 };
+    let xoio   = if s.liod && n[35] > 0 { xr(s, n[35]) } else { 0.0 };
+    let xi2    = if s.liod && n[36] > 0 { xr(s, n[36]) } else { 0.0 };
+    let xi2o2  = if s.liod && n[37] > 0 { xr(s, n[37]) } else { 0.0 };
+    let xi2o3  = if s.liod && n[38] > 0 { xr(s, n[38]) } else { 0.0 };
+    let xi2o4  = if s.liod && n[39] > 0 { xr(s, n[39]) } else { 0.0 };
     let _xtbr  = s.fbrx[ib] * xnum;
     let _xch3br = s.fch3br[ib] * xnum;
     let xxxx   = s.fxxx[ib] * xnum;
@@ -422,6 +443,11 @@ pub fn chems(s: &mut ModelState) {
     let jvio    = s.vio[iv];
     let jvhoi   = s.vhoi[iv];
     let jviono2 = s.viono2[iv];
+    let jvoio   = s.voio[iv];
+    let jvi2    = s.vi2[iv];
+    let jvi2o2  = s.vi2o2[iv];
+    let jvi2o3  = s.vi2o3[iv];
+    let jvi2o4  = s.vi2o4[iv];
     let _ = (jvchbr3, jvcf3i); // not used in CHEMS directly
 
     // ── Reaction rates (0-based: r[0]=R(1), r[1]=R(2), ...) ─────────────────
@@ -652,6 +678,24 @@ pub fn chems(s: &mut ModelState) {
         r[231] = jvhoi   * xhoi;                       // HOI + hν → I + OH
         r[232] = jviono2 * xiono2;                     // IONO2 + hν → products
         r[233] = 0.0; // CH3I source suppressed: fiodx is inorganic Iy, not CH3I
+        r[234] = s.ratek[234] * xio  * xio;            // IO + IO → OIO + I
+        r[235] = s.ratek[235] * xio  * xio;            // IO + IO → I2 + O2
+        r[236] = s.ratek[236] * xio  * xio;            // IO + IO + M → I2O2
+        r[237] = s.ratek[237] * xoio * xno;            // OIO + NO → IO + NO2
+        r[238] = s.ratek[238] * xoio * xoh;            // OIO + OH → HOI + O2
+        r[239] = s.ratek[239] * xio  * xoio;           // IO + OIO → I2O3
+        r[240] = s.ratek[240] * xoio * xoio;           // OIO + OIO → I2O4
+        r[241] = s.ratek[241] * xi2  * xoh;            // I2 + OH → HOI + I
+        r[91]  = s.ratek[91]  * xhoi;                  // HOI sea-salt recycling
+        r[92]  = s.ratek[92]  * xiono2;                // IONO2 sea-salt recycling
+        r[242] = s.ratek[242] * xi2o2;                 // I2O2 sea-salt uptake
+        r[243] = jvoio  * xoio;                        // OIO + hν → I + O2
+        r[244] = jvi2   * xi2;                         // I2 + hν → 2I
+        r[245] = jvi2o2 * xi2o2;                       // I2O2 + hν → 2IO
+        r[246] = jvi2o3 * xi2o3;                       // I2O3 + hν → IO + OIO
+        r[247] = jvi2o4 * xi2o4;                       // I2O4 + hν → 2OIO
+        r[248] = s.ratek[248] * xi2o3;                 // I2O3 sea-salt uptake
+        r[249] = s.ratek[249] * xi2o4;                 // I2O4 sea-salt uptake
     }
 
     // ── O(1D) instant steady-state ───────────────────────────────────────────
@@ -808,26 +852,28 @@ pub fn chempl(s: &mut ModelState) {
     if s.liod {
         // I (atomic iodine)
         if n[30] > 0 {
-            rp[idx(n[30])] = r[222]+r[223]+r[227]+r[228]+r[229]+r[230]+r[231];
+            rp[idx(n[30])] = r[222]+r[223]+r[227]+r[228]+r[229]+r[230]+r[231]
+                +r[234]+r[241]+r[243]+2.0*r[244]+r[91]+r[92];
             rl[idx(n[30])] = r[221]+r[226];
         }
 
         // IO — IONO2+hν→IO+NO2 is the main photolysis channel (JPL 2019, by analogy with BrONO2)
         if n[31] > 0 {
-            rp[idx(n[31])] = r[221]+r[232];
-            rl[idx(n[31])] = r[222]+r[223]+r[224]+r[225]+r[228]+r[229]+r[230];
+            rp[idx(n[31])] = r[221]+r[232]+r[237]+2.0*r[245]+r[246];
+            rl[idx(n[31])] = r[222]+r[223]+r[224]+r[225]+r[228]+r[229]+r[230]
+                +2.0*r[234]+2.0*r[235]+2.0*r[236]+r[239];
         }
 
         // HOI
         if n[32] > 0 {
-            rp[idx(n[32])] = r[224];
-            rl[idx(n[32])] = r[231];
+            rp[idx(n[32])] = r[224]+r[238]+r[241];
+            rl[idx(n[32])] = r[231]+r[91];
         }
 
         // IONO2
         if n[33] > 0 {
             rp[idx(n[33])] = r[225];
-            rl[idx(n[33])] = r[232];
+            rl[idx(n[33])] = r[232]+r[92];
         }
 
         // HI
@@ -835,18 +881,48 @@ pub fn chempl(s: &mut ModelState) {
             rp[idx(n[34])] = r[226];
             rl[idx(n[34])] = r[227];
         }
+
+        // OIO
+        if n[35] > 0 {
+            rp[idx(n[35])] = r[234]+r[246]+2.0*r[247];
+            rl[idx(n[35])] = r[237]+r[238]+r[239]+2.0*r[240]+r[243];
+        }
+
+        // I2
+        if n[36] > 0 {
+            rp[idx(n[36])] = r[235];
+            rl[idx(n[36])] = r[241]+r[244];
+        }
+
+        // I2O2
+        if n[37] > 0 {
+            rp[idx(n[37])] = r[236];
+            rl[idx(n[37])] = r[245]+r[242];
+        }
+
+        // I2O3
+        if n[38] > 0 {
+            rp[idx(n[38])] = r[239];
+            rl[idx(n[38])] = r[246]+r[248];
+        }
+
+        // I2O4
+        if n[39] > 0 {
+            rp[idx(n[39])] = r[240];
+            rl[idx(n[39])] = r[247]+r[249];
+        }
     }
 
     // NO
     rp[idx(n[0])]  = r[79]+r[77]+r[19]+r[18]+r[68]     +r[177];
     rl[idx(n[0])]  = r[22]+r[78]+r[41]+r[20]+r[66]+r[50]+r[206]+r[115]+r[162]
-                    +r[223];   // IO + NO → I + NO2
+                    +r[223]+r[237];   // iodine + NO → NO2
 
     // NO2
     rp[idx(n[1])]  = r[62]+r[22]+r[78]+r[78]+r[76]+r[83]+r[82]+r[122]
                     +r[35]+r[41]+r[20]+r[69]+r[50]+r[75]+r[104]+r[206]
                     +r[72]+r[214]+r[115]+r[123]+r[162]+r[166]+r[172]+r[178]
-                    +r[223]+r[232];   // IO+NO→I+NO2 and IONO2 photolysis
+                    +r[223]+r[232]+r[237];   // iodine NO2 production
     rl[idx(n[1])]  = r[27]+r[23]+r[81]+r[19]+r[18]+r[67]+r[71]+r[121]+r[213]
                     +r[61]
                     +r[225];   // IO + NO2 + M → IONO2
@@ -870,7 +946,7 @@ pub fn chempl(s: &mut ModelState) {
                     +r[39]+r[61]+r[63]+r[48]+r[54]+r[57]+r[66]+r[69]
                     +r[94]+r[119]+r[75]+r[200]+r[212]+r[147]
                     +r[99]+r[142]+r[144]+r[126]+r[129]+r[163] +r[149]
-                    +r[227];   // HI + OH → I + H2O
+                    +r[227]+r[238]+r[241];   // iodine + OH sinks
 
     // HO2
     rp[idx(n[7])]  = r[31]+r[17]+r[25]+r[40]+r[72]+r[108] +r[149]
@@ -1219,6 +1295,24 @@ pub fn rhslhs(s: &mut ModelState, ido: i32) -> DVector<f64> {
             rct!(r[231], n[32] as i32, 0, 0, n[30] as i32, n[6] as i32);          // HOI + hν → I + OH
             rct!(r[232], n[33] as i32, 0, 0, n[30] as i32, n[1] as i32);          // IONO2 + hν → I + NO2
             // r[233] is a constant source (no variable reactant); no Jacobian entry
+            rct!(r[234], n[31] as i32, n[31] as i32, 0, n[35] as i32, n[30] as i32); // IO + IO → OIO + I
+            rct!(r[235], n[31] as i32, n[31] as i32, 0, n[36] as i32, 0);         // IO + IO → I2 + O2
+            rct!(r[236], n[31] as i32, n[31] as i32, 0, n[37] as i32, 0);         // IO + IO + M → I2O2
+            rct!(r[237], n[35] as i32, n[0] as i32, 0, n[31] as i32, n[1] as i32); // OIO + NO → IO + NO2
+            rct!(r[238], n[35] as i32, n[6] as i32, 0, n[32] as i32, 0);          // OIO + OH → HOI + O2
+            rct!(r[239], n[31] as i32, n[35] as i32, 0, n[38] as i32, 0);         // IO + OIO → I2O3
+            rct!(r[240], n[35] as i32, n[35] as i32, 0, n[39] as i32, 0);         // OIO + OIO → I2O4
+            rct!(r[241], n[36] as i32, n[6] as i32, 0, n[32] as i32, n[30] as i32); // I2 + OH → HOI + I
+            rct!(r[91],  n[32] as i32, 0, 0, n[30] as i32, 0);                   // HOI sea-salt recycling proxy
+            rct!(r[92],  n[33] as i32, 0, 0, n[30] as i32, 0);                   // IONO2 sea-salt recycling proxy
+            rct!(r[242], n[37] as i32, 0, 0, 0, 0);                              // I2O2 sea-salt uptake
+            rct!(r[243], n[35] as i32, 0, 0, n[30] as i32, 0);                   // OIO + hν → I + O2
+            rct!(r[244], n[36] as i32, 0, 0, n[30] as i32, n[30] as i32);         // I2 + hν → 2I
+            rct!(r[245], n[37] as i32, 0, 0, n[31] as i32, n[31] as i32);         // I2O2 + hν → 2IO
+            rct!(r[246], n[38] as i32, 0, 0, n[31] as i32, n[35] as i32);         // I2O3 + hν → IO + OIO
+            rct!(r[247], n[39] as i32, 0, 0, n[35] as i32, n[35] as i32);         // I2O4 + hν → 2OIO
+            rct!(r[248], n[38] as i32, 0, 0, 0, 0);                              // I2O3 sea-salt uptake
+            rct!(r[249], n[39] as i32, 0, 0, 0, 0);                              // I2O4 sea-salt uptake
         }
 
         // Divide by species densities to get d/dX out of loss

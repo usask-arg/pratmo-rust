@@ -339,14 +339,14 @@ impl ModelReader for FortranReader {
             }
         }
 
-        // fort10 has NTAB=40 standard species, then 16 extra organics, then 3 iodine species.
+        // fort10 has NTAB=40 standard species, then extra organics, then iodine species.
         // NQQQ in the file header counts organics as part of the total (=43), so a naive loop
         // over nqqq would fill slots 40-42 with organics instead of iodine cross-sections.
         // Fix: read exactly NTAB standard species, then scan remaining entries by title to find
-        // J(IO), J(HOI), J(IONO2) and store them at jq = NTAB, NTAB+1, NTAB+2.
+        // iodine J-values and store them contiguously starting at jq = NTAB.
         let ntab = crate::constants::NTAB; // 40 standard tabulated species
-        let nxs  = crate::constants::NXS;  // 43 = 40 standard + 3 iodine
-        s.njval  = nxs + 4;               // 47 total J-values (overrides nqqq+4 from header)
+        let nxs  = crate::constants::NXS;  // 48 = 40 standard + 8 iodine
+        s.njval  = nxs + 4;               // 52 total J-values (overrides nqqq+4 from header)
 
         // Phase 1: read NTAB standard QQQ species
         for jq in 0..ntab {
@@ -364,12 +364,17 @@ impl ModelReader for FortranReader {
             }
         }
 
-        // Phase 2: scan remaining species pairs (organics then iodine) looking for
-        // J(IO), J(HOI), J(IONO2) by title. Organics are read and discarded.
+        // Phase 2: scan remaining species pairs (organics then iodine) looking for iodine.
+        // Organics are read and discarded.
         let iodine_keys: &[(&str, usize)] = &[
             ("J(IO)",    ntab),
             ("J(HOI)",   ntab + 1),
             ("J(IONO2)", ntab + 2),
+            ("J(OIO)",   ntab + 3),
+            ("J(I2)",    ntab + 4),
+            ("J(I2O2)",  ntab + 5),
+            ("J(I2O3)",  ntab + 6),
+            ("J(I2O4)",  ntab + 7),
         ];
         let n_iodine = nxs - ntab;
         let mut iod_found = 0usize;
@@ -934,10 +939,9 @@ impl ModelReader for FortranReader {
             s.nrates = s.nrate1;
         }
 
-        // Iodine flag — species at n[30..34] (1-based N31..N35)
+        // Iodine flag — species at n[30..39] (1-based N31..N40)
         s.liod = s.ntotx > 30
-            && (s.n[30] <= s.ntot || s.n[31] <= s.ntot || s.n[32] <= s.ntot
-                || s.n[33] <= s.ntot || s.n[34] <= s.ntot);
+            && (30..40).any(|j| s.n[j] <= s.ntot);
 
         // Initialise XR to zero
         s.xr.iter_mut().for_each(|v| *v = 0.0);

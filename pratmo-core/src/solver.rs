@@ -55,6 +55,11 @@ pub fn rplace(s: &ModelState, xn: &mut [f64; NDEN], j: usize) {
         put(xn, n[32], s.dhoi[j]);
         put(xn, n[33], s.diono2[j]);
         put(xn, n[34], s.dhi[j]);
+        put(xn, n[35], s.doio[j]);
+        put(xn, n[36], s.di2[j]);
+        put(xn, n[37], s.di2o2[j]);
+        put(xn, n[38], s.di2o3[j]);
+        put(xn, n[39], s.di2o4[j]);
     }
 }
 
@@ -102,6 +107,11 @@ pub fn splace(s: &mut ModelState, xn: &[f64; NDEN], j: usize) {
         s.dhoi[j]   = get(xn, n[32]);
         s.diono2[j] = get(xn, n[33]);
         s.dhi[j]    = get(xn, n[34]);
+        s.doio[j]   = get(xn, n[35]);
+        s.di2[j]    = get(xn, n[36]);
+        s.di2o2[j]  = get(xn, n[37]);
+        s.di2o3[j]  = get(xn, n[38]);
+        s.di2o4[j]  = get(xn, n[39]);
     }
 }
 
@@ -236,12 +246,13 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
 
     // Iodine family closure (Iy linked to NOy via IONO2, analogous to BrONO2/ClONO2).
     if s.liod && n[30] > 0 && n[31] > 0 && n[32] > 0 && n[33] > 0 && n[34] > 0 {
-        let xxi = x[n[30] - 1] + x[n[31] - 1] + x[n[32] - 1] + x[n[34] - 1];
+        let xxi = x[n[30] - 1] + x[n[31] - 1] + x[n[32] - 1] + x[n[34] - 1]
+            + x[n[35] - 1] + 2.0 * (x[n[36] - 1] + x[n[37] - 1] + x[n[38] - 1] + x[n[39] - 1]);
         let xxin = x[n[33] - 1];
         let denom = xxi + rnoy * xxin;
         if denom > 1.0e-30 {
             let riyx = totiyx / denom;
-            for ni in [n[30], n[31], n[32], n[34]] {
+            for ni in [n[30], n[31], n[32], n[34], n[35], n[36], n[37], n[38], n[39]] {
                 x[ni - 1] *= riyx;
             }
             x[n[33] - 1] *= riyx * rnoy; // IONO2

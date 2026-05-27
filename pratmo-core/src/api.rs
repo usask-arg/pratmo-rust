@@ -62,6 +62,11 @@ pub struct ImplicitSpecies {
     pub hoi:   f64,
     pub iono2: f64,
     pub hi:    f64,
+    pub oio:   f64,
+    pub i2:    f64,
+    pub i2o2:  f64,
+    pub i2o3:  f64,
+    pub i2o4:  f64,
 }
 
 impl ImplicitSpecies {
@@ -102,6 +107,11 @@ impl ImplicitSpecies {
             hoi:    s.dhoi[ib],
             iono2:  s.diono2[ib],
             hi:     s.dhi[ib],
+            oio:    s.doio[ib],
+            i2:     s.di2[ib],
+            i2o2:   s.di2o2[ib],
+            i2o3:   s.di2o3[ib],
+            i2o4:   s.di2o4[ib],
         }
     }
 
@@ -131,6 +141,9 @@ impl ImplicitSpecies {
             i:      get(30), io:     get(31),
             hoi:    get(32), iono2:  get(33),
             hi:     get(34),
+            oio:    get(35), i2:     get(36),
+            i2o2:   get(37), i2o3:   get(38),
+            i2o4:   get(39),
         }
     }
 }
@@ -258,6 +271,11 @@ pub struct JValues {
     pub io: f64,
     pub hoi: f64,
     pub iono2: f64,
+    pub oio: f64,
+    pub i2: f64,
+    pub i2o2: f64,
+    pub i2o3: f64,
+    pub i2o4: f64,
 }
 
 impl JValues {
@@ -310,6 +328,11 @@ impl JValues {
             io:        s.vio[il],
             hoi:       s.vhoi[il],
             iono2:     s.viono2[il],
+            oio:       s.voio[il],
+            i2:        s.vi2[il],
+            i2o2:      s.vi2o2[il],
+            i2o3:      s.vi2o3[il],
+            i2o4:      s.vi2o4[il],
         }
     }
 }
@@ -657,6 +680,8 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) {
     if let Some(ref init_mr) = cfg.initial_mixing_ratios {
         for (ib, mr) in init_mr.iter().take(nbox).enumerate() {
             mr.apply_to_state(s, ib);
+            let ialt = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+            s.do3[ib] = s.fo3[ib] * s.dm[ialt];
         }
     }
 }

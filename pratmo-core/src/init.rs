@@ -122,11 +122,17 @@ pub fn ctinit(s: &mut ModelState, ib: usize, densbx: f64, lat: i32, _mon: i32) {
     // Partition following midday lower-stratosphere estimates
     if s.liod {
         let xxxiody = (s.fiodx[ib] * densbx).max(0.0);
+        let seed = 1.0e-30 * densbx;
         s.di_[ib]    = 0.200 * xxxiody;  // I
         s.dio[ib]    = 0.500 * xxxiody;  // IO
         s.dhoi[ib]   = 0.150 * xxxiody;  // HOI
         s.diono2[ib] = 0.100 * xxxiody;  // IONO2
         s.dhi[ib]    = 0.050 * xxxiody;  // HI
+        s.doio[ib]   = seed;
+        s.di2[ib]    = (s.fi2[ib] * densbx).max(seed);
+        s.di2o2[ib]  = seed;
+        s.di2o3[ib]  = seed;
+        s.di2o4[ib]  = seed;
     }
 
     let xxxppt = 1.0e-12 * densbx;

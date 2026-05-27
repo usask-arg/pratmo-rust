@@ -82,14 +82,42 @@ DEFAULT_PRESET = "NOx"
 
 model = PratmoModel.with_defaults()
 ALT_LEVELS = [8, 12, 18, 22]   # ~14, ~22, ~34, ~42 km
+O3_SCALE_FACTOR = 1.0 # multiply initial box O3; lower this to test less ozone
+NOY_SCALE_FACTOR = 1.0 # multiply initial total NOy; lower this to reduce NO2/IONO2
+AEROSOL_AREA_SCALE_FACTOR = 1.0 # scales BOXAA aerosol area for heterogeneous chemistry
+
+# DiurnBoxSpec's "albedo" argument is currently wired to legacy PRATMO BOXAA,
+# the aerosol surface-area factor used by heterogeneous chemistry.
+AEROSOL_AREA_BY_LEVEL = {
+    8: 1.0,
+    12: 0.05,
+    18: 0.0,
+    22: 0.0,
+}
+
 
 payload = {}
 for level in ALT_LEVELS:
+    aerosol_area = AEROSOL_AREA_BY_LEVEL.get(level, 0.0) * AEROSOL_AREA_SCALE_FACTOR
     cfg = DiurnConfig(
         latitude_deg=0.0, julian_day=120, integration_days=20,
-        boxes=[DiurnBoxSpec(altitude_level=level)],
+        boxes=[DiurnBoxSpec(altitude_level=level, albedo=aerosol_area)],
+        bromine=True
     )
     out = model.run_diurn(cfg)
+
+    if O3_SCALE_FACTOR != 1.0 or NOY_SCALE_FACTOR != 1.0:
+        init = out.boxes[0].long_lived
+        init.o3 *= O3_SCALE_FACTOR
+        init.noy *= NOY_SCALE_FACTOR
+        cfg = DiurnConfig(
+            latitude_deg=0.0, julian_day=120, integration_days=20,
+            boxes=[DiurnBoxSpec(altitude_level=level, albedo=aerosol_area)],
+            bromine=True,
+            initial_mixing_ratios=[init],
+        )
+        out = model.run_diurn(cfg)
+
     ts  = out.time_series[0]
     snap = out.boxes[0]
 
@@ -130,6 +158,7 @@ for level in ALT_LEVELS:
         "tick_text":   tick_text,
         "species":     sp_data,
         "night_spans": night_spans,
+        "o3_scale":    O3_SCALE_FACTOR,
     }
 
 # ── Build widget HTML ─────────────────────────────────────────────────────────

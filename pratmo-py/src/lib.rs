@@ -780,6 +780,8 @@ struct PyCustomAtmosphereProfile {
     #[pyo3(get, set)]
     temperature_k: Vec<f64>,
     #[pyo3(get, set)]
+    altitude_km: Option<Vec<f64>>,
+    #[pyo3(get, set)]
     o3: Vec<f64>,
     #[pyo3(get, set)]
     o3_kind: String,
@@ -788,14 +790,15 @@ struct PyCustomAtmosphereProfile {
 #[pymethods]
 impl PyCustomAtmosphereProfile {
     #[new]
-    #[pyo3(signature = (pressure_mb, temperature_k, o3, o3_kind="mixing_ratio".to_string()))]
+    #[pyo3(signature = (pressure_mb, temperature_k, o3, o3_kind="mixing_ratio".to_string(), altitude_km=None))]
     fn new(
         pressure_mb: Vec<f64>,
         temperature_k: Vec<f64>,
         o3: Vec<f64>,
         o3_kind: String,
+        altitude_km: Option<Vec<f64>>,
     ) -> Self {
-        Self { pressure_mb, temperature_k, o3, o3_kind }
+        Self { pressure_mb, temperature_k, altitude_km, o3, o3_kind }
     }
 
     fn __repr__(&self) -> String {
@@ -817,6 +820,7 @@ impl PyCustomAtmosphereProfile {
         Ok(CustomAtmosphereProfile {
             pressure_mb: self.pressure_mb.clone(),
             temperature_k: self.temperature_k.clone(),
+            altitude_km: self.altitude_km.clone(),
             o3: self.o3.clone(),
             o3_kind,
         })

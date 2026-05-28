@@ -29,6 +29,7 @@ def main() -> None:
     # volume mixing ratio; use o3_kind="number_density" for cm^-3 instead.
     pressure_mb = [80.0, 50.0, 30.0]
     temperature_k = [225.0, 220.0, 215.0]
+    altitude_km = [18.0, 21.0, 24.0]
     o3_vmr = [3.5e-6, 5.0e-6, 6.0e-6]
 
     observed_no2_cm3 = [2.0e8, 5.0e7, 1.0e7]
@@ -39,6 +40,7 @@ def main() -> None:
         temperature_k=temperature_k,
         o3=o3_vmr,
         o3_kind="mixing_ratio",
+        altitude_km=altitude_km,
     )
 
     diurn = DiurnConfig(
@@ -70,7 +72,10 @@ def main() -> None:
 
     print("Final NOy scale factors:")
     for i, scale in enumerate(result.noy_scale):
-        print(f"  box={i:02d} pressure={pressure_mb[i]:6.2f} mb scale={scale:.6g}")
+        print(
+            f"  box={i:02d} z={altitude_km[i]:5.1f} km "
+            f"pressure={pressure_mb[i]:6.2f} mb scale={scale:.6g}"
+        )
 
     print(f"\nModeled NO2 nearest {target_hhmm:04d} LST:")
     for i, value in enumerate(result.modeled_no2_cm3):

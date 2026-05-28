@@ -391,11 +391,13 @@ pub enum O3InputKind {
 /// Custom vertical atmosphere for DIURN runs.
 ///
 /// Pressures are in mb, temperatures in K. O3 values are either dimensionless
-/// mixing ratios or number densities depending on `o3_kind`.
+/// mixing ratios or number densities depending on `o3_kind`. If `altitude_km`
+/// is omitted, altitudes are estimated hydrostatically from pressure/temperature.
 #[derive(Debug, Clone)]
 pub struct CustomAtmosphereProfile {
     pub pressure_mb: Vec<f64>,
     pub temperature_k: Vec<f64>,
+    pub altitude_km: Option<Vec<f64>>,
     pub o3: Vec<f64>,
     pub o3_kind: O3InputKind,
 }
@@ -856,6 +858,11 @@ fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile
     if profile.temperature_k.len() != n || profile.o3.len() != n {
         bail!("custom atmosphere pressure, temperature, and O3 arrays must have equal length");
     }
+    if let Some(altitude_km) = &profile.altitude_km {
+        if altitude_km.len() != n {
+            bail!("custom atmosphere altitude_km length must match pressure length");
+        }
+    }
 
     let cboltz = 1.38e-19_f64;
     let po2 = s.po2;
@@ -889,12 +896,25 @@ fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile
         s.refo3[i] = s.do3ref[i];
     }
 
-    s.z[0] = 0.0;
-    for i in 1..n {
-        // Hypsometric estimate in cm using dry-air gas constant / g.
-        let tmean = 0.5 * (s.t[i - 1] + s.t[i]);
-        let dz_m = 29.263 * tmean * (s.pstd[i - 1] / s.pstd[i]).ln();
-        s.z[i] = s.z[i - 1] + dz_m * 100.0;
+    if let Some(altitude_km) = &profile.altitude_km {
+        for i in 0..n {
+            let zkm = altitude_km[i];
+            if !(zkm.is_finite() && zkm >= 0.0) {
+                bail!("custom atmosphere altitude_km at index {i} must be finite and non-negative");
+            }
+            if i > 0 && zkm <= altitude_km[i - 1] {
+                bail!("custom atmosphere altitude_km must increase with altitude");
+            }
+            s.z[i] = zkm * 1.0e5;
+        }
+    } else {
+        s.z[0] = 0.0;
+        for i in 1..n {
+            // Hypsometric estimate in cm using dry-air gas constant / g.
+            let tmean = 0.5 * (s.t[i - 1] + s.t[i]);
+            let dz_m = 29.263 * tmean * (s.pstd[i - 1] / s.pstd[i]).ln();
+            s.z[i] = s.z[i - 1] + dz_m * 100.0;
+        }
     }
 
     s.do3int[n - 1] = s.do3ref[n - 1] * s.zzht;

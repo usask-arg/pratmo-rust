@@ -14,6 +14,7 @@ fn custom_atmosphere_diurn_runs() {
         atmosphere: Some(CustomAtmosphereProfile {
             pressure_mb: vec![50.0],
             temperature_k: vec![220.0],
+            altitude_km: Some(vec![21.5]),
             o3: vec![5.0e-6],
             o3_kind: O3InputKind::MixingRatio,
         }),
@@ -25,6 +26,7 @@ fn custom_atmosphere_diurn_runs() {
     assert_eq!(out.time_series.len(), 1);
     assert!((out.boxes[0].pressure_mb - 50.0).abs() < 1e-12);
     assert!((out.boxes[0].temperature_k - 220.0).abs() < 1e-12);
+    assert!((out.boxes[0].altitude_km - 21.5).abs() < 1e-12);
     assert!(out.boxes[0].implicit.o3 > 0.0);
 }
 
@@ -40,6 +42,7 @@ fn no2_constrained_diurn_returns_scale() {
         atmosphere: Some(CustomAtmosphereProfile {
             pressure_mb: vec![50.0],
             temperature_k: vec![220.0],
+            altitude_km: Some(vec![21.5]),
             o3: vec![5.0e-6],
             o3_kind: O3InputKind::MixingRatio,
         }),

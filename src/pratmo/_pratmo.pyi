@@ -314,6 +314,7 @@ class CustomAtmosphereProfile:
 
     pressure_mb: list[float]
     temperature_k: list[float]
+    altitude_km: Optional[list[float]]
     o3: list[float]
     o3_kind: str
     def __init__(
@@ -322,6 +323,7 @@ class CustomAtmosphereProfile:
         temperature_k: list[float],
         o3: list[float],
         o3_kind: str = "mixing_ratio",
+        altitude_km: Optional[list[float]] = None,
     ) -> None: ...
 
 class DiurnConfig:

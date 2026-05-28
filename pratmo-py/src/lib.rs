@@ -7,9 +7,10 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use pratmo_core::api::{
+    CustomAtmosphereProfile,
     BoxSnapshot, CtmBoxSpec, CtmConfig, CtmOutput, Diagnostics, DiurnBoxSpec, DiurnBoxTimeSeries,
     DiurnConfig, DiurnOutput, DiurnTimeStep, ImplicitSpecies, JValues, LongLivedMixingRatios,
-    PratmoModel,
+    No2ConstrainedDiurnConfig, No2ConstrainedDiurnOutput, O3InputKind, PratmoModel,
 };
 
 // ── String-dispatch helpers ────────────────────────────────────────────────────
@@ -771,10 +772,62 @@ impl PyCtmBoxSpec {
     }
 }
 
+#[pyclass(name = "CustomAtmosphereProfile")]
+#[derive(Clone)]
+struct PyCustomAtmosphereProfile {
+    #[pyo3(get, set)]
+    pressure_mb: Vec<f64>,
+    #[pyo3(get, set)]
+    temperature_k: Vec<f64>,
+    #[pyo3(get, set)]
+    o3: Vec<f64>,
+    #[pyo3(get, set)]
+    o3_kind: String,
+}
+
+#[pymethods]
+impl PyCustomAtmosphereProfile {
+    #[new]
+    #[pyo3(signature = (pressure_mb, temperature_k, o3, o3_kind="mixing_ratio".to_string()))]
+    fn new(
+        pressure_mb: Vec<f64>,
+        temperature_k: Vec<f64>,
+        o3: Vec<f64>,
+        o3_kind: String,
+    ) -> Self {
+        Self { pressure_mb, temperature_k, o3, o3_kind }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("CustomAtmosphereProfile({} levels, o3_kind='{}')", self.pressure_mb.len(), self.o3_kind)
+    }
+}
+
+impl PyCustomAtmosphereProfile {
+    fn to_rust(&self) -> PyResult<CustomAtmosphereProfile> {
+        let o3_kind = match self.o3_kind.as_str() {
+            "mixing_ratio" | "vmr" => O3InputKind::MixingRatio,
+            "number_density" | "density" | "cm-3" | "cm3" => O3InputKind::NumberDensityCm3,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown o3_kind '{other}'. Use 'mixing_ratio' or 'number_density'."
+                )));
+            }
+        };
+        Ok(CustomAtmosphereProfile {
+            pressure_mb: self.pressure_mb.clone(),
+            temperature_k: self.temperature_k.clone(),
+            o3: self.o3.clone(),
+            o3_kind,
+        })
+    }
+}
+
 // ── DiurnConfig ────────────────────────────────────────────────────────────────
 
 /// Configuration for a diurnal cycle (DIURN) run.
 #[pyclass(name = "DiurnConfig")]
+#[derive(Clone)]
 struct PyDiurnConfig {
     #[pyo3(get, set)]
     latitude_deg: f64,
@@ -793,6 +846,8 @@ struct PyDiurnConfig {
     #[pyo3(get, set)]
     solar_flux_scale: f64,
     #[pyo3(get, set)]
+    atmosphere: Option<PyCustomAtmosphereProfile>,
+    #[pyo3(get, set)]
     initial_mixing_ratios: Option<Vec<PyLongLivedMixingRatios>>,
 }
 
@@ -808,6 +863,7 @@ impl PyDiurnConfig {
         iodine=true,
         parallel_boxes=false,
         solar_flux_scale=1.0,
+        atmosphere=None,
         initial_mixing_ratios=None
     ))]
     fn new(
@@ -819,6 +875,7 @@ impl PyDiurnConfig {
         iodine: bool,
         parallel_boxes: bool,
         solar_flux_scale: f64,
+        atmosphere: Option<PyCustomAtmosphereProfile>,
         initial_mixing_ratios: Option<Vec<PyLongLivedMixingRatios>>,
     ) -> Self {
         Self {
@@ -830,14 +887,15 @@ impl PyDiurnConfig {
             iodine,
             parallel_boxes,
             solar_flux_scale,
+            atmosphere,
             initial_mixing_ratios,
         }
     }
 }
 
 impl PyDiurnConfig {
-    fn to_rust(&self) -> DiurnConfig {
-        DiurnConfig {
+    fn to_rust(&self) -> PyResult<DiurnConfig> {
+        Ok(DiurnConfig {
             latitude_deg: self.latitude_deg,
             julian_day: self.julian_day,
             integration_days: self.integration_days,
@@ -854,10 +912,11 @@ impl PyDiurnConfig {
             iodine: self.iodine,
             parallel_boxes: self.parallel_boxes,
             solar_flux_scale: self.solar_flux_scale,
+            atmosphere: self.atmosphere.as_ref().map(|a| a.to_rust()).transpose()?,
             initial_mixing_ratios: self.initial_mixing_ratios.as_ref().map(|v| {
                 v.iter().map(|mr| mr.inner.clone()).collect()
             }),
-        }
+        })
     }
 }
 
@@ -1015,6 +1074,66 @@ impl PyDiurnOutput {
     }
 }
 
+#[pyclass(name = "No2ConstrainedDiurnConfig")]
+struct PyNo2ConstrainedDiurnConfig {
+    #[pyo3(get, set)]
+    diurn: PyDiurnConfig,
+    #[pyo3(get, set)]
+    observed_no2_cm3: Vec<f64>,
+    #[pyo3(get, set)]
+    target_hhmm: i32,
+    #[pyo3(get, set)]
+    iterations: usize,
+}
+
+#[pymethods]
+impl PyNo2ConstrainedDiurnConfig {
+    #[new]
+    #[pyo3(signature = (diurn, observed_no2_cm3, target_hhmm, iterations=3))]
+    fn new(
+        diurn: PyDiurnConfig,
+        observed_no2_cm3: Vec<f64>,
+        target_hhmm: i32,
+        iterations: usize,
+    ) -> Self {
+        Self { diurn, observed_no2_cm3, target_hhmm, iterations }
+    }
+}
+
+impl PyNo2ConstrainedDiurnConfig {
+    fn to_rust(&self) -> PyResult<No2ConstrainedDiurnConfig> {
+        Ok(No2ConstrainedDiurnConfig {
+            diurn: self.diurn.to_rust()?,
+            observed_no2_cm3: self.observed_no2_cm3.clone(),
+            target_hhmm: self.target_hhmm,
+            iterations: self.iterations,
+        })
+    }
+}
+
+#[pyclass(name = "No2ConstrainedDiurnOutput")]
+struct PyNo2ConstrainedDiurnOutput {
+    inner: No2ConstrainedDiurnOutput,
+}
+
+#[pymethods]
+impl PyNo2ConstrainedDiurnOutput {
+    #[getter]
+    fn output(&self) -> PyDiurnOutput {
+        PyDiurnOutput { inner: self.inner.output.clone() }
+    }
+
+    #[getter]
+    fn noy_scale(&self) -> Vec<f64> {
+        self.inner.noy_scale.clone()
+    }
+
+    #[getter]
+    fn modeled_no2_cm3(&self) -> Vec<f64> {
+        self.inner.modeled_no2_cm3.clone()
+    }
+}
+
 // ── CtmOutput ──────────────────────────────────────────────────────────────────
 
 #[pyclass(name = "CtmOutput", frozen)]
@@ -1122,9 +1241,21 @@ impl PyPratmoModel {
 
     /// Run the diurnal cycle (DIURN + TPATH) mode.
     fn run_diurn(&self, cfg: &PyDiurnConfig) -> PyResult<PyDiurnOutput> {
+        let rust_cfg = cfg.to_rust()?;
         self.inner
-            .run_diurn(&cfg.to_rust())
+            .run_diurn(&rust_cfg)
             .map(|out| PyDiurnOutput { inner: out })
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    fn run_diurn_no2_constrained(
+        &self,
+        cfg: &PyNo2ConstrainedDiurnConfig,
+    ) -> PyResult<PyNo2ConstrainedDiurnOutput> {
+        let rust_cfg = cfg.to_rust()?;
+        self.inner
+            .run_diurn_no2_constrained(&rust_cfg)
+            .map(|out| PyNo2ConstrainedDiurnOutput { inner: out })
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
@@ -1150,6 +1281,9 @@ fn _pratmo(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCtmConfig>()?;
     m.add_class::<PyDiurnBoxSpec>()?;
     m.add_class::<PyCtmBoxSpec>()?;
+    m.add_class::<PyCustomAtmosphereProfile>()?;
+    m.add_class::<PyNo2ConstrainedDiurnConfig>()?;
+    m.add_class::<PyNo2ConstrainedDiurnOutput>()?;
     m.add_class::<PyDiurnOutput>()?;
     m.add_class::<PyCtmOutput>()?;
     m.add_class::<PyBoxSnapshot>()?;

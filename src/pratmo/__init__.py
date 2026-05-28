@@ -22,6 +22,7 @@ from pratmo._pratmo import (
     CtmBoxSpec,
     CtmConfig,
     CtmOutput,
+    CustomAtmosphereProfile,
     Diagnostics,
     DiurnBoxSpec,
     DiurnBoxTimeSeries,
@@ -31,6 +32,8 @@ from pratmo._pratmo import (
     ImplicitSpecies,
     JValues,
     LongLivedMixingRatios,
+    No2ConstrainedDiurnConfig,
+    No2ConstrainedDiurnOutput,
     PratmoModel,
 )
 
@@ -40,6 +43,9 @@ __all__ = [
     "CtmConfig",
     "DiurnBoxSpec",
     "CtmBoxSpec",
+    "CustomAtmosphereProfile",
+    "No2ConstrainedDiurnConfig",
+    "No2ConstrainedDiurnOutput",
     "DiurnOutput",
     "CtmOutput",
     "BoxSnapshot",

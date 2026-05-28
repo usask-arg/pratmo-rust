@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use ndarray::Array2;
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use crate::{
     constants::{NB, NL},
@@ -382,6 +382,24 @@ pub struct DiurnBoxSpec {
     pub temp_offset_k: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum O3InputKind {
+    MixingRatio,
+    NumberDensityCm3,
+}
+
+/// Custom vertical atmosphere for DIURN runs.
+///
+/// Pressures are in mb, temperatures in K. O3 values are either dimensionless
+/// mixing ratios or number densities depending on `o3_kind`.
+#[derive(Debug, Clone)]
+pub struct CustomAtmosphereProfile {
+    pub pressure_mb: Vec<f64>,
+    pub temperature_k: Vec<f64>,
+    pub o3: Vec<f64>,
+    pub o3_kind: O3InputKind,
+}
+
 /// Configuration for a diurnal cycle run.
 ///
 /// `initial_mixing_ratios` overrides the long-lived species mixing ratios per box.
@@ -396,6 +414,9 @@ pub struct DiurnConfig {
     pub iodine: bool,
     pub parallel_boxes: bool,
     pub solar_flux_scale: f64,
+    /// Optional custom pressure/temperature/O3 grid. If provided and `boxes` is
+    /// empty, one DIURN box is created for each profile level.
+    pub atmosphere: Option<CustomAtmosphereProfile>,
     /// One `LongLivedMixingRatios` per box; must match `boxes.len()` if provided.
     pub initial_mixing_ratios: Option<Vec<LongLivedMixingRatios>>,
 }
@@ -411,9 +432,25 @@ impl Default for DiurnConfig {
             iodine: true,
             parallel_boxes: false,
             solar_flux_scale: 1.0,
+            atmosphere: None,
             initial_mixing_ratios: None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct No2ConstrainedDiurnConfig {
+    pub diurn: DiurnConfig,
+    pub observed_no2_cm3: Vec<f64>,
+    pub target_hhmm: i32,
+    pub iterations: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct No2ConstrainedDiurnOutput {
+    pub output: DiurnOutput,
+    pub noy_scale: Vec<f64>,
+    pub modeled_no2_cm3: Vec<f64>,
 }
 
 // ── Output types ───────────────────────────────────────────────────────────────
@@ -517,6 +554,28 @@ impl DiurnOutput {
     }
 }
 
+fn time_distance_hhmm(a: i32, b: i32) -> i32 {
+    let to_min = |hhmm: i32| -> i32 {
+        let hh = hhmm.div_euclid(100);
+        let mm = hhmm.rem_euclid(100);
+        hh * 60 + mm
+    };
+    (to_min(a) - to_min(b)).abs()
+}
+
+fn no2_at_hhmm(out: &DiurnOutput, target_hhmm: i32) -> Result<Vec<f64>> {
+    out.time_series
+        .iter()
+        .map(|ts| {
+            ts.steps
+                .iter()
+                .min_by_key(|step| time_distance_hhmm(step.time_hhmm, target_hhmm))
+                .map(|step| step.implicit.no2)
+                .ok_or_else(|| anyhow::anyhow!("DIURN output has an empty time series"))
+        })
+        .collect()
+}
+
 impl CtmOutput {
     /// Extract one implicit species as a `(n_boxes,)` altitude profile.
     ///
@@ -568,7 +627,7 @@ impl PratmoModel {
     /// parameters from `cfg`. Returns structured output without writing any files.
     pub fn run_diurn(&self, cfg: &DiurnConfig) -> Result<DiurnOutput> {
         let mut s = self.load_base_state()?;
-        apply_diurn_config(&mut s, cfg);
+        apply_diurn_config(&mut s, cfg)?;
 
         s.out_unit7 = None;
         s.out_unit8 = None;
@@ -582,6 +641,68 @@ impl PratmoModel {
         tpath(&mut s)?;
 
         Ok(extract_diurn_output(&s))
+    }
+
+    pub fn run_diurn_no2_constrained(
+        &self,
+        cfg: &No2ConstrainedDiurnConfig,
+    ) -> Result<No2ConstrainedDiurnOutput> {
+        let nbox = diurn_config_nbox(&cfg.diurn);
+        if cfg.observed_no2_cm3.len() != nbox {
+            bail!(
+                "observed_no2_cm3 length ({}) must match DIURN box count ({})",
+                cfg.observed_no2_cm3.len(),
+                nbox
+            );
+        }
+        for (ib, &obs) in cfg.observed_no2_cm3.iter().enumerate() {
+            if !(obs.is_finite() && obs >= 0.0) {
+                bail!("observed_no2_cm3[{ib}] must be finite and non-negative");
+            }
+        }
+
+        let mut base = self.load_base_state()?;
+        apply_diurn_config(&mut base, &cfg.diurn)?;
+        let mut base_mr: Vec<LongLivedMixingRatios> = (0..nbox)
+            .map(|ib| LongLivedMixingRatios::from_state(&base, ib))
+            .collect();
+        if let Some(ref init) = cfg.diurn.initial_mixing_ratios {
+            for (dst, src) in base_mr.iter_mut().zip(init.iter()) {
+                *dst = src.clone();
+            }
+        }
+
+        let mut noy_scale = vec![1.0_f64; nbox];
+        for _ in 0..cfg.iterations {
+            let mut run_cfg = cfg.diurn.clone();
+            let mut init = base_mr.clone();
+            for (ib, mr) in init.iter_mut().enumerate() {
+                mr.noy = base_mr[ib].noy * noy_scale[ib];
+            }
+            run_cfg.initial_mixing_ratios = Some(init);
+            let out = self.run_diurn(&run_cfg)?;
+            let modeled_no2 = no2_at_hhmm(&out, cfg.target_hhmm)?;
+            for ib in 0..nbox {
+                if modeled_no2[ib] > 0.0 && cfg.observed_no2_cm3[ib].is_finite() {
+                    noy_scale[ib] *= cfg.observed_no2_cm3[ib] / modeled_no2[ib];
+                }
+            }
+        }
+
+        let mut final_cfg = cfg.diurn.clone();
+        let mut init = base_mr.clone();
+        for (ib, mr) in init.iter_mut().enumerate() {
+            mr.noy = base_mr[ib].noy * noy_scale[ib];
+        }
+        final_cfg.initial_mixing_ratios = Some(init);
+        let final_out = self.run_diurn(&final_cfg)?;
+        let modeled_no2 = no2_at_hhmm(&final_out, cfg.target_hhmm)?;
+
+        Ok(No2ConstrainedDiurnOutput {
+            output: final_out,
+            noy_scale,
+            modeled_no2_cm3: modeled_no2,
+        })
     }
 
     /// Run the CTM climatological mode.
@@ -619,8 +740,24 @@ impl PratmoModel {
 
 // ── Config application ─────────────────────────────────────────────────────────
 
-fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) {
-    let nbox = cfg.boxes.len().min(NB);
+fn diurn_config_nbox(cfg: &DiurnConfig) -> usize {
+    if let Some(profile) = &cfg.atmosphere {
+        if cfg.boxes.is_empty() {
+            profile.pressure_mb.len().min(NB)
+        } else {
+            cfg.boxes.len().min(profile.pressure_mb.len()).min(NB)
+        }
+    } else {
+        cfg.boxes.len().min(NB)
+    }
+}
+
+fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
+    if let Some(profile) = &cfg.atmosphere {
+        apply_custom_atmosphere(s, profile)?;
+    }
+
+    let nbox = diurn_config_nbox(cfg);
     s.nbox = nbox;
     s.nd216  = 0;
     s.nd216s = 0;
@@ -659,9 +796,16 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) {
     // Rescale to dm[ialt_new] before changing nboxdo so diurn() starts from
     // physically consistent densities at the user's requested altitude.
     let ndval = s.ndval as usize;
-    for (ib, spec) in cfg.boxes.iter().take(nbox).enumerate() {
+    for ib in 0..nbox {
+        let spec = cfg.boxes.get(ib);
         let ialt_old = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
-        let ialt_new = (spec.altitude_level as usize).saturating_sub(1).min(NL - 1);
+        let ialt_new = if cfg.atmosphere.is_some() {
+            ib.min(NL - 1)
+        } else {
+            (spec.map(|b| b.altitude_level).unwrap_or((ib + 1) as u8) as usize)
+                .saturating_sub(1)
+                .min(NL - 1)
+        };
         if ialt_old != ialt_new && s.dm[ialt_old] > 0.0 {
             let scale = s.dm[ialt_new] / s.dm[ialt_old];
             for id in 0..ndval {
@@ -669,14 +813,18 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) {
                 s.den_set(ib, id, v * scale);
             }
         }
-        s.nboxdo[ib]  = spec.altitude_level as i32;
-        s.boxaa[ib]   = spec.albedo;
-        s.boxtt[ib]   = spec.temp_offset_k;
+        s.nboxdo[ib]  = (ialt_new + 1) as i32;
+        s.boxaa[ib]   = spec.map(|b| b.albedo).unwrap_or(0.25);
+        s.boxtt[ib]   = spec.map(|b| b.temp_offset_k).unwrap_or(0.0);
         s.nboxmx[ib]  = cfg.integration_days as i32;
         s.nboxwt[ib]  = 1;
         s.nboxpr[ib]  = 0;
         s.nboxct[ib]  = 0;
         s.boxrn[ib]   = (ib + 1) as f64;
+        if cfg.atmosphere.is_some() && s.dm[ialt_new] > 0.0 {
+            s.do3[ib] = s.do3ref[ialt_new];
+            s.fo3[ib] = s.do3[ib] / s.dm[ialt_new];
+        }
     }
     // Zero out any leftover boxes from fort01
     for ib in nbox..NB {
@@ -696,6 +844,80 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) {
     if !cfg.iodine {
         disable_iodine(s);
     }
+
+    Ok(())
+}
+
+fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile) -> Result<()> {
+    let n = profile.pressure_mb.len();
+    if n == 0 || n > NL {
+        bail!("custom atmosphere must contain 1..={NL} levels, got {n}");
+    }
+    if profile.temperature_k.len() != n || profile.o3.len() != n {
+        bail!("custom atmosphere pressure, temperature, and O3 arrays must have equal length");
+    }
+
+    let cboltz = 1.38e-19_f64;
+    let po2 = s.po2;
+    s.nc = n;
+
+    for i in 0..n {
+        let p = profile.pressure_mb[i];
+        let t = profile.temperature_k[i];
+        let o3 = profile.o3[i];
+        if !(p.is_finite() && p > 0.0) {
+            bail!("custom atmosphere pressure at index {i} must be positive");
+        }
+        if !(t.is_finite() && t > 0.0) {
+            bail!("custom atmosphere temperature at index {i} must be positive");
+        }
+        if !(o3.is_finite() && o3 >= 0.0) {
+            bail!("custom atmosphere O3 at index {i} must be non-negative");
+        }
+        if i > 0 && p >= profile.pressure_mb[i - 1] {
+            bail!("custom atmosphere pressure must decrease with altitude");
+        }
+
+        s.pstd[i] = p;
+        s.t[i] = t;
+        s.dm[i] = p / (cboltz * t);
+        s.theta[i] = t * (1000.0 / p).powf(0.2857);
+        s.do3ref[i] = match profile.o3_kind {
+            O3InputKind::MixingRatio => o3 * s.dm[i],
+            O3InputKind::NumberDensityCm3 => o3,
+        };
+        s.refo3[i] = s.do3ref[i];
+    }
+
+    s.z[0] = 0.0;
+    for i in 1..n {
+        // Hypsometric estimate in cm using dry-air gas constant / g.
+        let tmean = 0.5 * (s.t[i - 1] + s.t[i]);
+        let dz_m = 29.263 * tmean * (s.pstd[i - 1] / s.pstd[i]).ln();
+        s.z[i] = s.z[i - 1] + dz_m * 100.0;
+    }
+
+    s.do3int[n - 1] = s.do3ref[n - 1] * s.zzht;
+    s.do2int[n - 1] = s.dm[n - 1] * s.zzht * po2;
+    for j in (0..n - 1).rev() {
+        let dz = (s.z[j + 1] - s.z[j]).abs();
+        s.do3int[j] = s.do3int[j + 1] + 0.5 * dz * (s.do3ref[j + 1] + s.do3ref[j]);
+        s.do2int[j] = s.do2int[j + 1] + 0.5 * dz * (s.dm[j + 1] + s.dm[j]) * po2;
+    }
+
+    for i in n..NL {
+        s.pstd[i] = 0.0;
+        s.t[i] = 0.0;
+        s.dm[i] = 0.0;
+        s.theta[i] = 0.0;
+        s.z[i] = s.z[n - 1];
+        s.do3ref[i] = 0.0;
+        s.refo3[i] = 0.0;
+        s.do3int[i] = 0.0;
+        s.do2int[i] = 0.0;
+    }
+
+    Ok(())
 }
 
 fn disable_iodine(s: &mut ModelState) {

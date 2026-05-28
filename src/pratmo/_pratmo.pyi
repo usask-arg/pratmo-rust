@@ -309,6 +309,21 @@ class CtmBoxSpec:
         temp_offset_k: float = 0.0,
     ) -> None: ...
 
+class CustomAtmosphereProfile:
+    """Custom pressure/temperature/O3 grid for DIURN runs."""
+
+    pressure_mb: list[float]
+    temperature_k: list[float]
+    o3: list[float]
+    o3_kind: str
+    def __init__(
+        self,
+        pressure_mb: list[float],
+        temperature_k: list[float],
+        o3: list[float],
+        o3_kind: str = "mixing_ratio",
+    ) -> None: ...
+
 class DiurnConfig:
     """Configuration for a diurnal cycle (DIURN) run."""
 
@@ -320,6 +335,7 @@ class DiurnConfig:
     iodine: bool
     parallel_boxes: bool
     solar_flux_scale: float
+    atmosphere: Optional[CustomAtmosphereProfile]
     initial_mixing_ratios: Optional[list[LongLivedMixingRatios]]
     def __init__(
         self,
@@ -332,6 +348,7 @@ class DiurnConfig:
         iodine: bool = True,
         parallel_boxes: bool = False,
         solar_flux_scale: float = 1.0,
+        atmosphere: Optional[CustomAtmosphereProfile] = None,
         initial_mixing_ratios: Optional[list[LongLivedMixingRatios]] = None,
     ) -> None: ...
 
@@ -409,6 +426,29 @@ class CtmOutput:
         """Return a J-value as a 1-D array of shape ``(n_boxes,)``."""
         ...
 
+class No2ConstrainedDiurnConfig:
+    """Iterative NOy scaling configuration for matching observed NO2."""
+
+    diurn: DiurnConfig
+    observed_no2_cm3: list[float]
+    target_hhmm: int
+    iterations: int
+    def __init__(
+        self,
+        diurn: DiurnConfig,
+        observed_no2_cm3: list[float],
+        target_hhmm: int,
+        iterations: int = 3,
+    ) -> None: ...
+
+class No2ConstrainedDiurnOutput:
+    @property
+    def output(self) -> DiurnOutput: ...
+    @property
+    def noy_scale(self) -> list[float]: ...
+    @property
+    def modeled_no2_cm3(self) -> list[float]: ...
+
 class PratmoModel:
     """Entry point for the PRATMO photochemical box model."""
 
@@ -422,6 +462,12 @@ class PratmoModel:
         ...
     def run_diurn(self, cfg: DiurnConfig) -> DiurnOutput:
         """Run the diurnal cycle (DIURN + TPATH) mode."""
+        ...
+    def run_diurn_no2_constrained(
+        self,
+        cfg: No2ConstrainedDiurnConfig,
+    ) -> No2ConstrainedDiurnOutput:
+        """Iteratively scale per-box NOy to match observed NO2 at a target HHMM."""
         ...
     def run_ctm(self, cfg: CtmConfig) -> CtmOutput:
         """Run the CTM climatological mode."""

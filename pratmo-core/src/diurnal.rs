@@ -4,6 +4,7 @@
 use anyhow::{bail, Result};
 use ndarray::Array2;
 use rayon::prelude::*;
+use std::sync::OnceLock;
 
 use crate::{
     chemistry::{chems, setupr},
@@ -30,6 +31,15 @@ fn rcolum_get(s: &ModelState, j: usize) -> f64 {
         401..=430 => s.rqf[j - 401],
         _ => 0.0,
     }
+}
+
+fn rafday_reuse_jacobian_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("PRATMO_RAFDAY_REUSE_JACOBIAN")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+            .unwrap_or(false)
+    })
 }
 
 // ── DIURN ────────────────────────────────────────────────────────────────────
@@ -407,6 +417,8 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
 
     let maxraf = s.maxraf;
     let maxrlx = s.maxrlx;
+    let reuse_jacobian = rafday_reuse_jacobian_enabled();
+    let mut have_jacobian = false;
 
     'outer: for itrraf in 0..=maxraf {
         s.lsvjac = false;
@@ -455,42 +467,46 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
             fxo[j] = s.pmean[459 + ntjn1];
         }
 
-        // Build finite-difference Jacobian
-        let save_lprtx = s.lprtx;
-        s.lprtx = false;
+        // Build finite-difference Jacobian. In experimental fast mode, reuse
+        // the first slow-species Jacobian for later RAFDAY iterations.
+        if !reuse_jacobian || !have_jacobian || itrraf % 2 == 0 {
+            let save_lprtx = s.lprtx;
+            s.lprtx = false;
 
-        for j in 0..nnr {
-            let jn = s.nnrt[j];
-            let ntjn1 = s.n[jn - 1];
-            if ntjn1 == 0 {
-                continue;
-            }
-            let ntjn0 = ntjn1 - 1; // 0-based slot for XNOLD
-
-            let mut xnold = s.xnold;
-            rplace(s, &mut xnold, s.ibox);
-            s.xnold = xnold;
-
-            let epslon = s.dayeps * s.xnold[ntjn0];
-            s.xnold[ntjn0] += epslon;
-
-            {
-                let xnold_snap = s.xnold;
-                fixrat(&mut { let mut tmp = xnold_snap; tmp }, s, s.ibox);
-            }
-            daily(s, 102)?;
-
-            for jj in 0..nnr {
-                let jjn = s.nnrt[jj];
-                let ntjjn1 = s.n[jjn - 1];
-                if ntjjn1 == 0 {
+            for j in 0..nnr {
+                let jn = s.nnrt[j];
+                let ntjn1 = s.n[jn - 1];
+                if ntjn1 == 0 {
                     continue;
                 }
-                fxdder[[jj, j]] = (s.pmean[459 + ntjjn1] - fxo[jj]) / epslon;
-            }
-        }
+                let ntjn0 = ntjn1 - 1; // 0-based slot for XNOLD
 
-        s.lprtx = save_lprtx;
+                let mut xnold = s.xnold;
+                rplace(s, &mut xnold, s.ibox);
+                s.xnold = xnold;
+
+                let epslon = s.dayeps * s.xnold[ntjn0];
+                s.xnold[ntjn0] += epslon;
+
+                {
+                    let xnold_snap = s.xnold;
+                    fixrat(&mut { let mut tmp = xnold_snap; tmp }, s, s.ibox);
+                }
+                daily(s, 102)?;
+
+                for jj in 0..nnr {
+                    let jjn = s.nnrt[jj];
+                    let ntjjn1 = s.n[jjn - 1];
+                    if ntjjn1 == 0 {
+                        continue;
+                    }
+                    fxdder[[jj, j]] = (s.pmean[459 + ntjjn1] - fxo[jj]) / epslon;
+                }
+            }
+
+            s.lprtx = save_lprtx;
+            have_jacobian = true;
+        }
 
         // Copy FXDDER into A matrix for LINSLV
         let a = s.a_mat.as_slice_mut().expect("a_mat is contiguous");

@@ -13,11 +13,12 @@ use ndarray::Array2;
 use anyhow::{bail, Result};
 
 use crate::{
-    constants::{NB, NL},
+    constants::{NB, NL, NDEN},
     ctm::ctmlfq,
     diurnal::{diurn, diurn_parallel_boxes},
     path::tpath,
     reader::{FortranReader, ModelReader, setday},
+    solver::{fixrat, rplace, splace},
     state::ModelState,
 };
 
@@ -747,7 +748,7 @@ fn diurn_config_nbox(cfg: &DiurnConfig) -> usize {
         if cfg.boxes.is_empty() {
             profile.pressure_mb.len().min(NB)
         } else {
-            cfg.boxes.len().min(profile.pressure_mb.len()).min(NB)
+            cfg.boxes.len().min(NB)
         }
     } else {
         cfg.boxes.len().min(NB)
@@ -798,17 +799,48 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     // Rescale to dm[ialt_new] before changing nboxdo so diurn() starts from
     // physically consistent densities at the user's requested altitude.
     let ndval = s.ndval as usize;
+    let custom_reference = if cfg.atmosphere.is_some() {
+        let ialt_ref = (s.nboxdo[0].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+        let mut densities = [0.0_f64; NDEN];
+        for (id, value) in densities.iter_mut().take(ndval).enumerate() {
+            *value = s.den_get(0, id);
+        }
+        Some((ialt_ref, densities))
+    } else {
+        None
+    };
     for ib in 0..nbox {
         let spec = cfg.boxes.get(ib);
         let ialt_old = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
         let ialt_new = if cfg.atmosphere.is_some() {
-            ib.min(NL - 1)
+            let level = spec.map(|b| b.altitude_level).unwrap_or((ib + 1) as u8) as usize;
+            if level == 0 {
+                bail!("DIURN box altitude_level must be 1-based, got 0 for box {ib}");
+            }
+            let ialt = level - 1;
+            if let Some(profile) = &cfg.atmosphere {
+                if ialt >= profile.pressure_mb.len() {
+                    bail!(
+                        "DIURN box altitude_level {} exceeds custom atmosphere level count {}",
+                        level,
+                        profile.pressure_mb.len()
+                    );
+                }
+            }
+            ialt.min(NL - 1)
         } else {
             (spec.map(|b| b.altitude_level).unwrap_or((ib + 1) as u8) as usize)
                 .saturating_sub(1)
                 .min(NL - 1)
         };
-        if ialt_old != ialt_new && s.dm[ialt_old] > 0.0 {
+        if let Some((ialt_ref, densities)) = custom_reference {
+            if s.dm[ialt_ref] > 0.0 {
+                let scale = s.dm[ialt_new] / s.dm[ialt_ref];
+                for (id, value) in densities.iter().take(ndval).enumerate() {
+                    s.den_set(ib, id, value * scale);
+                }
+            }
+        } else if ialt_old != ialt_new && s.dm[ialt_old] > 0.0 {
             let scale = s.dm[ialt_new] / s.dm[ialt_old];
             for id in 0..ndval {
                 let v = s.den_get(ib, id);
@@ -845,6 +877,12 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
 
     if !cfg.iodine {
         disable_iodine(s);
+    }
+
+    if cfg.atmosphere.is_some() {
+        for ib in 0..nbox {
+            reconcile_custom_box_implicit_species(s, ib);
+        }
     }
 
     Ok(())
@@ -938,6 +976,26 @@ fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile
     }
 
     Ok(())
+}
+
+fn reconcile_custom_box_implicit_species(s: &mut ModelState, ib: usize) {
+    let ialt = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+    let mut xn = [0.0f64; NDEN];
+    rplace(s, &mut xn, ib);
+    let old_ialt = s.ialt;
+    s.ialt = ialt;
+    fixrat(&mut xn, s, ib);
+    s.ialt = old_ialt;
+    splace(s, &xn, ib);
+
+    for j in 0..s.ntotx {
+        for it in 0..s.ntimdo {
+            s.xxnoft[[j, it, ib]] = xn[j];
+        }
+    }
+    for j in 0..s.ntotx {
+        s.xnoft[[j, 0]] = xn[j];
+    }
 }
 
 fn disable_iodine(s: &mut ModelState) {

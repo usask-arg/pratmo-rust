@@ -9,7 +9,9 @@ description = "Python bindings for the PRATMO stratospheric photochemical box mo
 requires-python = ">=3.10"
 dependencies = [
     "maturin>=1.13.3",
+    "netCDF4>=1.7",
     "numpy>=1.24",
+    "xarray>=2024.10",
 ]
 
 [project.optional-dependencies]
@@ -20,8 +22,10 @@ docs = [
     "numpydoc>=1.7",
 ]
 dev = [
+    "netCDF4>=1.7",
     "pytest>=8.0",
     "numpy>=1.24",
+    "xarray>=2024.10",
 ]
 
 [tool.maturin]
@@ -35,6 +39,7 @@ dev = [
     "furo>=2025.12.19",
     "ipykernel>=7.2.0",
     "myst-nb>=1.4.0",
+    "netCDF4>=1.7",
     "numpydoc>=1.10.0",
     "pytest>=9.0.3",
     "sphinx>=8.1.3",

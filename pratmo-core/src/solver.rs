@@ -17,21 +17,23 @@ pub fn rplace(s: &ModelState, xn: &mut [f64; NDEN], j: usize) {
     xn.iter_mut().for_each(|v| *v = 1.0e-36);
 
     let put = |xn: &mut [f64; NDEN], ni: usize, val: f64| {
-        if ni >= 1 && ni <= NDEN { xn[ni - 1] = val; }
+        if ni >= 1 && ni <= NDEN {
+            xn[ni - 1] = val;
+        }
     };
 
-    put(xn, n[0],  s.dno[j]);
-    put(xn, n[1],  s.dno2[j]);
-    put(xn, n[2],  s.dno3[j]);
-    put(xn, n[3],  s.dn2o5[j]);
-    put(xn, n[4],  s.dhno3[j]);
+    put(xn, n[0], s.dno[j]);
+    put(xn, n[1], s.dno2[j]);
+    put(xn, n[2], s.dno3[j]);
+    put(xn, n[3], s.dn2o5[j]);
+    put(xn, n[4], s.dhno3[j]);
     put(xn, n[14], s.dhno2[j]);
     put(xn, n[20], s.dhno4[j]);
-    put(xn, n[5],  s.dh[j]);
-    put(xn, n[6],  s.doh[j]);
-    put(xn, n[7],  s.dho2[j]);
-    put(xn, n[8],  s.dh2o2[j]);
-    put(xn, n[9],  s.do_[j]);
+    put(xn, n[5], s.dh[j]);
+    put(xn, n[6], s.doh[j]);
+    put(xn, n[7], s.dho2[j]);
+    put(xn, n[8], s.dh2o2[j]);
+    put(xn, n[9], s.do_[j]);
     put(xn, n[10], s.do3[j]);
     put(xn, n[15], s.dhcl[j]);
     put(xn, n[16], s.dcl[j]);
@@ -69,50 +71,54 @@ pub fn rplace(s: &ModelState, xn: &mut [f64; NDEN], j: usize) {
 pub fn splace(s: &mut ModelState, xn: &[f64; NDEN], j: usize) {
     let n = s.n;
     let get = |xn: &[f64; NDEN], ni: usize| -> f64 {
-        if ni >= 1 && ni <= NDEN { xn[ni - 1] } else { 0.0 }
+        if ni >= 1 && ni <= NDEN {
+            xn[ni - 1]
+        } else {
+            0.0
+        }
     };
 
-    s.dno[j]    = get(xn, n[0]);
-    s.dno2[j]   = get(xn, n[1]);
-    s.dno3[j]   = get(xn, n[2]);
-    s.dn2o5[j]  = get(xn, n[3]);
-    s.dhno3[j]  = get(xn, n[4]);
-    s.dhno2[j]  = get(xn, n[14]);
-    s.dhno4[j]  = get(xn, n[20]);
-    s.dh[j]     = get(xn, n[5]);
-    s.doh[j]    = get(xn, n[6]);
-    s.dho2[j]   = get(xn, n[7]);
-    s.dh2o2[j]  = get(xn, n[8]);
-    s.do_[j]    = get(xn, n[9]);
-    s.do3[j]    = get(xn, n[10]);
-    s.dhcl[j]   = get(xn, n[15]);
-    s.dcl[j]    = get(xn, n[16]);
-    s.dcl2[j]   = get(xn, n[17]);
-    s.dclo[j]   = get(xn, n[18]);
+    s.dno[j] = get(xn, n[0]);
+    s.dno2[j] = get(xn, n[1]);
+    s.dno3[j] = get(xn, n[2]);
+    s.dn2o5[j] = get(xn, n[3]);
+    s.dhno3[j] = get(xn, n[4]);
+    s.dhno2[j] = get(xn, n[14]);
+    s.dhno4[j] = get(xn, n[20]);
+    s.dh[j] = get(xn, n[5]);
+    s.doh[j] = get(xn, n[6]);
+    s.dho2[j] = get(xn, n[7]);
+    s.dh2o2[j] = get(xn, n[8]);
+    s.do_[j] = get(xn, n[9]);
+    s.do3[j] = get(xn, n[10]);
+    s.dhcl[j] = get(xn, n[15]);
+    s.dcl[j] = get(xn, n[16]);
+    s.dcl2[j] = get(xn, n[17]);
+    s.dclo[j] = get(xn, n[18]);
     s.dclno3[j] = get(xn, n[19]);
-    s.dhocl[j]  = get(xn, n[21]);
-    s.doclo[j]  = get(xn, n[27]);
+    s.dhocl[j] = get(xn, n[21]);
+    s.doclo[j] = get(xn, n[27]);
     s.dcl2o2[j] = get(xn, n[28]);
-    s.dbro[j]   = get(xn, n[11]);
-    s.dbr[j]    = get(xn, n[12]);
-    s.dhbr[j]   = get(xn, n[13]);
+    s.dbro[j] = get(xn, n[11]);
+    s.dbr[j] = get(xn, n[12]);
+    s.dhbr[j] = get(xn, n[13]);
     s.dbrno3[j] = get(xn, n[22]);
-    s.dhobr[j]  = get(xn, n[23]);
-    s.dh2co[j]  = get(xn, n[24]);
-    s.droo[j]   = get(xn, n[25]);
-    s.drooh[j]  = get(xn, n[26]);
-    s.dbrcl[j]  = get(xn, n[29]);
+    s.dhobr[j] = get(xn, n[23]);
+    s.dh2co[j] = get(xn, n[24]);
+    s.droo[j] = get(xn, n[25]);
+    s.drooh[j] = get(xn, n[26]);
+    s.dbrcl[j] = get(xn, n[29]);
     if s.liod {
-        s.di_[j]    = get(xn, n[30]);
-        s.dio[j]    = get(xn, n[31]);
-        s.dhoi[j]   = get(xn, n[32]);
+        s.di_[j] = get(xn, n[30]);
+        s.dio[j] = get(xn, n[31]);
+        s.dhoi[j] = get(xn, n[32]);
         s.diono2[j] = get(xn, n[33]);
-        s.dhi[j]    = get(xn, n[34]);
-        s.doio[j]   = get(xn, n[35]);
-        s.di2[j]    = get(xn, n[36]);
-        s.di2o2[j]  = get(xn, n[37]);
-        s.di2o3[j]  = get(xn, n[38]);
-        s.di2o4[j]  = get(xn, n[39]);
+        s.dhi[j] = get(xn, n[34]);
+        s.doio[j] = get(xn, n[35]);
+        s.di2[j] = get(xn, n[36]);
+        s.di2o2[j] = get(xn, n[37]);
+        s.di2o3[j] = get(xn, n[38]);
+        s.di2o4[j] = get(xn, n[39]);
     }
 }
 
@@ -122,7 +128,7 @@ pub fn splace(s: &mut ModelState, xn: &[f64; NDEN], j: usize) {
 /// Solves a cubic equation (regula falsi + Newton-Raphson) for the NOy scale factor.
 /// Fortran: SUBROUTINE FIXRAT(X, I) — I is the box index (1-based in Fortran)
 pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
-    let n  = s.n;
+    let n = s.n;
     let dm = s.dm[s.ialt];
 
     let totnoy = s.fnoy[ib] * dm;
@@ -132,22 +138,29 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
 
     // BrCl cap
     let n30 = n[29];
-    let brcl = x[n30 - 1]
-        .min(totclx / 2.0)
-        .min(totbrx / 2.0);
+    let brcl = x[n30 - 1].min(totclx / 2.0).min(totbrx / 2.0);
     x[n30 - 1] = brcl;
 
     let totclx = totclx - brcl;
     let totbrx = totbrx - brcl;
 
     // Family sums (without BrCl)
-    let xxn  = x[n[0]-1] + x[n[1]-1] + x[n[2]-1] + x[n[3]-1]*2.0
-              + x[n[4]-1] + x[n[14]-1] + x[n[20]-1];
-    let xxc  = x[n[15]-1] + x[n[16]-1] + x[n[18]-1] + x[n[21]-1]
-              + x[n[27]-1] + 2.0*(x[n[17]-1] + x[n[28]-1]);
-    let xxcn = x[n[19]-1]; // ClONO2 — links Cly and NOy
-    let xxb  = x[n[11]-1] + x[n[12]-1] + x[n[13]-1] + x[n[23]-1];
-    let xxbn = x[n[22]-1]; // BrONO2 — links Bry and NOy
+    let xxn = x[n[0] - 1]
+        + x[n[1] - 1]
+        + x[n[2] - 1]
+        + x[n[3] - 1] * 2.0
+        + x[n[4] - 1]
+        + x[n[14] - 1]
+        + x[n[20] - 1];
+    let xxc = x[n[15] - 1]
+        + x[n[16] - 1]
+        + x[n[18] - 1]
+        + x[n[21] - 1]
+        + x[n[27] - 1]
+        + 2.0 * (x[n[17] - 1] + x[n[28] - 1]);
+    let xxcn = x[n[19] - 1]; // ClONO2 — links Cly and NOy
+    let xxb = x[n[11] - 1] + x[n[12] - 1] + x[n[13] - 1] + x[n[23] - 1];
+    let xxbn = x[n[22] - 1]; // BrONO2 — links Bry and NOy
 
     if xxn < 1e-30 || xxcn < 1e-30 || xxbn < 1e-30 {
         return;
@@ -157,16 +170,16 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
     let xxxc = xxc / xxcn;
     let xxxb = xxb / xxbn;
     let tempa = xxxc + xxxb + (totclx + totbrx - totnoy) / xxn;
-    let tempb = xxxc * (totbrx - totnoy) / xxn + xxxb * (totclx - totnoy) / xxn
-               + xxxc * xxxb;
+    let tempb = xxxc * (totbrx - totnoy) / xxn + xxxb * (totclx - totnoy) / xxn + xxxc * xxxb;
     let tempc = -xxxb * xxxc * totnoy / xxn;
     let tempa3 = tempa / 3.0;
 
     // Closure functions
-    let fcube  = |y: f64| tempc + y * (tempb + y * (tempa + y));
+    let fcube = |y: f64| tempc + y * (tempb + y * (tempa + y));
     let fcube1 = |y: f64| tempb + y * (2.0 * tempa + 3.0 * y);
     let fcube2 = |y: f64| 2.0 * tempa + 6.0 * y;
-    let fcuba  = |y: f64| tempc.abs() + (tempb * y).abs() + (tempa * y * y).abs() + (y * y * y).abs();
+    let fcuba =
+        |y: f64| tempc.abs() + (tempb * y).abs() + (tempa * y * y).abs() + (y * y * y).abs();
 
     const EPSM: f64 = 1.0e-12;
     const EPS2: f64 = 1.0e-6;
@@ -175,20 +188,27 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
     let discrm = tempa * tempa - 3.0 * tempb;
     let (x1, x2, mut x_bar);
     if discrm <= 0.0 {
-        x1   = -tempa3;
-        x2   = x1;
+        x1 = -tempa3;
+        x2 = x1;
         x_bar = x1 + 1.0;
     } else {
         let xx1_raw = -1.5 * tempb / (tempa * tempa);
-        let xx1 = if xx1_raw > EPS2 { (1.0 + 2.0 * xx1_raw).sqrt() - 1.0 } else { xx1_raw };
+        let xx1 = if xx1_raw > EPS2 {
+            (1.0 + 2.0 * xx1_raw).sqrt() - 1.0
+        } else {
+            xx1_raw
+        };
         let (mut xa, mut xb) = (xx1 * tempa3, (-xx1 - 2.0) * tempa3);
-        if tempa3 < 0.0 { std::mem::swap(&mut xa, &mut xb); }
-        x1 = xa; x2 = xb;
+        if tempa3 < 0.0 {
+            std::mem::swap(&mut xa, &mut xb);
+        }
+        x1 = xa;
+        x2 = xb;
         x_bar = if fcube(x1) > 0.0 { x2 - 1.0 } else { x1 + 1.0 };
     }
 
     // Regula falsi to bracket root
-    let f1   = fcube(x1);
+    let f1 = fcube(x1);
     let l_up = f1 > 0.0;
     let mut xlo = 0.0_f64;
     let mut xhi = 0.0_f64;
@@ -198,35 +218,53 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
     for _ in 0..20 {
         let fbar = fcube(x_bar);
         if fbar <= 0.0 {
-            xlo   = x_bar;
-            l_lo  = true;
-            if l_hi { break; }
-            x_bar = if !l_up { x1 + (xlo - x1) * 10.0 }
-                    else      { x2 - (x2 - xlo) * 0.1  };
+            xlo = x_bar;
+            l_lo = true;
+            if l_hi {
+                break;
+            }
+            x_bar = if !l_up {
+                x1 + (xlo - x1) * 10.0
+            } else {
+                x2 - (x2 - xlo) * 0.1
+            };
         } else {
-            xhi   = x_bar;
-            l_hi  = true;
-            if l_lo { break; }
-            x_bar = if !l_up { x1 + (xhi - x1) * 0.1  }
-                    else      { x2 - (x2 - xhi) * 10.0 };
+            xhi = x_bar;
+            l_hi = true;
+            if l_lo {
+                break;
+            }
+            x_bar = if !l_up {
+                x1 + (xhi - x1) * 0.1
+            } else {
+                x2 - (x2 - xhi) * 10.0
+            };
         }
     }
 
-    if !l_lo || !l_hi { return; } // failed to bracket
+    if !l_lo || !l_hi {
+        return;
+    } // failed to bracket
 
     // Newton-Raphson 2nd-order refinement within [xlo, xhi]
     let mut x0 = xhi;
     for _ in 0..40 {
         let f0 = fcube(x0);
-        if f0.abs() < EPSM * fcuba(x0) { break; }
-        let f1v  = fcube1(x0);
+        if f0.abs() < EPSM * fcuba(x0) {
+            break;
+        }
+        let f1v = fcube1(x0);
         let f0f1 = f0 / f1v;
         let delx = -f0f1 * (1.0 + 0.5 * f0f1 * fcube2(x0) / f1v);
-        if delx.abs() < EPSM * x0.abs() { break; }
+        if delx.abs() < EPSM * x0.abs() {
+            break;
+        }
         x0 = xhi.min(xlo.max(x0 + delx));
     }
 
-    if x0 < 1.0e-30 { return; }
+    if x0 < 1.0e-30 {
+        return;
+    }
 
     let rnoy = x0;
     let rbrx = totbrx / (xxb + x0 * xxbn);
@@ -239,21 +277,27 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
     for ni in [n[15], n[16], n[17], n[18], n[21], n[27], n[28]] {
         x[ni - 1] *= rclx;
     }
-    x[n[19] - 1] *= rclx * rnoy;    // ClONO2
+    x[n[19] - 1] *= rclx * rnoy; // ClONO2
     for ni in [n[11], n[12], n[13], n[23]] {
         x[ni - 1] *= rbrx;
     }
-    x[n[22] - 1] *= rbrx * rnoy;    // BrONO2
+    x[n[22] - 1] *= rbrx * rnoy; // BrONO2
 
     // Iodine family closure (Iy linked to NOy via IONO2, analogous to BrONO2/ClONO2).
     if s.liod && n[30] > 0 && n[31] > 0 && n[32] > 0 && n[33] > 0 && n[34] > 0 {
-        let xxi = x[n[30] - 1] + x[n[31] - 1] + x[n[32] - 1] + x[n[34] - 1]
-            + x[n[35] - 1] + 2.0 * (x[n[36] - 1] + x[n[37] - 1] + x[n[38] - 1] + x[n[39] - 1]);
+        let xxi = x[n[30] - 1]
+            + x[n[31] - 1]
+            + x[n[32] - 1]
+            + x[n[34] - 1]
+            + x[n[35] - 1]
+            + 2.0 * (x[n[36] - 1] + x[n[37] - 1] + x[n[38] - 1] + x[n[39] - 1]);
         let xxin = x[n[33] - 1];
         let denom = xxi + rnoy * xxin;
         if denom > 1.0e-30 {
             let riyx = totiyx / denom;
-            for ni in [n[30], n[31], n[32], n[34], n[35], n[36], n[37], n[38], n[39]] {
+            for ni in [
+                n[30], n[31], n[32], n[34], n[35], n[36], n[37], n[38], n[39],
+            ] {
                 x[ni - 1] *= riyx;
             }
             x[n[33] - 1] *= riyx * rnoy; // IONO2
@@ -264,7 +308,7 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
 /// Wrapper: rplace → fixrat → splace → update FO3.
 /// Fortran: SUBROUTINE FIXMIX
 pub fn fixmix(s: &mut ModelState) {
-    let ib   = s.ibox;
+    let ib = s.ibox;
     let ialt = s.ialt;
     let mut xn = [0.0f64; NDEN];
     rplace(s, &mut xn, ib);
@@ -345,7 +389,9 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         s.raxloop += 1.0;
         chems(s);
 
-        if errxo < s.raferr { break; }
+        if errxo < s.raferr {
+            break;
+        }
         if iter == NUMITR - 1 {
             retry_probe_newrax_nonconverged(s, iter + 1, last_errpl, last_errpl_j, errxo);
             return 2;
@@ -371,7 +417,24 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         last_errpl = errpl;
         last_errpl_j = errpl_j;
 
-        if errpl < s.rafpml { break; }
+        // A residual is formed from several additions/subtractions.  In a
+        // cancellation-heavy dark-halogen case, the requested Fortran
+        // tolerance can be below the relative error that f64 arithmetic can
+        // resolve.  Normal Rust mode raises the threshold to a conservative
+        // operation-scale roundoff floor; parity mode deliberately keeps the
+        // original Fortran criterion so differential output is unchanged.
+        #[cfg(not(feature = "fortran-parity"))]
+        let achievable_rafpml = (0..n.min(ntot)).fold(s.rafpml, |tol, j| {
+            tol.max(achievable_errpl(
+                s.xr[j], s.xnold[j], s.deltt, s.rp[j], s.rl[j],
+            ))
+        });
+        #[cfg(feature = "fortran-parity")]
+        let achievable_rafpml = s.rafpml;
+
+        if errpl < achievable_rafpml {
+            break;
+        }
 
         // Jacobian + solve
         let mut xoo = [0.0f64; NDEN];
@@ -392,9 +455,7 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
             }
             let mut temp = s.xr[j] + dx;
             if iter < 6 {
-                temp = temp
-                    .max(s.rafmin * s.xr[j])
-                    .min(s.rafmax * s.xr[j]);
+                temp = temp.max(s.rafmin * s.xr[j]).min(s.rafmax * s.xr[j]);
             }
             s.xr[j] = temp;
         }
@@ -413,11 +474,34 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
     0
 }
 
+/// Estimate the smallest trustworthy relative P-L residual for one species.
+///
+/// `RHSLHS` evaluates `RL - RP + (XR-XNOLD)*DELTT`; when those terms nearly
+/// cancel, comparing the result with `RAFPML` alone asks for more precision
+/// than f64 can provide.  The factor of eight is a conservative bound for the
+/// handful of rounded operations in that expression.  This helper is compiled
+/// only for normal Rust mode: `fortran-parity` must retain the original
+/// executable's strict `RAFPML` test.
+#[cfg(not(feature = "fortran-parity"))]
+fn achievable_errpl(xr: f64, xnold: f64, deltt: f64, rp: f64, rl: f64) -> f64 {
+    let denom = rp + rl;
+    if denom <= 0.0 {
+        return 0.0;
+    }
+    let operation_scale = rp.abs() + rl.abs() + ((xr - xnold) * deltt).abs();
+    8.0 * f64::EPSILON * operation_scale / denom
+}
+
 fn retry_probe_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
         std::env::var("PRATMO_RETRY_PROBE")
-            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+            .map(|v| {
+                matches!(
+                    v.as_str(),
+                    "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+                )
+            })
             .unwrap_or(false)
     })
 }
@@ -520,6 +604,26 @@ fn retry_probe_newrax_nonconverged(
     );
 }
 
+#[cfg(all(test, not(feature = "fortran-parity")))]
+mod tests {
+    use super::achievable_errpl;
+
+    #[test]
+    fn precision_floor_catches_cancellation_limited_residual() {
+        // A dark BrCl-like species can have a tiny production/loss denominator
+        // while the time-step term is much larger.  Asking for 1e-10 relative
+        // residual in that case is below the f64 roundoff floor.
+        let floor = achievable_errpl(1.0e-4, 0.0, 1.0, 1.0e-10, 1.0e-10);
+        assert!(floor > 1.0e-10, "floor={floor:e}");
+        assert!(floor.is_finite());
+    }
+
+    #[test]
+    fn precision_floor_is_zero_without_positive_reaction_scale() {
+        assert_eq!(achievable_errpl(1.0, 0.0, 1.0, -1.0, 1.0), 0.0);
+    }
+}
+
 // ── LINSLV — Crout LU decomposition + solve ───────────────────────────────────
 
 /// Partial-pivoting LU decomposition of s.a_mat, then forward/back solve.
@@ -561,12 +665,12 @@ pub fn linslv(s: &mut ModelState, b: &[f64], x: &mut [f64], n: usize) {
         }
 
         // Find pivot
-        let mut smax   = s_col[kr].abs();
-        let mut krmax  = kr;
+        let mut smax = s_col[kr].abs();
+        let mut krmax = kr;
         for i in kr..n {
             if s_col[i].abs() >= smax {
                 krmax = i;
-                smax  = s_col[i].abs();
+                smax = s_col[i].abs();
             }
         }
         s.ipa[kr] = krmax;
@@ -662,7 +766,9 @@ pub fn resolv_in_place(s: &ModelState, b: &[f64], x: &mut [f64]) {
     let n = b.len();
     let mut sv = [0.0f64; NDEN];
     let a = s.a_mat.as_slice().expect("a_mat is contiguous");
-    for i in 0..n { sv[i] = b[i]; }
+    for i in 0..n {
+        sv[i] = b[i];
+    }
 
     // Forward substitution with pivoting
     for i in 0..n {

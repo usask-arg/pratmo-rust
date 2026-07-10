@@ -9,10 +9,10 @@ use crate::state::ModelState;
 /// for the current cos(SZA) stored in s.gmu.
 /// Fortran: SUBROUTINE SOL
 pub fn sol(s: &mut ModelState, gmu: f64) {
-    s.gmu   = gmu;
+    s.gmu = gmu;
     s.rflect = s.clouds.max(0.0).min(1.0);
-    s.u0    = gmu;
-    s.sza   = gmu.acos() * 57.29578;
+    s.u0 = gmu;
+    s.sza = gmu.acos() * 57.29578;
 
     // Find matching diurnal time step index for albedo lookup
     let ntimdo = s.ntimdo;
@@ -23,7 +23,7 @@ pub fn sol(s: &mut ModelState, gmu: f64) {
     }
 
     // Zero all J-value profiles
-    let nc   = s.nc;
+    let nc = s.nc;
     let njval = s.njval;
     for iv in 0..njval {
         for j in 0..nc {
@@ -39,8 +39,8 @@ pub fn sol(s: &mut ModelState, gmu: f64) {
     jvalue(s);
 
     // Compute remaining J-values from temperature-dependent cross-sections
-    let nw1  = s.nw1.saturating_sub(1); // 0-based
-    let nw2  = s.nw2.saturating_sub(1);
+    let nw1 = s.nw1.saturating_sub(1); // 0-based
+    let nw2 = s.nw2.saturating_sub(1);
 
     if s.lprtjv {
         // Full altitude profile mode
@@ -49,12 +49,12 @@ pub fn sol(s: &mut ModelState, gmu: f64) {
             // O3 total cross-section and O(1D) quantum yield
             for k in nw1..=nw2 {
                 let qo3tot = xseco3(k, tt, s);
-                let qo31d  = xsec1d(k, tt, s);
+                let qo31d = xsec1d(k, tt, s);
                 let fff_kj = s.fff[[k, j]];
-                let vo3_j  = s.vo3[j]  + fff_kj * qo3tot;
+                let vo3_j = s.vo3[j] + fff_kj * qo3tot;
                 let vo3d_j = s.vo3d[j] + fff_kj * qo3tot * qo31d;
-                s.vo3[j]   = vo3_j;
-                s.vo3d[j]  = vo3d_j;
+                s.vo3[j] = vo3_j;
+                s.vo3d[j] = vo3d_j;
             }
             // Additional J-values (IV = 5..NJVAL, 1-based; index 4..njval-1, 0-based)
             for iv in 4..njval {
@@ -73,13 +73,13 @@ pub fn sol(s: &mut ModelState, gmu: f64) {
         // Per-box mode: J-values indexed by box number (JB → 0-based jb)
         let nbox = s.nbox;
         for jb in 0..nbox {
-            let j  = (s.nboxdo[jb].abs() as usize).saturating_sub(1); // 0-based altitude level
+            let j = (s.nboxdo[jb].abs() as usize).saturating_sub(1); // 0-based altitude level
             let tt = s.t[j] + s.boxtt[jb];
             for k in nw1..=nw2 {
                 let qo3tot = xseco3(k, tt, s);
-                let qo31d  = xsec1d(k, tt, s);
+                let qo31d = xsec1d(k, tt, s);
                 let fff_kj = s.fff[[k, j]];
-                s.vo3[jb]  += fff_kj * qo3tot;
+                s.vo3[jb] += fff_kj * qo3tot;
                 s.vo3d[jb] += fff_kj * qo3tot * qo31d;
             }
             for iv in 4..njval {
@@ -112,8 +112,8 @@ fn interp_tfact(tt: f64, tq1: f64, tq2: f64) -> f64 {
 /// Compute actinic flux FFF and J(O2)/J(NO) by iterating over wavelengths.
 /// Fortran: SUBROUTINE JVALUE
 fn jvalue(s: &mut ModelState) {
-    let nc   = s.nc;
-    let nw2  = s.nw2.saturating_sub(1); // 0-based
+    let nc = s.nc;
+    let nw2 = s.nw2.saturating_sub(1); // 0-based
 
     // Zero actinic flux and JO2/JNO
     for j in 0..nc {
@@ -131,10 +131,10 @@ fn jvalue(s: &mut ModelState) {
     // Spherical geometry air mass weights
     sphere(s);
 
-    let nw1   = s.nw1.saturating_sub(1); // 0-based
-    let nwsrb = s.nwsrb;                 // 0-based count
-    let nsr   = s.nsr;
-    let nodf  = s.nodf;
+    let nw1 = s.nw1.saturating_sub(1); // 0-based
+    let nwsrb = s.nwsrb; // 0-based count
+    let nsr = s.nsr;
+    let nodf = s.nodf;
 
     // ── Main wavelength loop ──────────────────────────────────────────────────
     for k in nw1..=nw2 {
@@ -174,14 +174,13 @@ fn jvalue(s: &mut ModelState) {
             let j1 = s.nlbatm.saturating_sub(1); // 0-based
 
             // Accumulate actinic flux
-            let fl_k    = s.fl[k];
-            let flscal  = s.flscal;
-            let ssf_k   = s.ssf[k];
+            let fl_k = s.fl[k];
+            let flscal = s.flscal;
+            let ssf_k = s.ssf[k];
             let odf_ksr = if is_srb { s.odf[[kodf, ksr]] } else { 1.0 };
 
             for j in j1..nc {
-                let fopt = fl_k * trans[j] * flscal * ssf_k
-                           * if is_srb { odf_ksr } else { 1.0 };
+                let fopt = fl_k * trans[j] * flscal * ssf_k * if is_srb { odf_ksr } else { 1.0 };
                 s.fff[[k, j]] += fopt;
 
                 if s.lprtjv {
@@ -198,9 +197,12 @@ fn jvalue(s: &mut ModelState) {
                 for jb in 0..nbox {
                     let j = (s.nboxdo[jb].abs() as usize).saturating_sub(1); // 0-based
                     let fl_k = s.fl[k];
-                    let fopt = fl_k * trans[j] * s.flscal * s.ssf[k]
-                               * if is_srb { s.odf[[kodf, ksr]] } else { 1.0 };
-                    let tt   = s.t[j] + s.boxtt[jb];
+                    let fopt = fl_k
+                        * trans[j]
+                        * s.flscal
+                        * s.ssf[k]
+                        * if is_srb { s.odf[[kodf, ksr]] } else { 1.0 };
+                    let tt = s.t[j] + s.boxtt[jb];
                     let xqo2b = xseco2(k, tt, ksr_arg, kodf, is_srb, s);
                     s.vo2[jb] += xqo2b * fopt;
                     if is_srb && s.fno[ksr] > 0.0 {
@@ -217,9 +219,9 @@ fn jvalue(s: &mut ModelState) {
 /// Compute slant-path transmission TRANS(J) for each altitude level.
 /// Fortran: SUBROUTINE OPTAU(XQO2, XQO3, XQRAY, XQAER, TRANS)
 fn optau(
-    s:     &mut ModelState,
-    xqo2:  &[f64; 41],
-    xqo3:  &[f64; 41],
+    s: &mut ModelState,
+    xqo2: &[f64; 41],
+    xqo3: &[f64; 41],
     xqray: f64,
     xqaer: f64,
 ) -> [f64; 41] {
@@ -227,26 +229,25 @@ fn optau(
     let j1 = s.nlbatm.saturating_sub(1); // 0-based
 
     let mut trans = [0.0f64; 41];
-    let mut dtau  = [0.0f64; 41];
+    let mut dtau = [0.0f64; 41];
     let mut piray = [0.0f64; 42]; // local work arrays, mirror s.piray/piaer
     let mut piaer = [0.0f64; 42];
 
     // Build differential optical depths
     for j in j1..nc {
-        let xlo3  = s.do3ref[j] * xqo3[j];
-        let xlo2  = s.dm[j] * s.po2 * xqo2[j];
+        let xlo3 = s.do3ref[j] * xqo3[j];
+        let xlo2 = s.dm[j] * s.po2 * xqo2[j];
         let xlray = s.dm[j] * xqray;
         let xlaer = 0.0_f64; // aerosol scattering disabled in Fortran
-        dtau[j]  = xlo3 + xlo2 + xlray + xlaer;
-        let d     = dtau[j].max(1e-300);
+        dtau[j] = xlo3 + xlo2 + xlray + xlaer;
+        let d = dtau[j].max(1e-300);
         piray[j] = xlray / d;
         piaer[j] = xlaer / d;
     }
 
     // Copy boundary values (Fortran: PIRAY(1)=PIRAY(2), using NLBATM indexing)
-    let pi2 = piray[j1 + 1].max(piray[j1]);
-    piray[j1]  = pi2;
-    piaer[j1]  = piaer[j1 + 1].max(piaer[j1]);
+    piray[j1] = piray[j1 + 1];
+    piaer[j1] = piaer[j1 + 1];
 
     // Build cumulative TAU array (in local storage mirroring s.tau)
     // TAU(1)=0 = top; TAU(2)=DTAU(NC)*ZZHT; TAU(JI)=TAU(JI-1)+trapezoidal
@@ -257,16 +258,24 @@ fn optau(
     for ji in 2..ntt {
         let j = nc + 1 - ji - 1; // 0-based
         let jp1 = j + 1;
-        tau_local[ji] = tau_local[ji - 1]
-            + (s.z[jp1] - s.z[j]) * (dtau[j] + dtau[jp1]) * 0.5;
+        tau_local[ji] = tau_local[ji - 1] + (s.z[jp1] - s.z[j]) * (dtau[j] + dtau[jp1]) * 0.5;
     }
 
     // Store for SCATTR and for per-layer access
     s.ntt = ntt;
     for i in 0..ntt.min(42) {
-        s.tau[i]   = tau_local[i];
-        s.piray[i] = piray[nc + 1 - i - 1].max(0.0); // reindex
-        s.piaer[i] = piaer[nc + 1 - i - 1].max(0.0);
+        s.tau[i] = tau_local[i];
+        // The original Fortran passes PIRAY/PIAER in atmospheric-level order
+        // to SCATTR (rather than reversing them with TAU's optical-depth
+        // order). Preserve that indexing quirk only in parity mode; the
+        // normal build uses the physically aligned order.
+        if cfg!(feature = "fortran-parity") {
+            s.piray[i] = piray[i].max(0.0);
+            s.piaer[i] = piaer[i].max(0.0);
+        } else {
+            s.piray[i] = piray[nc + 1 - i - 1].max(0.0);
+            s.piaer[i] = piaer[nc + 1 - i - 1].max(0.0);
+        }
     }
     // Keep piray/piaer boundaries
     s.piray[0] = s.piray[1];
@@ -280,7 +289,10 @@ fn optau(
         let (wting, u0_loop) = if s.ldiurn {
             (wting_base, s.u0)
         } else {
-            let w = s.wtime[iloop] + s.wtime[s.ntim - iloop];
+            // Fortran: WTIME(ILOOP) + WTIME(NTIM+1-ILOOP).
+            // Both indices are zero-based here, so the mirrored slot is
+            // `NTIM - 1 - ILOOP`.
+            let w = s.wtime[iloop] + s.wtime[s.ntim - 1 - iloop];
             let u = s.utime[iloop];
             if u.acos() * 57.29578 > 98.0 {
                 continue;
@@ -323,7 +335,7 @@ fn optau(
 
         // Restore U0/SZA if we changed them
         if !s.ldiurn {
-            s.u0  = s.gmu;
+            s.u0 = s.gmu;
             s.sza = s.gmu.acos() * 57.29578;
         }
     }
@@ -338,9 +350,9 @@ fn optau(
 fn scattr(s: &mut ModelState) {
     const NWT: usize = 3;
     // Gauss-Legendre quadrature points and weights
-    const TTU:  [f64; 3] = [0.1127016654, 0.5000000000, 0.8872983346];
+    const TTU: [f64; 3] = [0.1127016654, 0.5000000000, 0.8872983346];
     const TTU2: [f64; 3] = [0.0127016654, 0.2500000000, 0.7872983346];
-    const TTW:  [f64; 3] = [0.2777777778, 0.4444444444, 0.2777777778];
+    const TTW: [f64; 3] = [0.2777777778, 0.4444444444, 0.2777777778];
     // Scattering matrix (Rayleigh phase function, column-major in Fortran)
     const TTP: [[f64; 3]; 3] = [
         [0.3099042361, 0.4578040972, 0.2322916667],
@@ -348,8 +360,8 @@ fn scattr(s: &mut ModelState) {
         [0.2322916667, 0.4255292360, 0.3421790972],
     ];
 
-    let ntt   = s.ntt;
-    let u0    = s.u0;
+    let ntt = s.ntt;
+    let u0 = s.u0;
     let rflect = s.rflect;
 
     // Phase function source from direct beam
@@ -389,19 +401,18 @@ fn scattr(s: &mut ModelState) {
     // ── Interior levels (II=2..NTT-2) ─────────────────────────────────────────
     for ii in 1..ntt - 1 {
         let dtemp = 2.0 / (s.tau[ii + 1] - s.tau[ii - 1]);
-        let dta   = dtemp / (s.tau[ii] - s.tau[ii - 1]);
-        let dtc   = dtemp / (s.tau[ii + 1] - s.tau[ii]);
+        let dta = dtemp / (s.tau[ii] - s.tau[ii - 1]);
+        let dtc = dtemp / (s.tau[ii + 1] - s.tau[ii]);
         let mut b = [[0.0f64; 3]; 3];
         let mut ttq2 = [0.0f64; 3];
         for j in 0..NWT {
             let atemp = TTU2[j] * dta;
             let ctemp = TTU2[j] * dtc;
-            ttq2[j] = 0.25 * s.fltau[ii] * (s.piray[ii] * ttp0[j] + s.piaer[ii])
-                     + atemp * ttc[ii - 1][j];
+            ttq2[j] =
+                0.25 * s.fltau[ii] * (s.piray[ii] * ttp0[j] + s.piaer[ii]) + atemp * ttc[ii - 1][j];
             for k in 0..NWT {
-                b[j][k] = -atemp * ttd[ii - 1][j][k]
-                          - s.piray[ii] * TTP[j][k]
-                          - s.piaer[ii] * TTW[k];
+                b[j][k] =
+                    -atemp * ttd[ii - 1][j][k] - s.piray[ii] * TTP[j][k] - s.piaer[ii] * TTW[k];
             }
             b[j][j] += 1.0 + atemp + ctemp;
         }
@@ -419,7 +430,7 @@ fn scattr(s: &mut ModelState) {
     // ── Bottom boundary ────────────────────────────────────────────────────────
     let ii = ntt - 1;
     let dtau_bot = s.tau[ii] - s.tau[ii - 1];
-    let factor  = 4.0 * rflect / (1.0 + rflect);
+    let factor = 4.0 * rflect / (1.0 + rflect);
     let ctemp_b = factor * 0.25 * s.ttfbot;
     let mut b = [[0.0f64; 3]; 3];
     let mut ttq3 = [0.0f64; 3];
@@ -427,13 +438,14 @@ fn scattr(s: &mut ModelState) {
     for j in 0..NWT {
         let atemp = TTU[j] / dtau_bot;
         let btemp = 0.5 / atemp;
-        ttq3[j] = atemp * ttc[ii - 1][j] + ctemp_b
-                 + btemp * 0.25 * s.fltau[ii] * (s.piray[ii] * ttp0[j] + s.piaer[ii]);
+        ttq3[j] = atemp * ttc[ii - 1][j]
+            + ctemp_b
+            + btemp * 0.25 * s.fltau[ii] * (s.piray[ii] * ttp0[j] + s.piaer[ii]);
         for k in 0..NWT {
             b[j][k] = -atemp * ttd[ii - 1][j][k]
-                     - btemp * s.piray[ii] * TTP[j][k]
-                     - btemp * s.piaer[ii] * TTW[k]
-                     - factor * TTU[k] * TTW[k];
+                - btemp * s.piray[ii] * TTP[j][k]
+                - btemp * s.piaer[ii] * TTW[k]
+                - factor * TTU[k] * TTW[k];
         }
         b[j][j] += atemp + btemp + 1.0;
     }
@@ -476,7 +488,7 @@ fn matin3(b: &mut [[f64; 3]; 3]) {
     b[1][1] -= b[1][0] * b[0][1];
     b[1][2] -= b[1][0] * b[0][2];
     b[2][0] /= b[0][0];
-    b[2][1]  = (b[2][1] - b[2][0] * b[0][1]) / b[1][1];
+    b[2][1] = (b[2][1] - b[2][0] * b[0][1]) / b[1][1];
     b[2][2] -= b[2][0] * b[0][2] + b[2][1] * b[1][2];
 
     // Invert L
@@ -485,20 +497,20 @@ fn matin3(b: &mut [[f64; 3]; 3]) {
     b[1][0] = -b[1][0];
 
     // Invert U
-    b[2][2]  = 1.0 / b[2][2];
-    b[1][2]  = -b[1][2] * b[2][2] / b[1][1];
-    b[1][1]  = 1.0 / b[1][1];
-    b[0][2]  = -(b[0][1] * b[1][2] + b[0][2] * b[2][2]) / b[0][0];
-    b[0][1]  = -b[0][1] * b[1][1] / b[0][0];
-    b[0][0]  = 1.0 / b[0][0];
+    b[2][2] = 1.0 / b[2][2];
+    b[1][2] = -b[1][2] * b[2][2] / b[1][1];
+    b[1][1] = 1.0 / b[1][1];
+    b[0][2] = -(b[0][1] * b[1][2] + b[0][2] * b[2][2]) / b[0][0];
+    b[0][1] = -b[0][1] * b[1][1] / b[0][0];
+    b[0][0] = 1.0 / b[0][0];
 
     // Multiply U⁻¹ × L⁻¹
     b[0][0] += b[0][1] * b[1][0] + b[0][2] * b[2][0];
-    b[0][1]  += b[0][2] * b[2][1];
-    b[1][0]  = b[1][1] * b[1][0] + b[1][2] * b[2][0];
-    b[1][1]  += b[1][2] * b[2][1];
-    b[2][0]  = b[2][2] * b[2][0];
-    b[2][1]  = b[2][2] * b[2][1];
+    b[0][1] += b[0][2] * b[2][1];
+    b[1][0] = b[1][1] * b[1][0] + b[1][2] * b[2][0];
+    b[1][1] += b[1][2] * b[2][1];
+    b[2][0] = b[2][2] * b[2][0];
+    b[2][1] = b[2][2] * b[2][1];
 }
 
 // ── SPHERE — spherical geometry air mass weights ──────────────────────────────
@@ -506,9 +518,9 @@ fn matin3(b: &mut [[f64; 3]; 3]) {
 /// Fill s.wtau[layer][level] with slant-path weights.
 /// Fortran: SUBROUTINE SPHERE
 pub fn sphere(s: &mut ModelState) {
-    let nc  = s.nc;
+    let nc = s.nc;
     let rad = s.rad;
-    let u0  = s.u0;
+    let u0 = s.u0;
 
     // Radii at each level
     let mut rz = [0.0f64; 41];
@@ -549,9 +561,9 @@ pub fn sphere(s: &mut ModelState) {
         // Upward path to top
         for i in j + 1..nc {
             let xmu2 = (1.0 - rq[i - 1] * (1.0 - xmu1 * xmu1)).max(0.0).sqrt();
-            let xl   = rz[i] * xmu2 - rz[i - 1] * xmu1;
+            let xl = rz[i] * xmu2 - rz[i - 1] * xmu1;
             s.wtau[[i - 1, j]] += xl * 0.5;
-            s.wtau[[i,     j]] += xl * 0.5;
+            s.wtau[[i, j]] += xl * 0.5;
             xmu1 = xmu2;
         }
 
@@ -572,14 +584,14 @@ pub fn sphere(s: &mut ModelState) {
             let diff = rz[jj] * (1.0 - xmu1 * xmu1).sqrt() - rz[jj - 1];
             if diff < 0.0 {
                 let xmu2 = (1.0 - (1.0 - xmu1 * xmu1) / rq[jj - 1]).max(0.0).sqrt();
-                let xl   = (rz[jj] * xmu1 - rz[jj - 1] * xmu2).abs();
-                s.wtau[[jj,     j]] += xl;
+                let xl = (rz[jj] * xmu1 - rz[jj - 1] * xmu2).abs();
+                s.wtau[[jj, j]] += xl;
                 s.wtau[[jj - 1, j]] += xl;
                 xmu1 = xmu2;
             } else {
-                let xl    = rz[jj] * xmu1 * 2.0;
+                let xl = rz[jj] * xmu1 * 2.0;
                 let wting = diff / (rz[jj] - rz[jj - 1]);
-                s.wtau[[jj,     j]] += xl * 0.5 * (1.0 + wting);
+                s.wtau[[jj, j]] += xl * 0.5 * (1.0 + wting);
                 s.wtau[[jj - 1, j]] += xl * 0.5 * (1.0 - wting);
                 break;
             }
@@ -593,10 +605,13 @@ pub fn sphere(s: &mut ModelState) {
 #[inline(always)]
 fn airmas(u: f64, h: f64) -> f64 {
     (1.0 + h)
-        / (u * u + 2.0 * h * (1.0
-            - 0.6817 * (-57.3 * u.abs() / (1.0 + 5500.0 * h).sqrt()).exp()
-              / (1.0 + 0.625 * h)))
-        .sqrt()
+        / (u * u
+            + 2.0
+                * h
+                * (1.0
+                    - 0.6817 * (-57.3 * u.abs() / (1.0 + 5500.0 * h).sqrt()).exp()
+                        / (1.0 + 0.625 * h)))
+            .sqrt()
 }
 
 // ── Cross-section helper functions ───────────────────────────────────────────
@@ -606,8 +621,12 @@ fn airmas(u: f64, h: f64) -> f64 {
 fn xseco3(k: usize, ttt: f64, s: &ModelState) -> f64 {
     flint(
         ttt,
-        s.tqq[[0, 2]], s.tqq[[1, 2]], s.tqq[[2, 2]],
-        s.qo3[[k, 0]], s.qo3[[k, 1]], s.qo3[[k, 2]],
+        s.tqq[[0, 2]],
+        s.tqq[[1, 2]],
+        s.tqq[[2, 2]],
+        s.qo3[[k, 0]],
+        s.qo3[[k, 1]],
+        s.qo3[[k, 2]],
     )
 }
 
@@ -616,8 +635,12 @@ fn xseco3(k: usize, ttt: f64, s: &ModelState) -> f64 {
 fn xsec1d(k: usize, ttt: f64, s: &ModelState) -> f64 {
     flint(
         ttt,
-        s.tqq[[0, 3]], s.tqq[[1, 3]], s.tqq[[2, 3]],
-        s.q1d[[k, 0]], s.q1d[[k, 1]], s.q1d[[k, 2]],
+        s.tqq[[0, 3]],
+        s.tqq[[1, 3]],
+        s.tqq[[2, 3]],
+        s.q1d[[k, 0]],
+        s.q1d[[k, 1]],
+        s.q1d[[k, 2]],
     )
 }
 
@@ -627,14 +650,22 @@ fn xseco2(k: usize, ttt: f64, ksr: usize, kodf: usize, is_srb: bool, s: &ModelSt
     if !is_srb {
         flint(
             ttt,
-            s.tqq[[0, 1]], s.tqq[[1, 1]], s.tqq[[2, 1]],
-            s.qo2[[k, 0]], s.qo2[[k, 1]], s.qo2[[k, 2]],
+            s.tqq[[0, 1]],
+            s.tqq[[1, 1]],
+            s.tqq[[2, 1]],
+            s.qo2[[k, 0]],
+            s.qo2[[k, 1]],
+            s.qo2[[k, 2]],
         )
     } else {
         flint(
             ttt,
-            s.tqq[[0, 1]], s.tqq[[1, 1]], s.tqq[[2, 1]],
-            s.o2x[[kodf, ksr, 0]], s.o2x[[kodf, ksr, 1]], s.o2x[[kodf, ksr, 2]],
+            s.tqq[[0, 1]],
+            s.tqq[[1, 1]],
+            s.tqq[[2, 1]],
+            s.o2x[[kodf, ksr, 0]],
+            s.o2x[[kodf, ksr, 1]],
+            s.o2x[[kodf, ksr, 2]],
         )
     }
 }
@@ -643,11 +674,17 @@ fn xseco2(k: usize, ttt: f64, ksr: usize, kodf: usize, is_srb: bool, s: &ModelSt
 /// Fortran: FUNCTION FLINT(TINT, T1, T2, T3, F1, F2, F3)
 pub fn flint(tint: f64, t1: f64, t2: f64, t3: f64, f1: f64, f2: f64, f3: f64) -> f64 {
     if tint <= t2 {
-        if tint <= t1 { f1 }
-        else { f1 + (f2 - f1) * (tint - t1) / (t2 - t1) }
+        if tint <= t1 {
+            f1
+        } else {
+            f1 + (f2 - f1) * (tint - t1) / (t2 - t1)
+        }
     } else {
-        if tint >= t3 { f3 }
-        else { f2 + (f3 - f2) * (tint - t2) / (t3 - t2) }
+        if tint >= t3 {
+            f3
+        } else {
+            f2 + (f3 - f2) * (tint - t2) / (t3 - t2)
+        }
     }
 }
 
@@ -657,7 +694,7 @@ pub fn raylay(wave: f64) -> f64 {
     if wave < 170.0 {
         1.0e-24
     } else {
-        let wsqi   = 1.0e6 / (wave * wave);
+        let wsqi = 1.0e6 / (wave * wave);
         let refrm1 = 1.0e-6 * (64.328 + 29498.1 / (146.0 - wsqi) + 255.4 / (41.0 - wsqi));
         5.40e-21 * (refrm1 * wsqi).powi(2)
     }

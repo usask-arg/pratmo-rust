@@ -10,71 +10,72 @@ use crate::constants::*;
 ///   - Multi-dim arrays follow Fortran column-major logical ordering where noted
 pub struct ModelState {
     // ── COMMON / TITLES / ───────────────────────────────────────────────────
-    pub title0: String,                         // CHARACTER*78
-    pub titlev: String,                         // CHARACTER*78
-    pub titlej: Vec<[String; 3]>,               // CHARACTER*20 TITLEJ(3, NXS+4) → [NJVAL][3]
+    pub title0: String,           // CHARACTER*78
+    pub titlev: String,           // CHARACTER*78
+    pub titlej: Vec<[String; 3]>, // CHARACTER*20 TITLEJ(3, NXS+4) → [NJVAL][3]
 
     // ── COMMON/CCATMO/ ──────────────────────────────────────────────────────
     /// Temperature profile (K); T(46) in Fortran — 46 to allow interpolation headroom
     pub t: [f64; 46],
-    pub refo3: [f64; NL],       // reference O3 profile (cm⁻³)
-    pub pstd: [f64; NL],        // standard pressure profile (mb)
-    pub dm: [f64; NL],          // air number density (cm⁻³)
-    pub do3ref: [f64; NL],      // local O3 reference density (cm⁻³)
-    pub z: [f64; NL],           // altitude (cm)
-    pub theta: [f64; NL],       // potential temperature (K)
-    pub aer: [f64; NL],         // aerosol extinction (km⁻¹)
-    pub do3int: [f64; NL],      // integrated O3 column above (cm⁻²·atm)
+    pub refo3: [f64; NL],  // reference O3 profile (cm⁻³)
+    pub pstd: [f64; NL],   // standard pressure profile (mb)
+    pub dm: [f64; NL],     // air number density (cm⁻³)
+    pub do3ref: [f64; NL], // local O3 reference density (cm⁻³)
+    pub z: [f64; NL],      // altitude (cm)
+    pub theta: [f64; NL],  // potential temperature (K)
+    pub aer: [f64; NL],    // aerosol extinction (km⁻¹)
+    pub do3int: [f64; NL], // integrated O3 column above (cm⁻²·atm)
     /// WTAU(NL,NL): optical depth table [from_level][to_level]
     pub wtau: Array2<f64>,
-    pub dnoy_ref: [f64; NL],    // reference NOy profile (cm⁻³)
-    pub rflect: f64,            // surface albedo
-    pub sza: f64,               // solar zenith angle (degrees)
-    pub u0: f64,                // cos(SZA)
-    pub tanht: f64,             // tangent height (km)
-    pub nlbatm: usize,          // number of atmospheric levels used
-    pub nc: usize,              // number of active altitude levels
-    pub ncdim: usize,           // declared dimension for nc
-    pub nbdim: usize,           // declared dimension for nb
-    pub nbox: usize,            // number of boxes in current run
-    pub nd216: i32,             // run mode flag (>0: CTM, 0: DIURN/TPATH, <0: DERIVS)
-    pub nd216s: i32,            // saved nd216
+    pub dnoy_ref: [f64; NL], // reference NOy profile (cm⁻³)
+    pub rflect: f64,         // surface albedo
+    pub sza: f64,            // solar zenith angle (degrees)
+    pub u0: f64,             // cos(SZA)
+    pub tanht: f64,          // tangent height (km)
+    pub nlbatm: usize,       // number of atmospheric levels used
+    pub nc: usize,           // number of active altitude levels
+    pub ncdim: usize,        // declared dimension for nc
+    pub nbdim: usize,        // declared dimension for nb
+    pub nbox: usize,         // number of boxes in current run
+    pub n2box: usize,        // number of box columns actually present in fort02
+    pub nd216: i32,          // run mode flag (>0: CTM, 0: DIURN/TPATH, <0: DERIVS)
+    pub nd216s: i32,         // saved nd216
 
     // ── COMMON/CCETC/ ───────────────────────────────────────────────────────
-    pub press0: f64,            // surface pressure (mb)
-    pub pn2: f64,               // N2 partial pressure
-    pub po2: f64,               // O2 partial pressure
-    pub pco2: f64,              // CO2 partial pressure
-    pub rad: f64,               // Earth radius (cm)
-    pub grav: f64,              // gravity (cm/s²)
-    pub zzht: f64,              // scale height (cm)
-    pub xlat: f64,              // latitude (radians)
-    pub xdec: f64,              // solar declination (radians)
-    pub xlatd: f64,             // latitude (degrees)
-    pub xdecd: f64,             // solar declination (degrees)
-    pub atime: [f64; 15],       // time array A
-    pub btime: [f64; 15],       // time array B
-    pub clouds: f64,            // cloud fraction
-    pub turbd0: f64,            // turbidity parameter 0
-    pub turbdx: f64,            // turbidity parameter x
-    pub flscal: f64,            // solar flux scale factor
+    pub press0: f64,      // surface pressure (mb)
+    pub pn2: f64,         // N2 partial pressure
+    pub po2: f64,         // O2 partial pressure
+    pub pco2: f64,        // CO2 partial pressure
+    pub rad: f64,         // Earth radius (cm)
+    pub grav: f64,        // gravity (cm/s²)
+    pub zzht: f64,        // scale height (cm)
+    pub xlat: f64,        // latitude (radians)
+    pub xdec: f64,        // solar declination (radians)
+    pub xlatd: f64,       // latitude (degrees)
+    pub xdecd: f64,       // solar declination (degrees)
+    pub atime: [f64; 15], // time array A
+    pub btime: [f64; 15], // time array B
+    pub clouds: f64,      // cloud fraction
+    pub turbd0: f64,      // turbidity parameter 0
+    pub turbdx: f64,      // turbidity parameter x
+    pub flscal: f64,      // solar flux scale factor
 
     // ── COMMON/CCSCAT/ ──────────────────────────────────────────────────────
-    pub tau: [f64; 42],         // total optical depth per layer
-    pub piray: [f64; 42],       // Rayleigh scattering phase integral
-    pub piaer: [f64; 42],       // aerosol scattering phase integral
-    pub fltau: [f64; 42],       // filtered tau
-    pub ttfbot: f64,            // total tau at bottom
-    pub ntt: usize,             // number of tau levels
+    pub tau: [f64; 42],   // total optical depth per layer
+    pub piray: [f64; 42], // Rayleigh scattering phase integral
+    pub piaer: [f64; 42], // aerosol scattering phase integral
+    pub fltau: [f64; 42], // filtered tau
+    pub ttfbot: f64,      // total tau at bottom
+    pub ntt: usize,       // number of tau levels
 
     // ── COMMON/CCWORK/ ──────────────────────────────────────────────────────
     /// Previous time step species densities for 30 implicit species
     pub xnold: [f64; NDEN],
-    pub deltt: f64,             // current time step (s)
-    pub gmu: f64,               // cos(SZA) at current time step
-    pub ittt: i32,              // iteration counter
-    pub ialt: usize,            // current altitude level index (0-based)
-    pub ibox: usize,            // current box index (0-based)
+    pub deltt: f64,  // current time step (s)
+    pub gmu: f64,    // cos(SZA) at current time step
+    pub ittt: i32,   // iteration counter
+    pub ialt: usize, // current altitude level index (0-based)
+    pub ibox: usize, // current box index (0-based)
 
     // ── COMMON/CCDEN/ ───────────────────────────────────────────────────────
     // Species number densities (cm⁻³), one per box.
@@ -89,7 +90,7 @@ pub struct ModelState {
     pub doh: [f64; NB],
     pub dho2: [f64; NB],
     pub dh2o2: [f64; NB],
-    pub do_: [f64; NB],         // DO is a Rust keyword, renamed do_
+    pub do_: [f64; NB], // DO is a Rust keyword, renamed do_
     pub do3: [f64; NB],
     pub dbro: [f64; NB],
     pub dbr: [f64; NB],
@@ -111,16 +112,16 @@ pub struct ModelState {
     pub dcl2o2: [f64; NB],
     pub dbrcl: [f64; NB],
     // Iodine species (N31..N40)
-    pub di_:    [f64; NB],         // I  (atomic iodine; `i` is a keyword)
-    pub dio:    [f64; NB],         // IO
-    pub dhoi:   [f64; NB],         // HOI
-    pub diono2: [f64; NB],         // IONO2
-    pub dhi:    [f64; NB],         // HI
-    pub doio:   [f64; NB],         // OIO
-    pub di2:    [f64; NB],         // I2
-    pub di2o2:  [f64; NB],         // I2O2
-    pub di2o3:  [f64; NB],         // I2O3
-    pub di2o4:  [f64; NB],         // I2O4
+    pub di_: [f64; NB],    // I  (atomic iodine; `i` is a keyword)
+    pub dio: [f64; NB],    // IO
+    pub dhoi: [f64; NB],   // HOI
+    pub diono2: [f64; NB], // IONO2
+    pub dhi: [f64; NB],    // HI
+    pub doio: [f64; NB],   // OIO
+    pub di2: [f64; NB],    // I2
+    pub di2o2: [f64; NB],  // I2O2
+    pub di2o3: [f64; NB],  // I2O3
+    pub di2o4: [f64; NB],  // I2O4
     // Long-lived species mixing ratios (dimensionless) — FFFFFF(NB,19)
     pub fo3: [f64; NB],
     pub fn2o: [f64; NB],
@@ -132,7 +133,7 @@ pub struct ModelState {
     pub fcfcl3: [f64; NB],
     pub fccl4: [f64; NB],
     pub fch3cl: [f64; NB],
-    pub fmecl: [f64; NB],       // CH3CCl3
+    pub fmecl: [f64; NB], // CH3CCl3
     pub fh2: [f64; NB],
     pub fh2o: [f64; NB],
     pub fnh3: [f64; NB],
@@ -140,12 +141,12 @@ pub struct ModelState {
     pub fbrx: [f64; NB],
     pub fch3br: [f64; NB],
     pub focs: [f64; NB],
-    pub fiodx: [f64; NB],          // total inorganic iodine mixing ratio
-    pub fi2: [f64; NB],            // I2 source mixing ratio
+    pub fiodx: [f64; NB], // total inorganic iodine mixing ratio
+    pub fi2: [f64; NB],   // I2 source mixing ratio
     pub fxxx: [f64; NB],
     /// Species name labels (CHARACTER*8)
     pub titler: [String; 5],
-    pub titles: Vec<String>,    // TITLES(NSPEC+3)
+    pub titles: Vec<String>, // TITLES(NSPEC+3)
     pub ndval: i32,
     pub nfval: i32,
 
@@ -157,31 +158,31 @@ pub struct ModelState {
     /// Solar flux at each bin; FL(NQ)
     pub fl: [f64; NQ],
     /// O2 absorption cross-sections; QO2(NQ, 3) — 3 temperature points
-    pub qo2: Array2<f64>,       // shape [NQ, 3]
+    pub qo2: Array2<f64>, // shape [NQ, 3]
     /// O2 Schumann-Runge band data; O2X(6, 15, 3)
-    pub o2x: Array3<f64>,       // shape [6, 15, 3]
+    pub o2x: Array3<f64>, // shape [6, 15, 3]
     /// O2 SRB oscillator strengths; ODF(6, 15)
-    pub odf: Array2<f64>,       // shape [6, 15]
+    pub odf: Array2<f64>, // shape [6, 15]
     /// NO photolysis flux coefficients; FNO(15)
     pub fno: [f64; 15],
     /// NO cross-sections; QNO(6, 15)
-    pub qno: Array2<f64>,       // shape [6, 15]
+    pub qno: Array2<f64>, // shape [6, 15]
     /// O3 cross-sections; QO3(NQ, 3)
-    pub qo3: Array2<f64>,       // shape [NQ, 3]
+    pub qo3: Array2<f64>, // shape [NQ, 3]
     /// O3→O(1D) cross-sections; Q1D(NQ, 3)
-    pub q1d: Array2<f64>,       // shape [NQ, 3]
+    pub q1d: Array2<f64>, // shape [NQ, 3]
     /// Additional species cross-sections; QQQ(NQ, 2, NXS) — 2 temperature points
-    pub qqq: Array3<f64>,       // shape [NQ, 2, NXS]
+    pub qqq: Array3<f64>, // shape [NQ, 2, NXS]
     /// Temperature interpolation points for each J-value; TQQ(3, NXS+4)
-    pub tqq: Array2<f64>,       // shape [3, NJVAL]
+    pub tqq: Array2<f64>, // shape [3, NJVAL]
     pub qmi1m: f64,
     pub qmiwvl: f64,
-    pub nw1: usize,             // first wavelength bin for fast-J
-    pub nw2: usize,             // last wavelength bin for fast-J
-    pub nwsrb: usize,           // number of SRB bins
-    pub nsr: usize,             // number of SRB sub-intervals
-    pub nodf: usize,            // number of ODF points
-    pub isr: [usize; 15],       // SRB bin indices
+    pub nw1: usize,       // first wavelength bin for fast-J
+    pub nw2: usize,       // last wavelength bin for fast-J
+    pub nwsrb: usize,     // number of SRB bins
+    pub nsr: usize,       // number of SRB sub-intervals
+    pub nodf: usize,      // number of ODF points
+    pub isr: [usize; 15], // SRB bin indices
 
     // ── COMMON/CCJVL/ ───────────────────────────────────────────────────────
     // J-value profiles (s⁻¹) at each altitude level.
@@ -189,7 +190,7 @@ pub struct ModelState {
     pub vno: [f64; NL],
     pub vo2: [f64; NL],
     pub vo3: [f64; NL],
-    pub vo3d: [f64; NL],        // O3 → O(1D)
+    pub vo3d: [f64; NL], // O3 → O(1D)
     pub vh2coa: [f64; NL],
     pub vh2cob: [f64; NL],
     pub vh2o2: [f64; NL],
@@ -230,22 +231,22 @@ pub struct ModelState {
     pub vch3i: [f64; NL],
     pub vcf3i: [f64; NL],
     pub vocs: [f64; NL],
-    pub vio:    [f64; NL],         // J(IO)
-    pub vhoi:   [f64; NL],         // J(HOI)
-    pub viono2: [f64; NL],         // J(IONO2)
-    pub voio:   [f64; NL],         // J(OIO)
-    pub vi2:    [f64; NL],         // J(I2)
-    pub vi2o2:  [f64; NL],         // J(I2O2)
-    pub vi2o3:  [f64; NL],         // J(I2O3)
-    pub vi2o4:  [f64; NL],         // J(I2O4)
+    pub vio: [f64; NL],    // J(IO)
+    pub vhoi: [f64; NL],   // J(HOI)
+    pub viono2: [f64; NL], // J(IONO2)
+    pub voio: [f64; NL],   // J(OIO)
+    pub vi2: [f64; NL],    // J(I2)
+    pub vi2o2: [f64; NL],  // J(I2O2)
+    pub vi2o3: [f64; NL],  // J(I2O3)
+    pub vi2o4: [f64; NL],  // J(I2O4)
     /// Actinic flux per wavelength bin at each level; FFF(NQ, NL)
-    pub fff: Array2<f64>,       // shape [NQ, NL]
-    pub njval: usize,           // number of J-values computed
+    pub fff: Array2<f64>, // shape [NQ, NL]
+    pub njval: usize,      // number of J-values computed
 
     // ── COMMON/CCNNN/ ───────────────────────────────────────────────────────
     // Species index mapping: N1..N35 are the 1-based indices for each of the
     // NDEN implicit species in the Newton-Raphson solve (NTOT = N35).
-    pub n: [usize; NDEN],       // N1..N35 mapped to n[0]..n[34]
+    pub n: [usize; NDEN], // N1..N35 mapped to n[0]..n[34]
     pub ntot: usize,
     pub ntotx: usize,
     pub nnrt: [usize; NSLOWM],
@@ -259,54 +260,54 @@ pub struct ModelState {
     // ── COMMON/CCRTS/ ───────────────────────────────────────────────────────
     // Equivalence: RCOLUM = XR(NDEN) ++ R(NR) ++ RP(NDEN) ++ RL(NDEN)
     //              ++ RPF(NDEN) ++ RLF(NDEN) ++ RQF(NDEN)
-    pub xr: [f64; NDEN],        // species densities passed to solver
-    pub r: [f64; NR],           // reaction rates (cm⁻³ s⁻¹ or s⁻¹)
-    pub rp: [f64; NDEN],        // production rates
-    pub rl: [f64; NDEN],        // loss rates
-    pub rpf: [f64; NDEN],       // production rates (family)
-    pub rlf: [f64; NDEN],       // loss rates (family)
-    pub rqf: [f64; NDEN],       // quasi-steady-state rates (family)
+    pub xr: [f64; NDEN],  // species densities passed to solver
+    pub r: [f64; NR],     // reaction rates (cm⁻³ s⁻¹ or s⁻¹)
+    pub rp: [f64; NDEN],  // production rates
+    pub rl: [f64; NDEN],  // loss rates
+    pub rpf: [f64; NDEN], // production rates (family)
+    pub rlf: [f64; NDEN], // loss rates (family)
+    pub rqf: [f64; NDEN], // quasi-steady-state rates (family)
 
     // ── COMMON/DMEANS/ ──────────────────────────────────────────────────────
     /// Daily mean diagnostic storage; PMEAN(490)
     pub pmean: [f64; NPMEAN],
     /// Species densities at each time step; XNOFT(30, 44)
-    pub xnoft: Array2<f64>,     // shape [NDEN, NXNOFT]
+    pub xnoft: Array2<f64>, // shape [NDEN, NXNOFT]
     /// Per-box mean diagnostics; PPMEAN(50+NNDXPQ, NB)
-    pub ppmean: Array2<f64>,    // shape [50+NNDXPQ, NB]
+    pub ppmean: Array2<f64>, // shape [50+NNDXPQ, NB]
     /// Per-box species at each time step; XXNOFT(30, 44, NB)
-    pub xxnoft: Array3<f64>,    // shape [NDEN, NXNOFT, NB]
+    pub xxnoft: Array3<f64>, // shape [NDEN, NXNOFT, NB]
     /// Stored J-values; STORJV(NXS+4, 16, NB)
-    pub storjv: Array3<f64>,    // shape [NJVAL, 16, NB]
+    pub storjv: Array3<f64>, // shape [NJVAL, 16, NB]
     pub ndxpp: [usize; NNDXPQ],
     pub ndxqq: [usize; NNDXPQ],
 
     // ── COMMON/CCKINE/ ──────────────────────────────────────────────────────
     /// Arrhenius parameters; RK(2, 250) — (A, Ea) or similar
-    pub rk: Array2<f64>,        // shape [2, NR]
+    pub rk: Array2<f64>, // shape [2, NR]
     /// Rate format codes; RFMT(2, 250) stored as integers encoded in f64
-    pub rfmt: Array2<f64>,      // shape [2, NR]  (CHARACTER*8 in Fortran → encoded)
+    pub rfmt: Array2<f64>, // shape [2, NR]  (CHARACTER*8 in Fortran → encoded)
     pub rfmt_str: Vec<[String; 2]>, // actual CHARACTER*8 values; RFMT(2,250)
     /// Additional rate parameters; RKADD(2, 50)
-    pub rkadd: Array2<f64>,     // shape [2, 50]
+    pub rkadd: Array2<f64>, // shape [2, 50]
     /// Rate index mapping; NDXRAT(250)
     pub ndxrat: [i32; NR],
-    pub nrates: usize,          // total number of rates
-    pub nrate1: usize,          // index of first photolysis rate
+    pub nrates: usize, // total number of rates
+    pub nrate1: usize, // index of first photolysis rate
     /// Zero-pressure rate parameters; rk0(2, 250)
-    pub rk0: Array2<f64>,       // shape [2, NR]
+    pub rk0: Array2<f64>, // shape [2, NR]
 
     // ── COMMON/CCRATE/ ──────────────────────────────────────────────────────
     /// Evaluated rate constants at current T, M; RATEK(250)
     pub ratek: [f64; NR],
-    pub ztemp: f64,             // current temperature (K)
-    pub zdnum: f64,             // current number density (cm⁻³)
-    pub zalt: f64,              // current altitude (cm)
-    pub izalt: usize,           // current altitude level index
+    pub ztemp: f64,   // current temperature (K)
+    pub zdnum: f64,   // current number density (cm⁻³)
+    pub zalt: f64,    // current altitude (cm)
+    pub izalt: usize, // current altitude level index
 
     // ── COMMON/CCSOLV/ ──────────────────────────────────────────────────────
     /// Jacobian matrix for Newton-Raphson; backing storage is used column-major in hot solver paths.
-    pub a_mat: Array2<f64>,     // shape [NDEN, NDEN]
+    pub a_mat: Array2<f64>, // shape [NDEN, NDEN]
     /// Pivot indices from LU; IPA(30)
     pub ipa: [usize; NDEN],
     pub astore: [f64; NDEN],
@@ -321,43 +322,43 @@ pub struct ModelState {
     pub utime: [f64; NXNOFT],
     /// Zenith angle time array; ZTIME(44)
     pub ztime: [f64; NXNOFT],
-    pub gmu0: f64,              // noon cos(SZA)
-    pub daysec: f64,            // seconds per day
-    pub sunset: f64,            // sunset time (s from midnight)
-    pub jtim: [i32; NXNOFT],    // time step type flags
-    pub nhhmm: [i32; NXNOFT],   // time labels (HHMM format)
-    pub ntim: usize,            // number of diurnal time steps
-    pub nmu: usize,             // number of cos(SZA) points
-    pub ntimdo: usize,          // actual number of time steps used
+    pub gmu0: f64,            // noon cos(SZA)
+    pub daysec: f64,          // seconds per day
+    pub sunset: f64,          // sunset time (s from midnight)
+    pub jtim: [i32; NXNOFT],  // time step type flags
+    pub nhhmm: [i32; NXNOFT], // time labels (HHMM format)
+    pub ntim: usize,          // number of diurnal time steps
+    pub nmu: usize,           // number of cos(SZA) points
+    pub ntimdo: usize,        // actual number of time steps used
 
     // ── COMMON/CCRAL/ ───────────────────────────────────────────────────────
-    pub rafmin: f64,            // min time step fraction
-    pub rafmax: f64,            // max time step fraction
-    pub rafpml: f64,            // P-L convergence tolerance
-    pub rafeps: f64,            // species convergence epsilon
-    pub raferr: f64,            // species convergence error limit
-    pub dayeps: f64,            // daily convergence epsilon
-    pub dayerr: f64,            // daily convergence error
-    pub maxraf: usize,          // max NR iterations
-    pub maxrlx: usize,          // max relaxation iterations
+    pub rafmin: f64,   // min time step fraction
+    pub rafmax: f64,   // max time step fraction
+    pub rafpml: f64,   // P-L convergence tolerance
+    pub rafeps: f64,   // species convergence epsilon
+    pub raferr: f64,   // species convergence error limit
+    pub dayeps: f64,   // daily convergence epsilon
+    pub dayerr: f64,   // daily convergence error
+    pub maxraf: usize, // max NR iterations
+    pub maxrlx: usize, // max relaxation iterations
 
     // ── COMMON/CCPARM/ ──────────────────────────────────────────────────────
-    pub boxrn: [f64; NB],       // box run number / identifier
-    pub boxaa: [f64; NB],       // box surface albedo
-    pub boxtt: [f64; NB],       // box temperature offset (K)
-    pub nboxpr: [i32; NB],      // print flags per box
-    pub nboxdo: [i32; NB],      // altitude level for each box (1-based; negative = use DAILY)
-    pub nboxmx: [i32; NB],      // max integration days per box
-    pub nboxwt: [i32; NB],      // weight flag per box
-    pub nboxct: [i32; NB],      // count flag per box
+    pub boxrn: [f64; NB],  // box run number / identifier
+    pub boxaa: [f64; NB],  // box surface albedo
+    pub boxtt: [f64; NB],  // box temperature offset (K)
+    pub nboxpr: [i32; NB], // print flags per box
+    pub nboxdo: [i32; NB], // altitude level for each box (1-based; negative = use DAILY)
+    pub nboxmx: [i32; NB], // max integration days per box
+    pub nboxwt: [i32; NB], // weight flag per box
+    pub nboxct: [i32; NB], // count flag per box
     pub nprt1: i32,
     pub nprt2: i32,
     pub nprtrr: i32,
     pub itprtx: i32,
     pub itprtr: i32,
     pub itprtb: i32,
-    pub nday: i32,              // diurnal flag (0=noon avg, 1=full 24h)
-    pub ndaysd: i32,            // number of integration days
+    pub nday: i32,   // diurnal flag (0=noon avg, 1=full 24h)
+    pub ndaysd: i32, // number of integration days
     pub npstd: i32,
 
     // ── COMMON/CCDIFF/ ──────────────────────────────────────────────────────
@@ -385,68 +386,68 @@ pub struct ModelState {
 
     // ── COMMON/CHRIS/ ───────────────────────────────────────────────────────
     /// CTM diagnostic storage; dpl(12, 18, NB, NTAB)
-    pub dpl: Array4<f64>,       // shape [12, 18, NB, NTAB]
-    pub asa: [f64; NL],         // aerosol surface area density (μm²/cm³)
+    pub dpl: Array4<f64>, // shape [12, 18, NB, NTAB]
+    pub asa: [f64; NL], // aerosol surface area density (μm²/cm³)
     /// Density output; denout(12, 18, 3, 4, NB)
     pub denout: ndarray::Array5<f64>, // shape [12, 18, 3, 4, NB]
     /// AM/PM ratio means; rampm(12, 18, 9, NB)
-    pub rampm: Array4<f64>,     // shape [12, 18, 9, NB]
-    pub aersf: f64,             // aerosol scale factor
-    pub smxsf: [f64; NQ],       // spectral solar flux scale factors
-    pub ssf: [f64; NQ],         // spectral scale factors
-    pub coclo: [f64; 44],       // ClO diurnal cycle
-    pub cbro: [f64; 44],        // BrO diurnal cycle
-    pub cno2: [f64; 44],        // NO2 diurnal cycle
-    pub cno3: [f64; 44],        // NO3 diurnal cycle
-    pub cclo: [f64; 44],        // Cl diurnal cycle
-    pub chono: [f64; 44],       // HONOx diurnal cycle
-    pub xpo3: f64,              // O3 production
-    pub xlo3: f64,              // O3 loss
-    pub do2int: [f64; NL],      // integrated O2 column above (cm⁻²·atm)
+    pub rampm: Array4<f64>, // shape [12, 18, 9, NB]
+    pub aersf: f64,     // aerosol scale factor
+    pub smxsf: [f64; NQ], // spectral solar flux scale factors
+    pub ssf: [f64; NQ], // spectral scale factors
+    pub coclo: [f64; 44], // ClO diurnal cycle
+    pub cbro: [f64; 44], // BrO diurnal cycle
+    pub cno2: [f64; 44], // NO2 diurnal cycle
+    pub cno3: [f64; 44], // NO3 diurnal cycle
+    pub cclo: [f64; 44], // Cl diurnal cycle
+    pub chono: [f64; 44], // HONOx diurnal cycle
+    pub xpo3: f64,      // O3 production
+    pub xlo3: f64,      // O3 loss
+    pub do2int: [f64; NL], // integrated O2 column above (cm⁻²·atm)
     /// O3 tracer profiles; o3tr(12, 55)
-    pub o3tr: Array2<f64>,      // shape [12, 55]
-    pub ztr: [f64; 55],         // tracer altitude grid (cm)
+    pub o3tr: Array2<f64>, // shape [12, 55]
+    pub ztr: [f64; 55], // tracer altitude grid (cm)
     /// Water albedo table; watalb(11, 34)
-    pub watalb: Array2<f64>,    // shape [11, 34]
-    pub wvalb: [f64; 34],       // wavelength grid for albedo table
-    pub szalb: [f64; 11],       // SZA grid for albedo table
+    pub watalb: Array2<f64>, // shape [11, 34]
+    pub wvalb: [f64; 34], // wavelength grid for albedo table
+    pub szalb: [f64; 11], // SZA grid for albedo table
     /// SZA-dependent albedo; ztalb(44, 34)
-    pub ztalb: Array2<f64>,     // shape [44, 34]
-    pub dn2oref: [f64; NL],     // reference N2O profile (cm⁻³)
+    pub ztalb: Array2<f64>, // shape [44, 34]
+    pub dn2oref: [f64; NL], // reference N2O profile (cm⁻³)
 
     // ── COMMON/CHRIS2/ ──────────────────────────────────────────────────────
     /// Input temperature climatology; TINP(12, 18, 46)
-    pub tinp: Array3<f64>,      // shape [12, 18, 46]
+    pub tinp: Array3<f64>, // shape [12, 18, 46]
     /// Input O3 climatology; DO3INP(12, 18, NL)
-    pub do3inp: Array3<f64>,    // shape [12, 18, NL]
+    pub do3inp: Array3<f64>, // shape [12, 18, NL]
     /// Input N2O climatology; DN2OINP(12, 18, NL)
-    pub dn2oinp: Array3<f64>,   // shape [12, 18, NL]
+    pub dn2oinp: Array3<f64>, // shape [12, 18, NL]
     /// Input NOy climatology; DNOyINP(12, 18, NL)
-    pub dnoyi_np: Array3<f64>,  // shape [12, 18, NL]
-    pub zin: [f64; 101],        // altitude grid for tracer input (cm)
+    pub dnoyi_np: Array3<f64>, // shape [12, 18, NL]
+    pub zin: [f64; 101], // altitude grid for tracer input (cm)
     /// Tracer mixing ratio input; xin(6, 101)
-    pub xin: Array2<f64>,       // shape [6, 101]
-    pub pin_t: [f64; 101],      // pressure grid for T input (mb)
-    pub tfull: [f64; 101],      // full T profile
-    pub fbrx_ref: [f64; NL],    // reference Bry mixing ratio profile
-    pub zjh2o: [f64; NJH2O],    // altitude grid for H2O photolysis (cm)
-    pub xjh2o: [f64; NJH2O],    // H2O photolysis rate table (s⁻¹)
-    pub xjdo: f64,              // H2O photolysis rate at current box
+    pub xin: Array2<f64>, // shape [6, 101]
+    pub pin_t: [f64; 101], // pressure grid for T input (mb)
+    pub tfull: [f64; 101], // full T profile
+    pub fbrx_ref: [f64; NL], // reference Bry mixing ratio profile
+    pub zjh2o: [f64; NJH2O], // altitude grid for H2O photolysis (cm)
+    pub xjh2o: [f64; NJH2O], // H2O photolysis rate table (s⁻¹)
+    pub xjdo: f64,       // H2O photolysis rate at current box
 
     // ── COMMON/ICHRIS/ ──────────────────────────────────────────────────────
-    pub nwalb: usize,           // number of wavelength points in albedo table
-    pub izalb: usize,           // number of SZA points in albedo table
-    pub nztr: usize,            // number of tracer altitude levels
-    pub iwn2o: usize,           // N2O input weighting flag
-    pub iwnoy: usize,           // NOy input weighting flag
-    pub iwbry: usize,           // Bry input weighting flag
+    pub nwalb: usize, // number of wavelength points in albedo table
+    pub izalb: usize, // number of SZA points in albedo table
+    pub nztr: usize,  // number of tracer altitude levels
+    pub iwn2o: usize, // N2O input weighting flag
+    pub iwnoy: usize, // NOy input weighting flag
+    pub iwbry: usize, // Bry input weighting flag
 
     // ── COMMON/CCHRIS/ ──────────────────────────────────────────────────────
-    pub cinpdir: String,        // CHARACTER*2 input directory prefix
+    pub cinpdir: String, // CHARACTER*2 input directory prefix
 
     // ── COMMON/NICKLLOYD/ ───────────────────────────────────────────────────
-    pub raxloop: f64,           // diagnostic loop counter
-    pub radcount: f64,          // diagnostic iteration counter
+    pub raxloop: f64,  // diagnostic loop counter
+    pub radcount: f64, // diagnostic iteration counter
 
     // ── Scratch / cross-read communication ──────────────────────────────────
     /// Aerosol profile shape parameters read from fort01: AERSOL(1..6).
@@ -456,9 +457,9 @@ pub struct ModelState {
     pub zo3col: f64,
 
     // ── Output file handles (Fortran units 7, 8, 9) ─────────────────────────
-    pub out_unit7: Option<std::io::BufWriter<std::fs::File>>,  // PUNCH output
-    pub out_unit8: Option<std::io::BufWriter<std::fs::File>>,  // PRTPTH species
-    pub out_unit9: Option<std::io::BufWriter<std::fs::File>>,  // PRTPTH rates
+    pub out_unit7: Option<std::io::BufWriter<std::fs::File>>, // PUNCH output
+    pub out_unit8: Option<std::io::BufWriter<std::fs::File>>, // PRTPTH species
+    pub out_unit9: Option<std::io::BufWriter<std::fs::File>>, // PRTPTH rates
 
     // ── Cached file content for NEWATM ──────────────────────────────────────
     /// Remaining fort01 records after initial READIN (reversed; pop from back = read forward)
@@ -495,6 +496,7 @@ impl Clone for ModelState {
             ncdim: self.ncdim.clone(),
             nbdim: self.nbdim.clone(),
             nbox: self.nbox.clone(),
+            n2box: self.n2box.clone(),
             nd216: self.nd216.clone(),
             nd216s: self.nd216s.clone(),
             press0: self.press0.clone(),
@@ -846,6 +848,7 @@ impl ModelState {
             ncdim: NL,
             nbdim: NB,
             nbox: 0,
+            n2box: 0,
             nd216: 0,
             nd216s: 0,
 
@@ -911,16 +914,16 @@ impl ModelState {
             doclo: [0.0; NB],
             dcl2o2: [0.0; NB],
             dbrcl: [0.0; NB],
-            di_:    [0.0; NB],
-            dio:    [0.0; NB],
-            dhoi:   [0.0; NB],
+            di_: [0.0; NB],
+            dio: [0.0; NB],
+            dhoi: [0.0; NB],
             diono2: [0.0; NB],
-            dhi:    [0.0; NB],
-            doio:   [0.0; NB],
-            di2:    [0.0; NB],
-            di2o2:  [0.0; NB],
-            di2o3:  [0.0; NB],
-            di2o4:  [0.0; NB],
+            dhi: [0.0; NB],
+            doio: [0.0; NB],
+            di2: [0.0; NB],
+            di2o2: [0.0; NB],
+            di2o3: [0.0; NB],
+            di2o4: [0.0; NB],
             fo3: [0.0; NB],
             fn2o: [0.0; NB],
             fnoy: [0.0; NB],
@@ -943,8 +946,11 @@ impl ModelState {
             fi2: [0.0; NB],
             fxxx: [0.0; NB],
             titler: [
-                String::new(), String::new(), String::new(),
-                String::new(), String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
             ],
             titles: vec![String::new(); NSPEC + 3],
             ndval: 0,
@@ -1015,14 +1021,14 @@ impl ModelState {
             vch3i: [0.0; NL],
             vcf3i: [0.0; NL],
             vocs: [0.0; NL],
-            vio:    [0.0; NL],
-            vhoi:   [0.0; NL],
+            vio: [0.0; NL],
+            vhoi: [0.0; NL],
             viono2: [0.0; NL],
-            voio:   [0.0; NL],
-            vi2:    [0.0; NL],
-            vi2o2:  [0.0; NL],
-            vi2o3:  [0.0; NL],
-            vi2o4:  [0.0; NL],
+            voio: [0.0; NL],
+            vi2: [0.0; NL],
+            vi2o2: [0.0; NL],
+            vi2o3: [0.0; NL],
+            vi2o4: [0.0; NL],
             fff: Array2::zeros((NQ, NL)),
             njval: NJVAL,
 
@@ -1206,46 +1212,91 @@ impl ModelState {
     //   35=OIO, 36=I2, 37=I2O2, 38=I2O3, 39=I2O4
     pub fn den_get(&self, ib: usize, ispec: usize) -> f64 {
         match ispec {
-            0 => self.dno[ib],   1 => self.dno2[ib],  2 => self.dno3[ib],
-            3 => self.dn2o5[ib], 4 => self.dhno3[ib], 5 => self.dh[ib],
-            6 => self.doh[ib],   7 => self.dho2[ib],  8 => self.dh2o2[ib],
-            9 => self.do_[ib],   10 => self.do3[ib],  11 => self.dbro[ib],
-            12 => self.dbr[ib],  13 => self.dhbr[ib], 14 => self.dhno2[ib],
-            15 => self.dhcl[ib], 16 => self.dcl[ib],  17 => self.dcl2[ib],
-            18 => self.dclo[ib], 19 => self.dclno3[ib],20 => self.dhno4[ib],
-            21 => self.dhocl[ib],22 => self.dbrno3[ib],23 => self.dhobr[ib],
-            24 => self.dh2co[ib],25 => self.droo[ib], 26 => self.drooh[ib],
-            27 => self.doclo[ib],28 => self.dcl2o2[ib],29 => self.dbrcl[ib],
-            30 => self.di_[ib],  31 => self.dio[ib],  32 => self.dhoi[ib],
-            33 => self.diono2[ib],34 => self.dhi[ib],
-            35 => self.doio[ib], 36 => self.di2[ib],  37 => self.di2o2[ib],
-            38 => self.di2o3[ib],39 => self.di2o4[ib],
+            0 => self.dno[ib],
+            1 => self.dno2[ib],
+            2 => self.dno3[ib],
+            3 => self.dn2o5[ib],
+            4 => self.dhno3[ib],
+            5 => self.dh[ib],
+            6 => self.doh[ib],
+            7 => self.dho2[ib],
+            8 => self.dh2o2[ib],
+            9 => self.do_[ib],
+            10 => self.do3[ib],
+            11 => self.dbro[ib],
+            12 => self.dbr[ib],
+            13 => self.dhbr[ib],
+            14 => self.dhno2[ib],
+            15 => self.dhcl[ib],
+            16 => self.dcl[ib],
+            17 => self.dcl2[ib],
+            18 => self.dclo[ib],
+            19 => self.dclno3[ib],
+            20 => self.dhno4[ib],
+            21 => self.dhocl[ib],
+            22 => self.dbrno3[ib],
+            23 => self.dhobr[ib],
+            24 => self.dh2co[ib],
+            25 => self.droo[ib],
+            26 => self.drooh[ib],
+            27 => self.doclo[ib],
+            28 => self.dcl2o2[ib],
+            29 => self.dbrcl[ib],
+            30 => self.di_[ib],
+            31 => self.dio[ib],
+            32 => self.dhoi[ib],
+            33 => self.diono2[ib],
+            34 => self.dhi[ib],
+            35 => self.doio[ib],
+            36 => self.di2[ib],
+            37 => self.di2o2[ib],
+            38 => self.di2o3[ib],
+            39 => self.di2o4[ib],
             _ => panic!("den_get: species index {} out of range", ispec),
         }
     }
 
     pub fn den_set(&mut self, ib: usize, ispec: usize, val: f64) {
         match ispec {
-            0 => self.dno[ib] = val,   1 => self.dno2[ib] = val,
-            2 => self.dno3[ib] = val,  3 => self.dn2o5[ib] = val,
-            4 => self.dhno3[ib] = val, 5 => self.dh[ib] = val,
-            6 => self.doh[ib] = val,   7 => self.dho2[ib] = val,
-            8 => self.dh2o2[ib] = val, 9 => self.do_[ib] = val,
-            10 => self.do3[ib] = val,  11 => self.dbro[ib] = val,
-            12 => self.dbr[ib] = val,  13 => self.dhbr[ib] = val,
-            14 => self.dhno2[ib] = val,15 => self.dhcl[ib] = val,
-            16 => self.dcl[ib] = val,  17 => self.dcl2[ib] = val,
-            18 => self.dclo[ib] = val, 19 => self.dclno3[ib] = val,
-            20 => self.dhno4[ib] = val,21 => self.dhocl[ib] = val,
-            22 => self.dbrno3[ib] = val,23 => self.dhobr[ib] = val,
-            24 => self.dh2co[ib] = val,25 => self.droo[ib] = val,
-            26 => self.drooh[ib] = val,27 => self.doclo[ib] = val,
-            28 => self.dcl2o2[ib] = val,29 => self.dbrcl[ib] = val,
-            30 => self.di_[ib] = val,  31 => self.dio[ib] = val,
-            32 => self.dhoi[ib] = val, 33 => self.diono2[ib] = val,
+            0 => self.dno[ib] = val,
+            1 => self.dno2[ib] = val,
+            2 => self.dno3[ib] = val,
+            3 => self.dn2o5[ib] = val,
+            4 => self.dhno3[ib] = val,
+            5 => self.dh[ib] = val,
+            6 => self.doh[ib] = val,
+            7 => self.dho2[ib] = val,
+            8 => self.dh2o2[ib] = val,
+            9 => self.do_[ib] = val,
+            10 => self.do3[ib] = val,
+            11 => self.dbro[ib] = val,
+            12 => self.dbr[ib] = val,
+            13 => self.dhbr[ib] = val,
+            14 => self.dhno2[ib] = val,
+            15 => self.dhcl[ib] = val,
+            16 => self.dcl[ib] = val,
+            17 => self.dcl2[ib] = val,
+            18 => self.dclo[ib] = val,
+            19 => self.dclno3[ib] = val,
+            20 => self.dhno4[ib] = val,
+            21 => self.dhocl[ib] = val,
+            22 => self.dbrno3[ib] = val,
+            23 => self.dhobr[ib] = val,
+            24 => self.dh2co[ib] = val,
+            25 => self.droo[ib] = val,
+            26 => self.drooh[ib] = val,
+            27 => self.doclo[ib] = val,
+            28 => self.dcl2o2[ib] = val,
+            29 => self.dbrcl[ib] = val,
+            30 => self.di_[ib] = val,
+            31 => self.dio[ib] = val,
+            32 => self.dhoi[ib] = val,
+            33 => self.diono2[ib] = val,
             34 => self.dhi[ib] = val,
-            35 => self.doio[ib] = val, 36 => self.di2[ib] = val,
-            37 => self.di2o2[ib] = val,38 => self.di2o3[ib] = val,
+            35 => self.doio[ib] = val,
+            36 => self.di2[ib] = val,
+            37 => self.di2o2[ib] = val,
+            38 => self.di2o3[ib] = val,
             39 => self.di2o4[ib] = val,
             _ => panic!("den_set: species index {} out of range", ispec),
         }
@@ -1255,12 +1306,24 @@ impl ModelState {
     /// FFFFFF(NB,18) is EQUIVALENCED to FO3(1) in Fortran.
     pub fn fff_get(&self, ib: usize, j: usize) -> f64 {
         match j {
-            1  => self.fo3[ib],    2  => self.fn2o[ib],  3  => self.fnoy[ib],
-            4  => self.fch4[ib],   5  => self.fco[ib],   6  => self.fclx[ib],
-            7  => self.fcf2cl[ib], 8  => self.fcfcl3[ib],9  => self.fccl4[ib],
-            10 => self.fch3cl[ib], 11 => self.fmecl[ib], 12 => self.fh2[ib],
-            13 => self.fh2o[ib],   14 => self.fnh3[ib],  15 => self.fc5h8[ib],
-            16 => self.fbrx[ib],   17 => self.fch3br[ib],18 => self.focs[ib],
+            1 => self.fo3[ib],
+            2 => self.fn2o[ib],
+            3 => self.fnoy[ib],
+            4 => self.fch4[ib],
+            5 => self.fco[ib],
+            6 => self.fclx[ib],
+            7 => self.fcf2cl[ib],
+            8 => self.fcfcl3[ib],
+            9 => self.fccl4[ib],
+            10 => self.fch3cl[ib],
+            11 => self.fmecl[ib],
+            12 => self.fh2[ib],
+            13 => self.fh2o[ib],
+            14 => self.fnh3[ib],
+            15 => self.fc5h8[ib],
+            16 => self.fbrx[ib],
+            17 => self.fch3br[ib],
+            18 => self.focs[ib],
             19 => self.fiodx[ib],
             _ => 0.0,
         }
@@ -1269,15 +1332,24 @@ impl ModelState {
     /// Set FFFFFF(ib, j) — long-lived mixing ratio j (1-based) at box ib (0-based).
     pub fn fff_set(&mut self, ib: usize, j: usize, val: f64) {
         match j {
-            1  => self.fo3[ib] = val,    2  => self.fn2o[ib] = val,
-            3  => self.fnoy[ib] = val,   4  => self.fch4[ib] = val,
-            5  => self.fco[ib] = val,    6  => self.fclx[ib] = val,
-            7  => self.fcf2cl[ib] = val, 8  => self.fcfcl3[ib] = val,
-            9  => self.fccl4[ib] = val,  10 => self.fch3cl[ib] = val,
-            11 => self.fmecl[ib] = val,  12 => self.fh2[ib] = val,
-            13 => self.fh2o[ib] = val,   14 => self.fnh3[ib] = val,
-            15 => self.fc5h8[ib] = val,  16 => self.fbrx[ib] = val,
-            17 => self.fch3br[ib] = val, 18 => self.focs[ib] = val,
+            1 => self.fo3[ib] = val,
+            2 => self.fn2o[ib] = val,
+            3 => self.fnoy[ib] = val,
+            4 => self.fch4[ib] = val,
+            5 => self.fco[ib] = val,
+            6 => self.fclx[ib] = val,
+            7 => self.fcf2cl[ib] = val,
+            8 => self.fcfcl3[ib] = val,
+            9 => self.fccl4[ib] = val,
+            10 => self.fch3cl[ib] = val,
+            11 => self.fmecl[ib] = val,
+            12 => self.fh2[ib] = val,
+            13 => self.fh2o[ib] = val,
+            14 => self.fnh3[ib] = val,
+            15 => self.fc5h8[ib] = val,
+            16 => self.fbrx[ib] = val,
+            17 => self.fch3br[ib] = val,
+            18 => self.focs[ib] = val,
             19 => self.fiodx[ib] = val,
             _ => {}
         }
@@ -1287,56 +1359,115 @@ impl ModelState {
     /// Equivalent to VVVVVV(IL, K) in Fortran.
     pub fn jval_get(&self, il: usize, k: usize) -> f64 {
         match k {
-            0 => self.vno[il],    1 => self.vo2[il],    2 => self.vo3[il],
-            3 => self.vo3d[il],   4 => self.vh2coa[il], 5 => self.vh2cob[il],
-            6 => self.vh2o2[il],  7 => self.vrooh[il],  8 => self.vno2[il],
-            9 => self.vno3x[il],  10 => self.vno3l[il], 11 => self.vn2o5[il],
-            12 => self.vhno2[il], 13 => self.vhno3[il], 14 => self.vhno4[il],
-            15 => self.vclno3[il],16 => self.vcl2[il],  17 => self.vhocl[il],
-            18 => self.voclo[il], 19 => self.vcl2o2[il],20 => self.vclo[il],
-            21 => self.vbro[il],  22 => self.vbrno3[il],23 => self.vhobr[il],
-            24 => self.vn2o[il],  25 => self.vcfcl3[il],26 => self.vf2cl2[il],
-            27 => self.vf113[il], 28 => self.vf114[il], 29 => self.vf115[il],
-            30 => self.vccl4[il], 31 => self.vch3cl[il],32 => self.vmecf[il],
-            33 => self.vch3br[il],34 => self.vh1211[il],35 => self.vh1301[il],
-            36 => self.vh2402[il],37 => self.vh22[il],  38 => self.vh123[il],
-            39 => self.vh141b[il],40 => self.vchbr3[il],41 => self.vch3i[il],
-            42 => self.vcf3i[il], 43 => self.vocs[il],
-            44 => self.vio[il],   45 => self.vhoi[il],  46 => self.viono2[il],
-            47 => self.voio[il],  48 => self.vi2[il],   49 => self.vi2o2[il],
-            50 => self.vi2o3[il], 51 => self.vi2o4[il],
+            0 => self.vno[il],
+            1 => self.vo2[il],
+            2 => self.vo3[il],
+            3 => self.vo3d[il],
+            4 => self.vh2coa[il],
+            5 => self.vh2cob[il],
+            6 => self.vh2o2[il],
+            7 => self.vrooh[il],
+            8 => self.vno2[il],
+            9 => self.vno3x[il],
+            10 => self.vno3l[il],
+            11 => self.vn2o5[il],
+            12 => self.vhno2[il],
+            13 => self.vhno3[il],
+            14 => self.vhno4[il],
+            15 => self.vclno3[il],
+            16 => self.vcl2[il],
+            17 => self.vhocl[il],
+            18 => self.voclo[il],
+            19 => self.vcl2o2[il],
+            20 => self.vclo[il],
+            21 => self.vbro[il],
+            22 => self.vbrno3[il],
+            23 => self.vhobr[il],
+            24 => self.vn2o[il],
+            25 => self.vcfcl3[il],
+            26 => self.vf2cl2[il],
+            27 => self.vf113[il],
+            28 => self.vf114[il],
+            29 => self.vf115[il],
+            30 => self.vccl4[il],
+            31 => self.vch3cl[il],
+            32 => self.vmecf[il],
+            33 => self.vch3br[il],
+            34 => self.vh1211[il],
+            35 => self.vh1301[il],
+            36 => self.vh2402[il],
+            37 => self.vh22[il],
+            38 => self.vh123[il],
+            39 => self.vh141b[il],
+            40 => self.vchbr3[il],
+            41 => self.vch3i[il],
+            42 => self.vcf3i[il],
+            43 => self.vocs[il],
+            44 => self.vio[il],
+            45 => self.vhoi[il],
+            46 => self.viono2[il],
+            47 => self.voio[il],
+            48 => self.vi2[il],
+            49 => self.vi2o2[il],
+            50 => self.vi2o3[il],
+            51 => self.vi2o4[il],
             _ => panic!("jval_get: J-value index {} out of range", k),
         }
     }
 
     pub fn jval_set(&mut self, il: usize, k: usize, val: f64) {
         match k {
-            0 => self.vno[il] = val,    1 => self.vo2[il] = val,
-            2 => self.vo3[il] = val,    3 => self.vo3d[il] = val,
-            4 => self.vh2coa[il] = val, 5 => self.vh2cob[il] = val,
-            6 => self.vh2o2[il] = val,  7 => self.vrooh[il] = val,
-            8 => self.vno2[il] = val,   9 => self.vno3x[il] = val,
-            10 => self.vno3l[il] = val, 11 => self.vn2o5[il] = val,
-            12 => self.vhno2[il] = val, 13 => self.vhno3[il] = val,
-            14 => self.vhno4[il] = val, 15 => self.vclno3[il] = val,
-            16 => self.vcl2[il] = val,  17 => self.vhocl[il] = val,
-            18 => self.voclo[il] = val, 19 => self.vcl2o2[il] = val,
-            20 => self.vclo[il] = val,  21 => self.vbro[il] = val,
-            22 => self.vbrno3[il] = val,23 => self.vhobr[il] = val,
-            24 => self.vn2o[il] = val,  25 => self.vcfcl3[il] = val,
-            26 => self.vf2cl2[il] = val,27 => self.vf113[il] = val,
-            28 => self.vf114[il] = val, 29 => self.vf115[il] = val,
-            30 => self.vccl4[il] = val, 31 => self.vch3cl[il] = val,
-            32 => self.vmecf[il] = val, 33 => self.vch3br[il] = val,
-            34 => self.vh1211[il] = val,35 => self.vh1301[il] = val,
-            36 => self.vh2402[il] = val,37 => self.vh22[il] = val,
-            38 => self.vh123[il] = val, 39 => self.vh141b[il] = val,
-            40 => self.vchbr3[il] = val,41 => self.vch3i[il] = val,
-            42 => self.vcf3i[il] = val, 43 => self.vocs[il] = val,
-            44 => self.vio[il] = val,   45 => self.vhoi[il] = val,
+            0 => self.vno[il] = val,
+            1 => self.vo2[il] = val,
+            2 => self.vo3[il] = val,
+            3 => self.vo3d[il] = val,
+            4 => self.vh2coa[il] = val,
+            5 => self.vh2cob[il] = val,
+            6 => self.vh2o2[il] = val,
+            7 => self.vrooh[il] = val,
+            8 => self.vno2[il] = val,
+            9 => self.vno3x[il] = val,
+            10 => self.vno3l[il] = val,
+            11 => self.vn2o5[il] = val,
+            12 => self.vhno2[il] = val,
+            13 => self.vhno3[il] = val,
+            14 => self.vhno4[il] = val,
+            15 => self.vclno3[il] = val,
+            16 => self.vcl2[il] = val,
+            17 => self.vhocl[il] = val,
+            18 => self.voclo[il] = val,
+            19 => self.vcl2o2[il] = val,
+            20 => self.vclo[il] = val,
+            21 => self.vbro[il] = val,
+            22 => self.vbrno3[il] = val,
+            23 => self.vhobr[il] = val,
+            24 => self.vn2o[il] = val,
+            25 => self.vcfcl3[il] = val,
+            26 => self.vf2cl2[il] = val,
+            27 => self.vf113[il] = val,
+            28 => self.vf114[il] = val,
+            29 => self.vf115[il] = val,
+            30 => self.vccl4[il] = val,
+            31 => self.vch3cl[il] = val,
+            32 => self.vmecf[il] = val,
+            33 => self.vch3br[il] = val,
+            34 => self.vh1211[il] = val,
+            35 => self.vh1301[il] = val,
+            36 => self.vh2402[il] = val,
+            37 => self.vh22[il] = val,
+            38 => self.vh123[il] = val,
+            39 => self.vh141b[il] = val,
+            40 => self.vchbr3[il] = val,
+            41 => self.vch3i[il] = val,
+            42 => self.vcf3i[il] = val,
+            43 => self.vocs[il] = val,
+            44 => self.vio[il] = val,
+            45 => self.vhoi[il] = val,
             46 => self.viono2[il] = val,
-            47 => self.voio[il] = val,  48 => self.vi2[il] = val,
-            49 => self.vi2o2[il] = val, 50 => self.vi2o3[il] = val,
+            47 => self.voio[il] = val,
+            48 => self.vi2[il] = val,
+            49 => self.vi2o2[il] = val,
+            50 => self.vi2o3[il] = val,
             51 => self.vi2o4[il] = val,
             _ => panic!("jval_set: J-value index {} out of range", k),
         }

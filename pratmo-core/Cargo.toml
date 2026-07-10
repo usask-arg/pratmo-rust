@@ -3,6 +3,14 @@ name = "pratmo-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+# Opt-in numerical differential-testing policy.  Source-level uses document
+# the specific Fortran discrepancy and the normal Rust behavior beside each
+# conditional; without this feature, corrected/physical Rust behavior stays
+# the default.
+fortran-parity = []
+
 [dependencies]
 ndarray = { version = "0.16", features = ["approx"] }
 nalgebra = "0.33"

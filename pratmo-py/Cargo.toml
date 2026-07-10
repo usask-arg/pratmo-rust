@@ -16,3 +16,5 @@ anyhow      = "1"
 
 [features]
 extension-module = ["pyo3/extension-module"]
+# Forward the core's opt-in legacy policy to the Python extension.
+fortran-parity = ["pratmo-core/fortran-parity"]

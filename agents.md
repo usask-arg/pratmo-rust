@@ -108,6 +108,16 @@ Note: `ClNO3code.f` is excluded because `HETPROB` is already defined in `bhetp.f
 ./pratmo_gf
 ```
 
+The clean-room numerical differential (requires gfortran) is:
+
+```bash
+scripts/fortran_differential.sh
+```
+
+It compares both the standard CTM `boxout.dat` and DIURN/TPATH `fort07`–`fort09`
+records in temporary normalized input trees. Use `ctm` or `diurn` to select one
+mode.
+
 The binary reads from the current directory. Outputs go to `boxout.dat` (path from boxin_gui.dat) and to `G:\software\...` (literal Windows path, created as a file on macOS).
 
 ---
@@ -150,7 +160,7 @@ The binary reads from the current directory. Outputs go to `boxout.dat` (path fr
 | HNO3 | 4 sig figs | resolved by jcomp fix |
 | N2O5 | 4 sig figs | resolved by jcomp fix |
 
-### DIURN mode — partially validated (equatorial May, 25 boxes levels 1–30)
+### DIURN mode — validated in parity mode (equatorial May, 25 boxes levels 1–30)
 
 | Output | Agreement | Notes |
 |---|---|---|
@@ -163,7 +173,7 @@ The binary reads from the current directory. Outputs go to `boxout.dat` (path fr
 
 ## Open tasks (priority order)
 
-1. **DIURN integration tests** — add tests using fort08 output as reference; the Rust values are physically correct.
+1. **DIURN integration tests** — the parity feature now has policy guards, a representative latitude/season invariant matrix, and an end-to-end CTM smoke test; the compiled gfortran differential is documented in `FORTRAN_PARITY.md`.
 
 2. **DERIVS mode** (`nd216 < 0`) — sensitivity Jacobians; not implemented yet.
 

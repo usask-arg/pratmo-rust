@@ -41,16 +41,21 @@ pub trait ModelReader {
             let _ = self.read_initial_densities(s); // optional — fort02.x may not exist
         }
         // Apply calibration scaling (bread.f lines 396–402): AFTER fort02.x initial densities.
-        // Fortran: do3ref/do3int *= 1.066; dm/do2int *= 1.049
-        // NOTE: the original Fortran test block also set t = 280.0 (a flat override for
-        // sensitivity testing only). That line was ported unconditionally, clobbering the
-        // real US STD temperature profile loaded from fort13.x. It is removed here.
+        // Both modes retain Fortran's do3ref/do3int *= 1.066 and dm/do2int *=
+        // 1.049 ordering.  The original executable additionally forces every
+        // temperature to 280 K in this test-calibration block; parity mode
+        // reproduces that flattening, while normal Rust mode keeps the
+        // atmosphere's supplied temperature profile.
         let nc = s.nc;
         for j in 0..nc {
             s.do3ref[j] *= 1.066;
             s.do3int[j] *= 1.066;
-            s.dm[j]     *= 1.049;
+            s.dm[j] *= 1.049;
             s.do2int[j] *= 1.049;
+            #[cfg(feature = "fortran-parity")]
+            {
+                s.t[j] = 280.0;
+            }
         }
         Ok(())
     }
@@ -60,13 +65,13 @@ pub trait ModelReader {
 
 // ── Embedded default data ─────────────────────────────────────────────────────
 
-static EMBEDDED_FORT01:  &[u8] = include_bytes!("../data/fort01.x");
-static EMBEDDED_FORT02:  &[u8] = include_bytes!("../data/fort02.x");
-static EMBEDDED_FORT10:  &[u8] = include_bytes!("../data/fort10_cam06.x");
-static EMBEDDED_FORT11:  &[u8] = include_bytes!("../data/fort11_jpl09.x");
-static EMBEDDED_FORT13:  &[u8] = include_bytes!("../data/fort13.x");
-static EMBEDDED_FORT14:  &[u8] = include_bytes!("../data/fort14.x");
-static EMBEDDED_JH2O:    &[u8] = include_bytes!("../data/J_H2O_SZA0.dat");
+static EMBEDDED_FORT01: &[u8] = include_bytes!("../data/fort01.x");
+static EMBEDDED_FORT02: &[u8] = include_bytes!("../data/fort02.x");
+static EMBEDDED_FORT10: &[u8] = include_bytes!("../data/fort10_cam06.x");
+static EMBEDDED_FORT11: &[u8] = include_bytes!("../data/fort11_jpl09.x");
+static EMBEDDED_FORT13: &[u8] = include_bytes!("../data/fort13.x");
+static EMBEDDED_FORT14: &[u8] = include_bytes!("../data/fort14.x");
+static EMBEDDED_JH2O: &[u8] = include_bytes!("../data/J_H2O_SZA0.dat");
 
 // ── FortranReader ─────────────────────────────────────────────────────────────
 
@@ -91,14 +96,17 @@ impl FortranReader {
     /// which is the right behaviour for optional files (fort03, fort05, fort51).
     pub fn embedded() -> Self {
         let mut overrides: HashMap<&'static str, &'static [u8]> = HashMap::new();
-        overrides.insert("fort01.x",        EMBEDDED_FORT01);
-        overrides.insert("fort02.x",        EMBEDDED_FORT02);
-        overrides.insert("fort10_cam06.x",  EMBEDDED_FORT10);
-        overrides.insert("fort11_jpl09.x",  EMBEDDED_FORT11);
-        overrides.insert("fort13.x",        EMBEDDED_FORT13);
-        overrides.insert("fort14.x",        EMBEDDED_FORT14);
-        overrides.insert("J_H2O_SZA0.dat",  EMBEDDED_JH2O);
-        Self { input_dir: std::path::PathBuf::new(), overrides }
+        overrides.insert("fort01.x", EMBEDDED_FORT01);
+        overrides.insert("fort02.x", EMBEDDED_FORT02);
+        overrides.insert("fort10_cam06.x", EMBEDDED_FORT10);
+        overrides.insert("fort11_jpl09.x", EMBEDDED_FORT11);
+        overrides.insert("fort13.x", EMBEDDED_FORT13);
+        overrides.insert("fort14.x", EMBEDDED_FORT14);
+        overrides.insert("J_H2O_SZA0.dat", EMBEDDED_JH2O);
+        Self {
+            input_dir: std::path::PathBuf::new(),
+            overrides,
+        }
     }
 
     fn open(&self, name: &str) -> Result<Box<dyn BufRead>> {
@@ -132,7 +140,9 @@ fn parse_fixed_i32s(line: &str, offset: usize, width: usize, count: usize) -> Ve
             out.push(0);
             continue;
         }
-        let chunk = std::str::from_utf8(&bytes[start..end]).unwrap_or("0").trim();
+        let chunk = std::str::from_utf8(&bytes[start..end])
+            .unwrap_or("0")
+            .trim();
         out.push(chunk.parse::<i32>().unwrap_or(0));
     }
     out
@@ -145,7 +155,11 @@ fn read_f64_array(reader: &mut impl BufRead, target: usize) -> Result<Vec<f64>> 
     while vals.len() < target {
         let mut line = String::new();
         if reader.read_line(&mut line)? == 0 {
-            bail!("unexpected EOF reading f64 array (got {}, need {})", vals.len(), target);
+            bail!(
+                "unexpected EOF reading f64 array (got {}, need {})",
+                vals.len(),
+                target
+            );
         }
         for tok in line.split_whitespace() {
             if let Ok(v) = tok.parse::<f64>() {
@@ -163,7 +177,10 @@ fn read_f64_array(reader: &mut impl BufRead, target: usize) -> Result<Vec<f64>> 
 fn next_line(reader: &mut impl BufRead) -> Result<String> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    Ok(line.trim_end_matches('\n').trim_end_matches('\r').to_owned())
+    Ok(line
+        .trim_end_matches('\n')
+        .trim_end_matches('\r')
+        .to_owned())
 }
 
 /// Skip one line.
@@ -189,19 +206,19 @@ impl ModelReader for FortranReader {
         // Actual file: "NW--QQQQQQ   40   77    1   77    0   15    6"
         let line2 = next_line(&mut r)?;
         let ints = parse_fixed_i32s(&line2, 10, 5, 14);
-        let nqqq  = ints[0] as usize;
-        let nwww  = ints[1] as usize;
-        s.nw1    = ints[2] as usize;
-        s.nw2    = ints[3] as usize;
-        s.nwsrb  = ints[4] as usize;
-        s.nsr    = ints[5] as usize;
-        s.nodf   = ints[6] as usize;
-        s.njval  = nqqq + 4;
+        let nqqq = ints[0] as usize;
+        let nwww = ints[1] as usize;
+        s.nw1 = ints[2] as usize;
+        s.nw2 = ints[3] as usize;
+        s.nwsrb = ints[4] as usize;
+        s.nsr = ints[5] as usize;
+        s.nodf = ints[6] as usize;
+        s.njval = nqqq + 4;
 
         // Line 3: `8E10.3` → QMI1M, QMIWVL
         let line3 = next_line(&mut r)?;
         let fv = parse_f64s(&line3);
-        s.qmi1m  = *fv.get(0).unwrap_or(&0.0);
+        s.qmi1m = *fv.get(0).unwrap_or(&0.0);
         s.qmiwvl = *fv.get(1).unwrap_or(&0.0);
 
         // Line 4: title/blank
@@ -241,7 +258,15 @@ impl ModelReader for FortranReader {
                 s.odf[[i, l]] = chunk.parse::<f64>().unwrap_or(0.0);
             }
             let isr_start = nodf * 10;
-            let isr_chunk = line.get(isr_start..).unwrap_or("").trim();
+            // The fixed-format integer is followed by a parenthesized band
+            // label (e.g. `6  (14,0)1774-1783`), so parse only the first
+            // token rather than the entire trailing annotation.
+            let isr_chunk = line
+                .get(isr_start..)
+                .unwrap_or("")
+                .split_whitespace()
+                .next()
+                .unwrap_or("");
             s.isr[l] = isr_chunk.parse::<usize>().unwrap_or(0);
         }
 
@@ -260,7 +285,7 @@ impl ModelReader for FortranReader {
 
         // NSR lines: `7F10.1` → FNO(L), QNO(I=1..NODF, L)
         let nodf = s.nodf;
-        let nsr  = s.nsr;
+        let nsr = s.nsr;
         for l in 0..nsr {
             let vals = read_f64_array(&mut r, 1 + nodf)?;
             s.fno[l] = vals[0];
@@ -275,8 +300,7 @@ impl ModelReader for FortranReader {
         for l in 0..nsr {
             let k = l + nwsrb; // 0-based index into wbin
             if s.fno[l] > 0.0 {
-                let cno = 8.85e-13 * s.fno[l]
-                    / (1.0e7 * (1.0 / s.wbin[k] - 1.0 / s.wbin[k + 1]));
+                let cno = 8.85e-13 * s.fno[l] / (1.0e7 * (1.0 / s.wbin[k] - 1.0 / s.wbin[k + 1]));
                 for i in 0..nodf {
                     let odf = s.odf[[i, l]];
                     if odf != 0.0 {
@@ -292,7 +316,9 @@ impl ModelReader for FortranReader {
             let line = next_line(&mut r)?;
             let title = line.get(..20).unwrap_or("").trim().to_owned();
             let tqq_val: f64 = line.get(20..25).unwrap_or("").trim().parse().unwrap_or(0.0);
-            if s.titlej.len() > 1 { s.titlej[1][k] = title; }
+            if s.titlej.len() > 1 {
+                s.titlej[1][k] = title;
+            }
             s.tqq[[k, 1]] = tqq_val;
 
             // `8E10.3` → QO2(IW=1..nwww, k)
@@ -318,7 +344,9 @@ impl ModelReader for FortranReader {
             let line = next_line(&mut r)?;
             let title = line.get(..20).unwrap_or("").trim().to_owned();
             let tqq_val: f64 = line.get(20..25).unwrap_or("").trim().parse().unwrap_or(0.0);
-            if s.titlej.len() > 2 { s.titlej[2][k] = title; }
+            if s.titlej.len() > 2 {
+                s.titlej[2][k] = title;
+            }
             s.tqq[[k, 2]] = tqq_val;
             let qo3 = read_f64_array(&mut r, nwww)?;
             for (iw, v) in qo3.iter().enumerate() {
@@ -331,7 +359,9 @@ impl ModelReader for FortranReader {
             let line = next_line(&mut r)?;
             let title = line.get(..20).unwrap_or("").trim().to_owned();
             let tqq_val: f64 = line.get(20..25).unwrap_or("").trim().parse().unwrap_or(0.0);
-            if s.titlej.len() > 3 { s.titlej[3][k] = title; }
+            if s.titlej.len() > 3 {
+                s.titlej[3][k] = title;
+            }
             s.tqq[[k, 3]] = tqq_val;
             let q1d = read_f64_array(&mut r, nwww)?;
             for (iw, v) in q1d.iter().enumerate() {
@@ -339,14 +369,11 @@ impl ModelReader for FortranReader {
             }
         }
 
-        // fort10 has NTAB=40 standard species, then extra organics, then iodine species.
-        // NQQQ in the file header counts organics as part of the total (=43), so a naive loop
-        // over nqqq would fill slots 40-42 with organics instead of iodine cross-sections.
-        // Fix: read exactly NTAB standard species, then scan remaining entries by title to find
-        // iodine J-values and store them contiguously starting at jq = NTAB.
+        // fort10 always starts with NTAB=40 standard species. Newer datasets may then contain
+        // extra organics and the eight iodine species used by this port. The original PRATMO
+        // file stops at the 40 standard entries, so do not scan beyond EOF in that case.
         let ntab = crate::constants::NTAB; // 40 standard tabulated species
-        let nxs  = crate::constants::NXS;  // 48 = 40 standard + 8 iodine
-        s.njval  = nxs + 4;               // 52 total J-values (overrides nqqq+4 from header)
+        let nxs = crate::constants::NXS; // 48 = 40 standard + 8 iodine
 
         // Phase 1: read NTAB standard QQQ species
         for jq in 0..ntab {
@@ -355,7 +382,9 @@ impl ModelReader for FortranReader {
                 let line = next_line(&mut r)?;
                 let title = line.get(..20).unwrap_or("").trim().to_owned();
                 let tqq_val: f64 = line.get(20..25).unwrap_or("").trim().parse().unwrap_or(0.0);
-                if idx < s.titlej.len() { s.titlej[idx][k] = title; }
+                if idx < s.titlej.len() {
+                    s.titlej[idx][k] = title;
+                }
                 s.tqq[[k, idx]] = tqq_val;
                 let qqq = read_f64_array(&mut r, nwww)?;
                 for (iw, v) in qqq.iter().enumerate() {
@@ -364,29 +393,43 @@ impl ModelReader for FortranReader {
             }
         }
 
+        if nqqq <= ntab {
+            s.njval = nqqq + 4;
+            s.nlbatm = 1;
+            return Ok(());
+        }
+
+        // The extension file's NQQQ includes non-iodine organics. Scan by title and place
+        // iodine cross-sections contiguously after the 40 standard entries.
+        s.njval = nxs + 4;
+
         // Phase 2: scan remaining species pairs (organics then iodine) looking for iodine.
         // Organics are read and discarded.
         let iodine_keys: &[(&str, usize)] = &[
-            ("J(IO)",    ntab),
-            ("J(HOI)",   ntab + 1),
+            ("J(IO)", ntab),
+            ("J(HOI)", ntab + 1),
             ("J(IONO2)", ntab + 2),
-            ("J(OIO)",   ntab + 3),
-            ("J(I2)",    ntab + 4),
-            ("J(I2O2)",  ntab + 5),
-            ("J(I2O3)",  ntab + 6),
-            ("J(I2O4)",  ntab + 7),
+            ("J(OIO)", ntab + 3),
+            ("J(I2)", ntab + 4),
+            ("J(I2O2)", ntab + 5),
+            ("J(I2O3)", ntab + 6),
+            ("J(I2O4)", ntab + 7),
         ];
         let n_iodine = nxs - ntab;
         let mut iod_found = 0usize;
         'scan: loop {
             let mut hdr = String::new();
-            if r.read_line(&mut hdr)? == 0 { break; }
+            if r.read_line(&mut hdr)? == 0 {
+                break;
+            }
             let title_250 = hdr.get(..20).unwrap_or("").trim().to_owned();
             let tqq_250: f64 = hdr.get(20..25).unwrap_or("").trim().parse().unwrap_or(0.0);
             let data_250 = read_f64_array(&mut r, nwww)?;
 
             let mut hdr = String::new();
-            if r.read_line(&mut hdr)? == 0 { break; }
+            if r.read_line(&mut hdr)? == 0 {
+                break;
+            }
             let title_298 = hdr.get(..20).unwrap_or("").trim().to_owned();
             let tqq_298: f64 = hdr.get(20..25).unwrap_or("").trim().parse().unwrap_or(0.0);
             let data_298 = read_f64_array(&mut r, nwww)?;
@@ -395,13 +438,23 @@ impl ModelReader for FortranReader {
                 if title_250.contains(tag) {
                     let idx = jq + 4;
                     s.tqq[[0, idx]] = tqq_250;
-                    if idx < s.titlej.len() { s.titlej[idx][0] = title_250.clone(); }
-                    for (iw, v) in data_250.iter().enumerate() { s.qqq[[iw, 0, jq]] = *v; }
+                    if idx < s.titlej.len() {
+                        s.titlej[idx][0] = title_250.clone();
+                    }
+                    for (iw, v) in data_250.iter().enumerate() {
+                        s.qqq[[iw, 0, jq]] = *v;
+                    }
                     s.tqq[[1, idx]] = tqq_298;
-                    if idx < s.titlej.len() { s.titlej[idx][1] = title_298; }
-                    for (iw, v) in data_298.iter().enumerate() { s.qqq[[iw, 1, jq]] = *v; }
+                    if idx < s.titlej.len() {
+                        s.titlej[idx][1] = title_298;
+                    }
+                    for (iw, v) in data_298.iter().enumerate() {
+                        s.qqq[[iw, 1, jq]] = *v;
+                    }
                     iod_found += 1;
-                    if iod_found >= n_iodine { break 'scan; }
+                    if iod_found >= n_iodine {
+                        break 'scan;
+                    }
                     break;
                 }
             }
@@ -472,8 +525,8 @@ impl ModelReader for FortranReader {
             let rest = hdr.get(10..).unwrap_or("");
             let fv = parse_f64s(rest);
             let press0 = *fv.get(0).unwrap_or(&0.0);
-            let grav   = *fv.get(1).unwrap_or(&0.0);
-            let rad    = *fv.get(2).unwrap_or(&0.0);
+            let grav = *fv.get(1).unwrap_or(&0.0);
+            let rad = *fv.get(2).unwrap_or(&0.0);
 
             // `8E10.3` → T(1..46)
             let t_vals = read_f64_array(&mut r, 46)?;
@@ -483,8 +536,8 @@ impl ModelReader for FortranReader {
 
             if tita == titatm {
                 s.press0 = press0;
-                s.grav   = grav;
-                s.rad    = rad;
+                s.grav = grav;
+                s.rad = rad;
                 break;
             }
         }
@@ -494,8 +547,13 @@ impl ModelReader for FortranReader {
             s.z[i] = 2.0e5 * i as f64;
         }
 
-        // Hydrostatic equilibrium
-        hystat(s, 0);
+        // Hydrostatic equilibrium.  Fortran selects the pressure-level
+        // reconstruction for atmosphere labels beginning with `P` (the
+        // standard DIURN input uses `P:US STD`).  The previous Rust path
+        // always used the geometric 2-km grid, which left DIURN boxes at the
+        // wrong altitudes and consequently loaded the wrong fort02 values.
+        let logp = if titatm.starts_with('P') { 1 } else { 0 };
+        hystat(s, logp);
 
         // Cache fort13 content for NEWATM (path mode atmosphere resets)
         if let Ok(mut r13) = self.open("fort13.x") {
@@ -504,7 +562,11 @@ impl ModelReader for FortranReader {
                 line.clear();
                 match r13.read_line(&mut line) {
                     Ok(0) => break,
-                    Ok(_) => s.fort13_lines.push(line.trim_end_matches('\n').trim_end_matches('\r').to_string()),
+                    Ok(_) => s.fort13_lines.push(
+                        line.trim_end_matches('\n')
+                            .trim_end_matches('\r')
+                            .to_string(),
+                    ),
                     Err(_) => break,
                 }
             }
@@ -570,10 +632,10 @@ impl ModelReader for FortranReader {
         s.do3int[nc - 1] = s.do3ref[nc - 1] * s.zzht;
         s.do2int[nc - 1] = s.dm[nc - 1] * s.zzht * po2;
         for j in (0..nc - 1).rev() {
-            s.do3int[j] = s.do3int[j + 1]
-                + 0.5 * (s.z[j + 1] - s.z[j]) * (s.do3ref[j + 1] + s.do3ref[j]);
-            s.do2int[j] = s.do2int[j + 1]
-                + 0.5 * (s.z[j + 1] - s.z[j]) * (s.dm[j + 1] + s.dm[j]) * po2;
+            s.do3int[j] =
+                s.do3int[j + 1] + 0.5 * (s.z[j + 1] - s.z[j]) * (s.do3ref[j + 1] + s.do3ref[j]);
+            s.do2int[j] =
+                s.do2int[j + 1] + 0.5 * (s.z[j + 1] - s.z[j]) * (s.dm[j + 1] + s.dm[j]) * po2;
         }
 
         // O3 column rescaling (bread.f lines 388–393)
@@ -603,7 +665,9 @@ impl ModelReader for FortranReader {
         }
         if aercol > 0.0 {
             let aerscl = s.turbd0 / aercol;
-            for j in 0..nc { s.aer[j] *= aerscl; }
+            for j in 0..nc {
+                s.aer[j] *= aerscl;
+            }
         }
 
         // Cache fort14 content for NEWATM (path mode O3 profile resets)
@@ -613,7 +677,11 @@ impl ModelReader for FortranReader {
                 line.clear();
                 match r14.read_line(&mut line) {
                     Ok(0) => break,
-                    Ok(_) => s.fort14_lines.push(line.trim_end_matches('\n').trim_end_matches('\r').to_string()),
+                    Ok(_) => s.fort14_lines.push(
+                        line.trim_end_matches('\n')
+                            .trim_end_matches('\r')
+                            .to_string(),
+                    ),
                     Err(_) => break,
                 }
             }
@@ -632,7 +700,8 @@ impl ModelReader for FortranReader {
         // `10A8` → TITLER (5 × CHARACTER*8)
         let line = next_line(&mut r)?;
         for i in 0..5 {
-            s.titler[i] = line.get(i * 8..(i + 1) * 8)
+            s.titler[i] = line
+                .get(i * 8..(i + 1) * 8)
                 .unwrap_or("        ")
                 .to_owned();
         }
@@ -640,7 +709,7 @@ impl ModelReader for FortranReader {
         // `2X,A8,2X,A8,...` → TITATM, TITO3
         let line = next_line(&mut r)?;
         let titatm = line.get(2..10).unwrap_or("").trim().to_owned();
-        let tito3  = line.get(12..20).unwrap_or("").trim().to_owned();
+        let tito3 = line.get(12..20).unwrap_or("").trim().to_owned();
         // Re-purpose titlev/title0 to carry atmosphere/O3 labels into later reads
         s.titlev = titatm;
         s.title0 = tito3;
@@ -648,12 +717,24 @@ impl ModelReader for FortranReader {
         // `A10,7E10.3` → TLBL, XLATD, XDECD, FLSCAL, ZO3COL, DAYSEC, GMU0
         let line = next_line(&mut r)?;
         let fv = parse_f64s(&line[10..]);
-        s.xlatd  = *fv.get(0).unwrap_or(&0.0);
-        s.xdecd  = *fv.get(1).unwrap_or(&0.0);
+        s.xlatd = *fv.get(0).unwrap_or(&0.0);
+        s.xdecd = *fv.get(1).unwrap_or(&0.0);
         s.flscal = *fv.get(2).unwrap_or(&1.0);
         s.zo3col = *fv.get(3).unwrap_or(&0.0);
         s.daysec = *fv.get(4).unwrap_or(&86400.0);
-        s.gmu0   = *fv.get(5).unwrap_or(&-0.14); // from fort01 LAT/DEC/FL line
+        let _input_gmu0 = *fv.get(5).unwrap_or(&-0.14);
+        #[cfg(feature = "fortran-parity")]
+        {
+            // bread.f reads GMU0 and then unconditionally replaces it with
+            // -0.14.  This is intentionally limited to differential-testing
+            // mode; it is not the value requested by the normal Rust input.
+            s.gmu0 = -0.14;
+        }
+        #[cfg(not(feature = "fortran-parity"))]
+        {
+            // Normal Rust mode honors the GMU0 value supplied in fort01.x.
+            s.gmu0 = _input_gmu0;
+        }
         let crad = 57.29578_f64;
         s.xlat = s.xlatd / crad;
         s.xdec = s.xdecd / crad;
@@ -661,8 +742,8 @@ impl ModelReader for FortranReader {
         // `A10,7E10.3` → TLBL, PN2, PO2, PCO2, ZZHT
         let line = next_line(&mut r)?;
         let fv = parse_f64s(&line[10..]);
-        s.pn2  = *fv.get(0).unwrap_or(&0.0);
-        s.po2  = *fv.get(1).unwrap_or(&0.0);
+        s.pn2 = *fv.get(0).unwrap_or(&0.0);
+        s.po2 = *fv.get(1).unwrap_or(&0.0);
         s.pco2 = *fv.get(2).unwrap_or(&0.0);
         s.zzht = *fv.get(3).unwrap_or(&6.3e5);
 
@@ -692,7 +773,9 @@ impl ModelReader for FortranReader {
         s.turbd0 = *fv.get(4).unwrap_or(&0.0);
         s.turbdx = *fv.get(5).unwrap_or(&0.0);
         let aersol: Vec<f64> = fv.into_iter().take(6).collect();
-        for (i, v) in aersol.iter().enumerate() { s.aersol[i] = *v; }
+        for (i, v) in aersol.iter().enumerate() {
+            s.aersol[i] = *v;
+        }
 
         // `A10,7E10.3` → TLBL, RAFMIN..DAYERR
         let line = next_line(&mut r)?;
@@ -708,12 +791,12 @@ impl ModelReader for FortranReader {
         // `A10,14I5` → TLBL, MAXRAF, MAXRLX, NLBATM, NRADD, ND216, ND216S
         let line = next_line(&mut r)?;
         let ints = parse_fixed_i32s(&line, 10, 5, 14);
-        s.maxraf  = ints[0] as usize;
-        s.maxrlx  = ints[1] as usize;
-        s.nlbatm  = ints[2] as usize;
+        s.maxraf = ints[0] as usize;
+        s.maxrlx = ints[1] as usize;
+        s.nlbatm = ints[2] as usize;
         let nradd = ints[3] as usize;
-        s.nd216   = ints[4];
-        s.nd216s  = ints[5];
+        s.nd216 = ints[4];
+        s.nd216s = ints[5];
         if s.nd216s == 0 {
             s.nd216s = s.nd216;
         }
@@ -721,22 +804,22 @@ impl ModelReader for FortranReader {
         // `A10,14I5` → TLBL, NDAY, NBOX, NDVAL, NFVAL, NDDD, NDAYSD
         let line = next_line(&mut r)?;
         let ints = parse_fixed_i32s(&line, 10, 5, 14);
-        s.nday   = ints[0];
+        s.nday = ints[0];
         let nbox_raw = ints[1];
-        s.ndval  = ints[2];
-        s.nfval  = ints[3];
+        s.ndval = ints[2];
+        s.nfval = ints[3];
         let nddd = ints[4] as usize;
         s.ndaysd = ints[5];
 
         // If NBOX < 0: read from unit=2, propagate box 1 to all
-        let n2box = if nbox_raw < 0 {
+        s.n2box = if nbox_raw < 0 {
             s.nbox = (-nbox_raw) as usize;
             1usize
         } else {
             s.nbox = nbox_raw as usize;
             s.nbox
         };
-        let _ = (n2box, nddd);
+        let _ = nddd;
 
         // `A5,25I3` → BOXDO — fixed-width 3-char integers after 5-char label
         let line = next_line(&mut r)?;
@@ -748,19 +831,27 @@ impl ModelReader for FortranReader {
         // `A5,25I3` → BOXWT, BOXPR, BOXCT, BOXMX
         let line = next_line(&mut r)?;
         let vals = parse_fixed_i32s(&line, 5, 3, 25);
-        for (i, v) in vals.iter().take(s.nbox).enumerate() { s.nboxwt[i] = *v; }
+        for (i, v) in vals.iter().take(s.nbox).enumerate() {
+            s.nboxwt[i] = *v;
+        }
 
         let line = next_line(&mut r)?;
         let vals = parse_fixed_i32s(&line, 5, 3, 25);
-        for (i, v) in vals.iter().take(s.nbox).enumerate() { s.nboxpr[i] = *v; }
+        for (i, v) in vals.iter().take(s.nbox).enumerate() {
+            s.nboxpr[i] = *v;
+        }
 
         let line = next_line(&mut r)?;
         let vals = parse_fixed_i32s(&line, 5, 3, 25);
-        for (i, v) in vals.iter().take(s.nbox).enumerate() { s.nboxct[i] = *v; }
+        for (i, v) in vals.iter().take(s.nbox).enumerate() {
+            s.nboxct[i] = *v;
+        }
 
         let line = next_line(&mut r)?;
         let vals = parse_fixed_i32s(&line, 5, 3, 25);
-        for (i, v) in vals.iter().take(s.nbox).enumerate() { s.nboxmx[i] = *v; }
+        for (i, v) in vals.iter().take(s.nbox).enumerate() {
+            s.nboxmx[i] = *v;
+        }
 
         // `A10,14F5.2/(10X,14F5.2)` → BOXRN (multi-line float array)
         read_boxf_multiline(&mut r, &mut s.boxrn, s.nbox)?;
@@ -801,9 +892,9 @@ impl ModelReader for FortranReader {
         let line = next_line(&mut r)?;
         let fv = parse_f64s(&line[10..]);
         let diffc = *fv.get(0).unwrap_or(&0.0);
-        s.xdmax   = *fv.get(1).unwrap_or(&0.0);
-        s.zshear  = *fv.get(2).unwrap_or(&0.0);
-        s.diffac  = *fv.get(3).unwrap_or(&1.0);
+        s.xdmax = *fv.get(1).unwrap_or(&0.0);
+        s.zshear = *fv.get(2).unwrap_or(&0.0);
+        s.diffac = *fv.get(3).unwrap_or(&1.0);
         s.tdiff = if diffc > 0.0 {
             s.xdmax * s.xdmax * 1.0e4 / diffc
         } else {
@@ -827,22 +918,22 @@ impl ModelReader for FortranReader {
         // `A10,14I5` → NPRT1..ITPRTB
         let line = next_line(&mut r)?;
         let ints = parse_fixed_i32s(&line, 10, 5, 14);
-        s.nprt1  = ints[0];
-        s.nprt2  = ints[1];
+        s.nprt1 = ints[0];
+        s.nprt2 = ints[1];
         s.nprtrr = ints[2];
         s.itprtx = ints[3];
         s.itprtr = ints[4];
-        s.npstd  = ints[5];
+        s.npstd = ints[5];
         s.itprtb = ints[6];
 
         // `5L2` → LPRT, LPRTX, LPRTJV, LPRTY, LPRT8
         let line = next_line(&mut r)?;
         let bools = parse_fortran_logicals(&line, 5);
-        s.lprt   = bools[0];
-        s.lprtx  = bools[1];
+        s.lprt = bools[0];
+        s.lprtx = bools[1];
         s.lprtjv = bools[2];
-        s.lprty  = bools[3];
-        s.lprt8  = bools[4];
+        s.lprty = bools[3];
+        s.lprt8 = bools[4];
 
         // Long-lived (flow) species: `A8,I2,1X,4I1` header then entries.
         // Some legacy files have a stale header count (e.g., "L-LIVED 18") while
@@ -889,13 +980,13 @@ impl ModelReader for FortranReader {
         for _j in 0..s.ntotx {
             // `A8,I2,1X,4I1`
             let line = next_line(&mut r)?;
-            let name  = line.get(..8).unwrap_or("").trim().to_owned();
+            let name = line.get(..8).unwrap_or("").trim().to_owned();
             let jx: usize = line.get(8..10).unwrap_or("").trim().parse().unwrap_or(0);
             // NXDIU at char 11, NXSLO at char 12, NXE at char 13, NXDIFF at char 14
             let nxdiu: i32 = line.get(11..12).unwrap_or("0").trim().parse().unwrap_or(0);
             let nxslo: i32 = line.get(12..13).unwrap_or("0").trim().parse().unwrap_or(0);
-            let _nxe:  i32 = line.get(13..14).unwrap_or("0").trim().parse().unwrap_or(0);
-            let nxdiff:i32 = line.get(14..15).unwrap_or("0").trim().parse().unwrap_or(0);
+            let _nxe: i32 = line.get(13..14).unwrap_or("0").trim().parse().unwrap_or(0);
+            let nxdiff: i32 = line.get(14..15).unwrap_or("0").trim().parse().unwrap_or(0);
 
             jxsum -= jx as i32;
             if jx > 0 && jx <= NDEN {
@@ -906,10 +997,14 @@ impl ModelReader for FortranReader {
 
             let effective_diu = if nxslo > 0 { 1 } else { nxdiu };
             if effective_diu > 0 {
-                if jx > 0 && jx <= NDEN { s.ntsav[jx - 1] = nts1; }
+                if jx > 0 && jx <= NDEN {
+                    s.ntsav[jx - 1] = nts1;
+                }
                 nts1 += 1;
             } else {
-                if jx > 0 && jx <= NDEN { s.ntsav[jx - 1] = nts2; }
+                if jx > 0 && jx <= NDEN {
+                    s.ntsav[jx - 1] = nts2;
+                }
                 nts2 = nts2.saturating_sub(1);
             }
 
@@ -929,19 +1024,23 @@ impl ModelReader for FortranReader {
         // Build NT array: NT(J) = NTSAV(J) for J=1..NDEN
         for j in 0..NDEN {
             s.n[j] = s.ntsav[j];
-            s.tnamet[s.ntsav[j].saturating_sub(1)] = s.tname[j].clone();
+            if s.ntsav[j] > 0 {
+                s.tnamet[s.ntsav[j] - 1] = s.tname[j].clone();
+            }
         }
 
         // Bromine flag
-        s.lbrom = s.n[11] <= s.ntot || s.n[12] <= s.ntot || s.n[13] <= s.ntot
-            || s.n[22] <= s.ntot || s.n[23] <= s.ntot;
+        s.lbrom = s.n[11] <= s.ntot
+            || s.n[12] <= s.ntot
+            || s.n[13] <= s.ntot
+            || s.n[22] <= s.ntot
+            || s.n[23] <= s.ntot;
         if !s.lbrom {
             s.nrates = s.nrate1;
         }
 
         // Iodine flag — species at n[30..39] (1-based N31..N40)
-        s.liod = s.ntotx > 30
-            && (30..40).any(|j| s.n[j] <= s.ntot);
+        s.liod = s.ntotx > 30 && (30..40).any(|j| s.n[j] <= s.ntot);
 
         // Initialise XR to zero
         s.xr.iter_mut().for_each(|v| *v = 0.0);
@@ -973,7 +1072,10 @@ impl ModelReader for FortranReader {
                 match r.read_line(&mut line) {
                     Ok(0) => break, // EOF
                     Ok(_) => {
-                        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r').to_string();
+                        let trimmed = line
+                            .trim_end_matches('\n')
+                            .trim_end_matches('\r')
+                            .to_string();
                         remaining.push(trimmed);
                     }
                     Err(_) => break,
@@ -1004,29 +1106,51 @@ impl ModelReader for FortranReader {
         let nddd = s.ndval as usize + s.nfval as usize;
         let ndval = s.ndval as usize;
         let nbox = s.nbox;
+        let n2box = if s.n2box == 0 {
+            nbox
+        } else {
+            s.n2box.min(nbox)
+        };
 
         for id in 0..nddd {
             // Species name (A10)
             line.clear();
-            if r.read_line(&mut line)? == 0 { break; }
+            if r.read_line(&mut line)? == 0 {
+                break;
+            }
             // Values (6E13.6 per line, across NBOX boxes)
             let mut vals = Vec::with_capacity(nbox);
-            while vals.len() < nbox {
+            while vals.len() < n2box {
                 line.clear();
-                if r.read_line(&mut line)? == 0 { break; }
+                if r.read_line(&mut line)? == 0 {
+                    break;
+                }
                 let trimmed = line.trim_end();
                 let mut off = 0;
-                while off + 13 <= trimmed.len() && vals.len() < nbox {
-                    let v: f64 = trimmed[off..off + 13].trim()
-                        .replace(|c: char| c == 'd' || c == 'D', "e")
-                        .parse().unwrap_or(0.0);
+                while off + 13 <= trimmed.len() && vals.len() < n2box {
+                    // Fortran's E13.6 reader ignores embedded blanks while
+                    // scanning a numeric field.  A legacy fort02 iodine line
+                    // is one character wider than 6*13, so fields such as
+                    // `0 1.000000E-3` occur; removing blanks reproduces the
+                    // reference value (1e-3) instead of treating the field as
+                    // invalid and silently returning zero.
+                    let v: f64 = trimmed[off..off + 13]
+                        .chars()
+                        .filter(|c| !c.is_whitespace())
+                        .collect::<String>()
+                        .replace(['d', 'D'], "e")
+                        .parse()
+                        .unwrap_or(0.0);
                     vals.push(v);
                     off += 13;
                 }
             }
-            // Fill missing boxes by repeating first value
+            // Negative NBOX means fort02 contains only box 1; Fortran propagates
+            // that value to every requested box.
             let fill = vals.first().copied().unwrap_or(0.0);
-            while vals.len() < nbox { vals.push(fill); }
+            while vals.len() < nbox {
+                vals.push(fill);
+            }
 
             // Store: ID=1..NDVAL → implicit species densities (as mixing ratio; rescaled later)
             //        ID=NDVAL+1..NDDD → long-lived species mixing ratios
@@ -1076,9 +1200,9 @@ impl ModelReader for FortranReader {
 /// Returns (NADD, IR, RK1, RK2)
 fn parse_rate_line(line: &str) -> (usize, usize, f64, f64) {
     let nadd: usize = line.get(5..6).unwrap_or("0").trim().parse().unwrap_or(0);
-    let ir:   usize = line.get(7..10).unwrap_or("0").trim().parse().unwrap_or(0);
-    let rk1:  f64   = parse_e_field(line.get(10..20).unwrap_or(""));
-    let rk2:  f64   = parse_e_field(line.get(20..30).unwrap_or(""));
+    let ir: usize = line.get(7..10).unwrap_or("0").trim().parse().unwrap_or(0);
+    let rk1: f64 = parse_e_field(line.get(10..20).unwrap_or(""));
+    let rk2: f64 = parse_e_field(line.get(20..30).unwrap_or(""));
     (nadd, ir, rk1, rk2)
 }
 
@@ -1086,19 +1210,30 @@ fn parse_rate_line(line: &str) -> (usize, usize, f64, f64) {
 fn parse_nadd_ir_rk(
     line: &str,
     s: &mut ModelState,
-    j: usize,      // 0-based
+    j: usize, // 0-based
     ndx0: &mut usize,
     r: &mut impl BufRead,
 ) -> Result<usize> {
     let (nadd, _ir, rk1, rk2) = parse_rate_line(line);
-    s.rk[[0, j]]  = rk1;
+    s.rk[[0, j]] = rk1;
     s.rk0[[0, j]] = rk1;
-    s.rk[[1, j]]  = rk2;
+    s.rk[[1, j]] = rk2;
     // RFMT labels (chars 35..75: 5×8)
     for k in 0..2 {
         let start = 35 + k * 8;
-        let end   = start + 8;
-        s.rfmt_str[j][k] = line.get(start..end).unwrap_or("        ").to_owned();
+        let end = start + 8;
+        // Fortran fixed-format input pads short records with blanks.  Rust's
+        // range slicing rejects a range whose end exceeds the line length,
+        // which used to drop the second mnemonic for short legacy records
+        // such as rates 78, 129, and 169.
+        let mut field = line
+            .get(start..line.len().min(end))
+            .unwrap_or("")
+            .to_owned();
+        while field.len() < 8 {
+            field.push(' ');
+        }
+        s.rfmt_str[j][k] = field;
     }
     s.ndxrat[j] = 0;
 
@@ -1156,7 +1291,7 @@ fn parse_fixed_f64s_fw(line: &str, offset: usize, width: usize, count: usize) ->
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let start = offset + i * width;
-        let end   = (start + width).min(bytes.len());
+        let end = (start + width).min(bytes.len());
         if start >= bytes.len() {
             out.push(0.0);
             continue;
@@ -1175,7 +1310,9 @@ fn parse_fortran_logicals(line: &str, count: usize) -> Vec<bool> {
         let b = matches!(tok.to_ascii_uppercase().as_str(), "T" | ".TRUE." | ".T.");
         out.push(b);
     }
-    while out.len() < count { out.push(false); }
+    while out.len() < count {
+        out.push(false);
+    }
     out
 }
 
@@ -1187,7 +1324,9 @@ fn read_boxf_multiline(r: &mut impl BufRead, arr: &mut [f64], nbox: usize) -> Re
         // First line: 10-char label then 14×F5.2; continuation: 10 spaces then 14×F5.2
         let vals = parse_fixed_f64s_fw(&line, 10, 5, 14);
         for v in vals.iter() {
-            if read >= nbox { break; }
+            if read >= nbox {
+                break;
+            }
             arr[read] = *v;
             read += 1;
         }
@@ -1200,7 +1339,7 @@ fn read_boxf_multiline(r: &mut impl BufRead, arr: &mut [f64], nbox: usize) -> Re
 /// Compute diurnal time grid (butil.f SETDAY).
 pub fn setday(s: &mut ModelState) {
     let cpisec = 13750.99_f64;
-    let cpihr  = 3.819719_f64;
+    let cpihr = 3.819719_f64;
 
     let gmua = s.xlat.sin() * s.xdec.sin();
     let gmub = s.xlat.cos() * s.xdec.cos();
@@ -1238,7 +1377,9 @@ pub fn setday(s: &mut ModelState) {
     let snit = s.daysec - s.dtime[jj] - s.dtime[jj];
     if snit >= 1.0 {
         for j in 0..14 {
-            if s.btime[j] < 1e-5 { break; }
+            if s.btime[j] < 1e-5 {
+                break;
+            }
             s.dtime[jj + j + 1] = s.btime[j] * snit + s.dtime[jj];
             night_j = j + 1;
         }
@@ -1251,9 +1392,12 @@ pub fn setday(s: &mut ModelState) {
         panic!("NTIM ({}) > 44", s.ntim);
     }
 
-    // Mirror morning into afternoon/night: Fortran mirrors JJ_fortran steps (1..JJ in 1-based)
+    // Mirror morning into afternoon/night: Fortran mirrors JJ_fortran steps (1..JJ in 1-based).
+    // Converting both source and destination to Rust's zero-based arrays gives
+    // `NTIM - 1 - j`; using `NTIM - j` shifts the first evening interval by one
+    // slot and changes all of the nighttime integration weights.
     for j in 0..jj_fortran {
-        let mirror_idx = s.ntim - j;
+        let mirror_idx = s.ntim - 1 - j;
         if mirror_idx <= 43 {
             s.dtime[mirror_idx] = s.daysec - s.dtime[j];
         }
@@ -1262,7 +1406,9 @@ pub fn setday(s: &mut ModelState) {
     // Compute WTIME (fractional weights)
     s.wtime[0] = 0.0;
     let ntim = s.ntim;
-    for j in 1..=ntim {
+    // Rust index 0 is Fortran's DTIME(1); the final Fortran interval is
+    // therefore at index `ntim - 1`, not at an extra `ntim` slot.
+    for j in 1..ntim {
         let dj = s.dtime[j].max(s.dtime[j - 1] + 1.0);
         s.dtime[j] = dj;
         s.wtime[j] = (dj - s.dtime[j - 1]) / s.daysec;
@@ -1286,7 +1432,10 @@ pub fn setday(s: &mut ModelState) {
             s.jtim[jcomp] = s.nmu as i32;
         }
         if gmu >= s.gmu0 {
-            s.nmu = jj + 1;
+            // SETDAY increments NMU after assigning JTIM for the current
+            // morning point.  NMU is therefore the 1-based count of points
+            // through the current point plus the next index, not jj+1.
+            s.nmu = jj + 2;
         }
     }
     s.nmu = s.nmu.min(midnit);
@@ -1318,11 +1467,18 @@ pub fn setday(s: &mut ModelState) {
             s.dtime[3] = s.daysec - sset2;
             s.dtime[4] = s.daysec;
             s.dtime[2] = s.btime[0] * (s.dtime[3] - s.dtime[1]) + s.dtime[1];
-            s.jtim[1] = 1; s.jtim[2] = 2; s.jtim[3] = 2; s.jtim[4] = 1;
-            s.ztime[1] = 90.0; s.ztime[2] = 180.0;
-            s.ztime[3] = 90.0; s.ztime[4] = s.ztime[0];
+            s.jtim[1] = 1;
+            s.jtim[2] = 2;
+            s.jtim[3] = 2;
+            s.jtim[4] = 1;
+            s.ztime[1] = 90.0;
+            s.ztime[2] = 180.0;
+            s.ztime[3] = 90.0;
+            s.ztime[4] = s.ztime[0];
             let ratio = 0.5 * s.daysec / sset2;
-            for j in 0..ntim { s.wtime[j] *= ratio; }
+            for j in 0..ntim {
+                s.wtime[j] *= ratio;
+            }
         }
     }
 
@@ -1330,7 +1486,9 @@ pub fn setday(s: &mut ModelState) {
     for j in 0..ntim {
         let htime = s.dtime[j] / 3600.0 + 0.001;
         let iitime = htime as i32;
-        s.nhhmm[j] = (100.0 * (0.60 * (htime - iitime as f64) + (iitime + 12).rem_euclid(24) as f64) + 0.50) as i32;
+        s.nhhmm[j] = (100.0
+            * (0.60 * (htime - iitime as f64) + (iitime + 12).rem_euclid(24) as f64)
+            + 0.50) as i32;
     }
 
     s.ittt = 1;
@@ -1351,7 +1509,7 @@ pub fn hystat(s: &mut ModelState, logp: i32) {
             let cplog2 = 0.5 * cstat0 * (s.rad / (s.rad + s.z[ii])).powi(2);
             let dlogp = (cplog1 / s.t[ii - 1] + cplog2 / s.t[ii]) * (s.z[ii - 1] - s.z[ii]);
             s.pstd[ii] = s.pstd[ii - 1] * dlogp.exp();
-            s.dm[ii]   = s.pstd[ii] / (cboltz * s.t[ii]);
+            s.dm[ii] = s.pstd[ii] / (cboltz * s.t[ii]);
             s.theta[ii] = s.t[ii] * (1000.0 / s.pstd[ii]).powf(0.2857);
             cplog1 = cplog2;
         }
@@ -1364,8 +1522,8 @@ pub fn hystat(s: &mut ModelState, logp: i32) {
         let clogp = 421.25462799776471_f64;
         for ii in 1..nc {
             s.pstd[ii] = s.pstd[ii - 1] * dlogp;
-            s.z[ii]    = s.z[ii - 1] + (s.t[ii - 1] + s.t[ii]) * clogp;
-            s.dm[ii]   = s.pstd[ii] / (cboltz * s.t[ii]);
+            s.z[ii] = s.z[ii - 1] + (s.t[ii - 1] + s.t[ii]) * clogp;
+            s.dm[ii] = s.pstd[ii] / (cboltz * s.t[ii]);
             s.theta[ii] = s.t[ii] * (1000.0 / s.pstd[ii]).powf(0.2857);
         }
     }
@@ -1444,7 +1602,9 @@ mod tests {
     fn test_hystat_logp_surface_pressure() {
         let mut s = ModelState::new();
         s.nc = 5;
-        for i in 0..5 { s.t[i] = 250.0; }
+        for i in 0..5 {
+            s.t[i] = 250.0;
+        }
         hystat(&mut s, 1);
         // Surface pressure is always 1000 hPa in log-p mode
         assert!((s.pstd[0] - 1000.0).abs() < 1e-9);
@@ -1455,7 +1615,9 @@ mod tests {
         // 16 levels in log-p spans exactly 2 decades: p[16] = 1000 × 10^(-2) = 10 hPa
         let mut s = ModelState::new();
         s.nc = 17;
-        for i in 0..17 { s.t[i] = 250.0; }
+        for i in 0..17 {
+            s.t[i] = 250.0;
+        }
         hystat(&mut s, 1);
         let ratio = s.pstd[16] / s.pstd[0];
         assert!((ratio - 0.01).abs() < 1e-9, "pstd ratio = {ratio}");
@@ -1467,7 +1629,9 @@ mod tests {
         let cboltz = 1.38e-19_f64;
         let mut s = ModelState::new();
         s.nc = 3;
-        s.t[0] = 300.0; s.t[1] = 280.0; s.t[2] = 260.0;
+        s.t[0] = 300.0;
+        s.t[1] = 280.0;
+        s.t[2] = 260.0;
         hystat(&mut s, 1);
         let expected_dm0 = 1000.0 / (cboltz * 300.0);
         assert!((s.dm[0] - expected_dm0).abs() / expected_dm0 < 1e-10);
@@ -1478,11 +1642,18 @@ mod tests {
         // Altitude must increase monotonically
         let mut s = ModelState::new();
         s.nc = 10;
-        for i in 0..10 { s.t[i] = 240.0 - i as f64 * 5.0; }
+        for i in 0..10 {
+            s.t[i] = 240.0 - i as f64 * 5.0;
+        }
         hystat(&mut s, 1);
         for i in 1..10 {
-            assert!(s.z[i] > s.z[i-1],
-                "z not monotone: z[{i}]={} <= z[{}]={}", s.z[i], i-1, s.z[i-1]);
+            assert!(
+                s.z[i] > s.z[i - 1],
+                "z not monotone: z[{i}]={} <= z[{}]={}",
+                s.z[i],
+                i - 1,
+                s.z[i - 1]
+            );
         }
     }
 
@@ -1491,12 +1662,16 @@ mod tests {
         // The CLOGP constant is chosen so each level is ~2 km in an isothermal 250 K atmosphere
         let mut s = ModelState::new();
         s.nc = 5;
-        for i in 0..5 { s.t[i] = 250.0; }
+        for i in 0..5 {
+            s.t[i] = 250.0;
+        }
         hystat(&mut s, 1);
         for i in 1..5 {
-            let dz_km = (s.z[i] - s.z[i-1]) * 1e-5;
-            assert!(dz_km > 1.5 && dz_km < 2.5,
-                "dz[{i}] = {dz_km:.2} km, expected ~2 km");
+            let dz_km = (s.z[i] - s.z[i - 1]) * 1e-5;
+            assert!(
+                dz_km > 1.5 && dz_km < 2.5,
+                "dz[{i}] = {dz_km:.2} km, expected ~2 km"
+            );
         }
     }
 
@@ -1506,10 +1681,14 @@ mod tests {
         let mut s = ModelState::new();
         s.nc = 3;
         s.press0 = 1013.25;
-        s.grav   = 980.665;
-        s.rad    = 6.371e8;
-        s.t[0] = 288.0; s.t[1] = 275.0; s.t[2] = 260.0;
-        s.z[0] = 0.0; s.z[1] = 2.0e5; s.z[2] = 4.0e5;
+        s.grav = 980.665;
+        s.rad = 6.371e8;
+        s.t[0] = 288.0;
+        s.t[1] = 275.0;
+        s.t[2] = 260.0;
+        s.z[0] = 0.0;
+        s.z[1] = 2.0e5;
+        s.z[2] = 4.0e5;
         hystat(&mut s, 0);
         let expected = 7.340e21 / 288.0;
         assert!((s.dm[0] - expected).abs() / expected < 1e-9);
@@ -1520,19 +1699,31 @@ mod tests {
     fn standard_setday_state() -> Box<ModelState> {
         let mut s = ModelState::new();
         let deg = std::f64::consts::PI / 180.0;
-        s.xlat   = 60.0 * deg;
-        s.xdec   = -1.689 * deg;   // March 16 declination
-        s.gmu0   = -0.12;
+        s.xlat = 60.0 * deg;
+        s.xdec = -1.689 * deg; // March 16 declination
+        s.gmu0 = -0.12;
         s.daysec = 86400.0;
         // ATIME from fort01.x (index 0 unused; indices 1..13 active)
-        s.atime[1]  = 0.15; s.atime[2]  = 0.30; s.atime[3]  = 0.45;
-        s.atime[4]  = 0.60; s.atime[5]  = 0.70; s.atime[6]  = 0.80;
-        s.atime[7]  = 0.88; s.atime[8]  = 0.92; s.atime[9]  = 0.96;
-        s.atime[10] = 0.98; s.atime[11] = 1.00; s.atime[12] = 1.02;
+        s.atime[1] = 0.15;
+        s.atime[2] = 0.30;
+        s.atime[3] = 0.45;
+        s.atime[4] = 0.60;
+        s.atime[5] = 0.70;
+        s.atime[6] = 0.80;
+        s.atime[7] = 0.88;
+        s.atime[8] = 0.92;
+        s.atime[9] = 0.96;
+        s.atime[10] = 0.98;
+        s.atime[11] = 1.00;
+        s.atime[12] = 1.02;
         s.atime[13] = 1.05;
         // BTIME from fort01.x (6 night steps)
-        s.btime[0] = 0.05; s.btime[1] = 0.10; s.btime[2] = 0.30;
-        s.btime[3] = 0.50; s.btime[4] = 0.70; s.btime[5] = 0.90;
+        s.btime[0] = 0.05;
+        s.btime[1] = 0.10;
+        s.btime[2] = 0.30;
+        s.btime[3] = 0.50;
+        s.btime[4] = 0.70;
+        s.btime[5] = 0.90;
         s
     }
 
@@ -1541,7 +1732,7 @@ mod tests {
         // Standard 60°N March 16 run must produce ntim = ntimdo = 34
         let mut s = standard_setday_state();
         setday(&mut s);
-        assert_eq!(s.ntim,   34, "ntim={}", s.ntim);
+        assert_eq!(s.ntim, 34, "ntim={}", s.ntim);
         assert_eq!(s.ntimdo, 34, "ntimdo={}", s.ntimdo);
     }
 
@@ -1558,18 +1749,25 @@ mod tests {
         // At 60°N March 16, sunset should be ~6.6–6.8 hours from noon
         let mut s = standard_setday_state();
         setday(&mut s);
-        assert!(s.sunset > 6.5 && s.sunset < 7.0,
-            "sunset = {:.3} h (expected 6.5–7.0 h)", s.sunset);
+        assert!(
+            s.sunset > 6.5 && s.sunset < 7.0,
+            "sunset = {:.3} h (expected 6.5–7.0 h)",
+            s.sunset
+        );
     }
 
     #[test]
     fn test_setday_last_mirror_is_daysec() {
-        // The last mirrored dtime (at index ntim) must equal DAYSEC
+        // The last mirrored dtime (at zero-based index ntim-1) must equal DAYSEC
         let mut s = standard_setday_state();
         setday(&mut s);
         let ntim = s.ntim;
-        assert!((s.dtime[ntim] - s.daysec).abs() < 1.0,
-            "dtime[ntim={ntim}] = {} ≠ DAYSEC", s.dtime[ntim]);
+        assert!(
+            (s.dtime[ntim - 1] - s.daysec).abs() < 1.0,
+            "dtime[ntim-1={}] = {} ≠ DAYSEC",
+            ntim - 1,
+            s.dtime[ntim - 1]
+        );
     }
 
     #[test]
@@ -1578,9 +1776,13 @@ mod tests {
         let mut s = standard_setday_state();
         setday(&mut s);
         let ntim = s.ntim;
-        for j in 1..=ntim {
-            assert!(s.dtime[j] > s.dtime[j-1],
-                "dtime not monotone at j={j}: {} <= {}", s.dtime[j], s.dtime[j-1]);
+        for j in 1..ntim {
+            assert!(
+                s.dtime[j] > s.dtime[j - 1],
+                "dtime not monotone at j={j}: {} <= {}",
+                s.dtime[j],
+                s.dtime[j - 1]
+            );
         }
     }
 
@@ -1600,10 +1802,33 @@ mod tests {
         let mut s = standard_setday_state();
         setday(&mut s);
         // With jcomp = ntim-1-jj and ntim=34: jj=0 → jcomp=33, jj=13 → jcomp=20.
-        assert!((s.utime[33] - s.utime[0]).abs() < 1e-12,
-            "utime[33]={} ≠ utime[0]={}", s.utime[33], s.utime[0]);
-        assert!((s.utime[20] - s.utime[13]).abs() < 1e-12,
-            "utime[20]={} ≠ utime[13]={}", s.utime[20], s.utime[13]);
+        assert!(
+            (s.utime[33] - s.utime[0]).abs() < 1e-12,
+            "utime[33]={} ≠ utime[0]={}",
+            s.utime[33],
+            s.utime[0]
+        );
+        assert!(
+            (s.utime[20] - s.utime[13]).abs() < 1e-12,
+            "utime[20]={} ≠ utime[13]={}",
+            s.utime[20],
+            s.utime[13]
+        );
+    }
+
+    #[test]
+    fn test_setday_dtime_mirror_symmetry() {
+        // The evening grid is the exact DAYSEC complement of the morning grid.
+        // This guards the one-based Fortran destination index in the mirror loop.
+        let mut s = standard_setday_state();
+        setday(&mut s);
+        for j in 0..14 {
+            let mirror = s.ntim - 1 - j;
+            assert!(
+                (s.dtime[j] + s.dtime[mirror] - s.daysec).abs() < 1.0,
+                "dtime[{j}] + dtime[{mirror}] is not DAYSEC"
+            );
+        }
     }
 
     #[test]
@@ -1622,12 +1847,12 @@ mod tests {
         // all day; SNIT ≈ DAYSEC and all wtime concentrated in night
         let mut s = ModelState::new();
         let deg = std::f64::consts::PI / 180.0;
-        s.xlat   = 90.0 * deg;
-        s.xdec   = -23.5 * deg;
-        s.gmu0   = -0.12;
+        s.xlat = 90.0 * deg;
+        s.xdec = -23.5 * deg;
+        s.gmu0 = -0.12;
         s.daysec = 86400.0;
-        s.atime[1] = 0.5;  // single afternoon step
-        s.btime[0] = 0.5;  // single night step
+        s.atime[1] = 0.5; // single afternoon step
+        s.btime[0] = 0.5; // single night step
         setday(&mut s);
         // Should still produce a valid time grid
         assert!(s.ntim >= 2);

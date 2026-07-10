@@ -1,3 +1,8 @@
+// Iodine/sea-salt tests assert the normal Rust chemistry, including active
+// heterogeneous recycling; parity mode deliberately zeros the legacy DIURN
+// heterogeneous-rate block for Fortran differential testing.
+#![cfg(not(feature = "fortran-parity"))]
+
 /// Iodine chemistry integration tests.
 ///
 /// Uses the high-level `PratmoModel` API with embedded defaults (which include
@@ -7,7 +12,6 @@
 /// Tests are written as sanity checks on stratospheric photochemistry rather
 /// than bit-exact regression tests, since the iodine chemistry is new and
 /// cross-section data is approximate.
-
 use pratmo_core::api::{DiurnBoxSpec, DiurnConfig, PratmoModel};
 
 /// Run a single-box DIURN at 20 km (~level 12) for 5 days, equatorial noon geometry.
@@ -17,7 +21,11 @@ fn run_20km() -> pratmo_core::api::DiurnOutput {
         latitude_deg: 0.0,
         julian_day: 120,
         integration_days: 5,
-        boxes: vec![DiurnBoxSpec { altitude_level: 12, albedo: 0.0, temp_offset_k: 0.0 }],
+        boxes: vec![DiurnBoxSpec {
+            altitude_level: 12,
+            albedo: 0.0,
+            temp_offset_k: 0.0,
+        }],
         ..Default::default()
     };
     model.run_diurn(&cfg).expect("DIURN run failed")
@@ -29,7 +37,11 @@ fn run_16km_with_aerosol(aerosol_area: f64) -> pratmo_core::api::DiurnOutput {
         latitude_deg: 0.0,
         julian_day: 120,
         integration_days: 2,
-        boxes: vec![DiurnBoxSpec { altitude_level: 9, albedo: aerosol_area, temp_offset_k: 0.0 }],
+        boxes: vec![DiurnBoxSpec {
+            altitude_level: 9,
+            albedo: aerosol_area,
+            temp_offset_k: 0.0,
+        }],
         bromine: true,
         ..Default::default()
     };
@@ -38,10 +50,14 @@ fn run_16km_with_aerosol(aerosol_area: f64) -> pratmo_core::api::DiurnOutput {
 
 /// Find the time step closest to solar noon (max OH proxy) and night (min OH).
 fn noon_and_night_idx(steps: &[pratmo_core::api::DiurnTimeStep]) -> (usize, usize) {
-    let (noon, _) = steps.iter().enumerate()
+    let (noon, _) = steps
+        .iter()
+        .enumerate()
         .max_by(|(_, a), (_, b)| a.implicit.oh.partial_cmp(&b.implicit.oh).unwrap())
         .unwrap();
-    let (night, _) = steps.iter().enumerate()
+    let (night, _) = steps
+        .iter()
+        .enumerate()
         .min_by(|(_, a), (_, b)| a.implicit.oh.partial_cmp(&b.implicit.oh).unwrap())
         .unwrap();
     (noon, night)
@@ -53,11 +69,31 @@ fn noon_and_night_idx(steps: &[pratmo_core::api::DiurnTimeStep]) -> (usize, usiz
 fn test_iodine_species_positive() {
     let out = run_20km();
     let snap = &out.boxes[0];
-    assert!(snap.implicit.i    > 0.0, "I should be > 0, got {}", snap.implicit.i);
-    assert!(snap.implicit.io   > 0.0, "IO should be > 0, got {}", snap.implicit.io);
-    assert!(snap.implicit.hoi  > 0.0, "HOI should be > 0, got {}", snap.implicit.hoi);
-    assert!(snap.implicit.iono2 > 0.0, "IONO2 should be > 0, got {}", snap.implicit.iono2);
-    assert!(snap.implicit.hi   > 0.0, "HI should be > 0, got {}", snap.implicit.hi);
+    assert!(
+        snap.implicit.i > 0.0,
+        "I should be > 0, got {}",
+        snap.implicit.i
+    );
+    assert!(
+        snap.implicit.io > 0.0,
+        "IO should be > 0, got {}",
+        snap.implicit.io
+    );
+    assert!(
+        snap.implicit.hoi > 0.0,
+        "HOI should be > 0, got {}",
+        snap.implicit.hoi
+    );
+    assert!(
+        snap.implicit.iono2 > 0.0,
+        "IONO2 should be > 0, got {}",
+        snap.implicit.iono2
+    );
+    assert!(
+        snap.implicit.hi > 0.0,
+        "HI should be > 0, got {}",
+        snap.implicit.hi
+    );
 }
 
 // ── Total-iodine conservation ─────────────────────────────────────────────────
@@ -70,10 +106,14 @@ fn test_iodine_conservation() {
     let out = run_20km();
     let snap = &out.boxes[0];
     let n = snap.air_density_cm3;
-    let total_iy = (snap.implicit.i + snap.implicit.io + snap.implicit.hoi
-                   + snap.implicit.iono2 + snap.implicit.hi + snap.implicit.oio
-                   + 2.0 * (snap.implicit.i2 + snap.implicit.i2o2
-                       + snap.implicit.i2o3 + snap.implicit.i2o4)) / n;
+    let total_iy = (snap.implicit.i
+        + snap.implicit.io
+        + snap.implicit.hoi
+        + snap.implicit.iono2
+        + snap.implicit.hi
+        + snap.implicit.oio
+        + 2.0 * (snap.implicit.i2 + snap.implicit.i2o2 + snap.implicit.i2o3 + snap.implicit.i2o4))
+        / n;
     let fiodx = snap.long_lived.iodx;
     let ratio = total_iy / fiodx;
     assert!(
@@ -94,7 +134,9 @@ fn test_io_dominates_i_at_noon() {
     let noon = &steps[noon_idx].implicit;
     assert!(
         noon.io > noon.i,
-        "IO ({:.2e}) should exceed I ({:.2e}) at noon", noon.io, noon.i
+        "IO ({:.2e}) should exceed I ({:.2e}) at noon",
+        noon.io,
+        noon.i
     );
 }
 
@@ -106,8 +148,14 @@ fn test_iono2_diurnal_variation() {
     // IONO2 must show a clear diurnal variation (max/min ratio > 1.05).
     let out = run_20km();
     let steps = &out.time_series[0].steps;
-    let iono2_max = steps.iter().map(|s| s.implicit.iono2).fold(0.0_f64, f64::max);
-    let iono2_min = steps.iter().map(|s| s.implicit.iono2).fold(f64::MAX, f64::min);
+    let iono2_max = steps
+        .iter()
+        .map(|s| s.implicit.iono2)
+        .fold(0.0_f64, f64::max);
+    let iono2_min = steps
+        .iter()
+        .map(|s| s.implicit.iono2)
+        .fold(f64::MAX, f64::min);
     assert!(
         iono2_max > iono2_min * 1.05,
         "IONO2 should vary diurnally: max={iono2_max:.2e} min={iono2_min:.2e}"
@@ -122,7 +170,10 @@ fn test_hoi_peaks_in_daytime() {
     let out = run_20km();
     let steps = &out.time_series[0].steps;
     let hoi_max = steps.iter().map(|s| s.implicit.hoi).fold(0.0_f64, f64::max);
-    let hoi_min = steps.iter().map(|s| s.implicit.hoi).fold(f64::MAX, f64::min);
+    let hoi_min = steps
+        .iter()
+        .map(|s| s.implicit.hoi)
+        .fold(f64::MAX, f64::min);
     assert!(
         hoi_max > hoi_min * 1.01,
         "HOI should vary diurnally: max={hoi_max:.2e} min={hoi_min:.2e}"
@@ -134,8 +185,14 @@ fn test_ixoy_do_not_accumulate() {
     let out = run_20km();
     let snap = &out.boxes[0];
     let ixoy = 2.0 * (snap.implicit.i2o2 + snap.implicit.i2o3 + snap.implicit.i2o4);
-    let iy = snap.implicit.i + snap.implicit.io + snap.implicit.hoi + snap.implicit.iono2
-        + snap.implicit.hi + snap.implicit.oio + 2.0 * snap.implicit.i2 + ixoy;
+    let iy = snap.implicit.i
+        + snap.implicit.io
+        + snap.implicit.hoi
+        + snap.implicit.iono2
+        + snap.implicit.hi
+        + snap.implicit.oio
+        + 2.0 * snap.implicit.i2
+        + ixoy;
     assert!(
         ixoy < 0.2 * iy,
         "IxOy reservoirs should stay transient: IxOy/Iy={:.2e}",
@@ -146,7 +203,9 @@ fn test_ixoy_do_not_accumulate() {
 #[test]
 fn test_sea_salt_heterogeneous_recycling_changes_partitioning() {
     let clean = run_16km_with_aerosol(0.0);
-    let salty = run_16km_with_aerosol(1.0);
+    // 0.1 µm² cm⁻³ is representative of lower-stratospheric background
+    // aerosol and remains inside RAFDAY's convergent regime after FIXRAT.
+    let salty = run_16km_with_aerosol(0.1);
 
     let clean_snap = &clean.boxes[0].implicit;
     let salty_snap = &salty.boxes[0].implicit;

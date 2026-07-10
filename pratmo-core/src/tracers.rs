@@ -14,7 +14,11 @@ fn linear(tpt: f64, xa: &[f64], ta: &[f64]) -> f64 {
         return -999.0;
     }
     if tpt <= ta[0] {
-        return if (tpt - ta[0]).abs() < 1e-15 { xa[0] } else { -999.0 };
+        return if (tpt - ta[0]).abs() < 1e-15 {
+            xa[0]
+        } else {
+            -999.0
+        };
     }
     if tpt >= ta[n - 1] {
         return -999.0;
@@ -46,8 +50,7 @@ fn cfc11_from_n2o_midlat(xn2otmp: f64) -> f64 {
 fn bry_from_cfc11(cfc11_ppt: f64) -> f64 {
     let x1 = cfc11_ppt;
     let x2 = cfc11_ppt * cfc11_ppt;
-    16.02 + 0.0033 * x1 + (-5.305e-4) * x2 + 2.55e-6 * x1 * x2
-        + (-5.37e-9) * x2 * x2
+    16.02 + 0.0033 * x1 + (-5.305e-4) * x2 + 2.55e-6 * x1 * x2 + (-5.37e-9) * x2 * x2
 }
 
 // ── Age-of-air correction tables ─────────────────────────────────────────────
@@ -134,8 +137,7 @@ pub fn cly_vs_n2o_solve(fn2o_ppb: f64) -> f64 {
         return 0.0;
     }
     let x = fn2o_ppb;
-    let cly = 3.538_76 - 2.677_09e-3 * x - 1.916_93e-5 * x * x
-        - 2.405_84e-8 * x * x * x;
+    let cly = 3.538_76 - 2.677_09e-3 * x - 1.916_93e-5 * x * x - 2.405_84e-8 * x * x * x;
     cly.max(0.005)
 }
 
@@ -174,4 +176,28 @@ pub fn set_tracers_from_n2o(s: &mut ModelState, ib: usize) {
 
     s.fnoy[ib] = s.dn2oref[ialt] / densty;
     s.fo3[ib] = s.do3ref[ialt] / densty;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ch3cl_vs_n2o_solve, cly_vs_n2o_solve};
+
+    #[test]
+    fn tracer_fits_return_zero_outside_their_calibrated_domain() {
+        // The original Fortran typo assigned an implicit clypt variable in
+        // the CH3Cl branch, leaving the output undefined for out-of-range N2O.
+        // Rust deliberately returns the documented zero sentinel for both fits.
+        for n2o in [-1.0, 321.0] {
+            assert_eq!(cly_vs_n2o_solve(n2o), 0.0);
+            assert_eq!(ch3cl_vs_n2o_solve(n2o), 0.0);
+        }
+    }
+
+    #[test]
+    fn tracer_fits_cover_both_calibration_endpoints() {
+        assert!(cly_vs_n2o_solve(0.0) >= 0.005);
+        assert!(cly_vs_n2o_solve(320.0) >= 0.005);
+        assert!(ch3cl_vs_n2o_solve(0.0).is_finite());
+        assert!(ch3cl_vs_n2o_solve(320.0).is_finite());
+    }
 }

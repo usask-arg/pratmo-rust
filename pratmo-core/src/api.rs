@@ -9,15 +9,15 @@
 /// ```
 use std::path::{Path, PathBuf};
 
-use ndarray::Array2;
 use anyhow::{bail, Result};
+use ndarray::Array2;
 
 use crate::{
-    constants::{NB, NL, NDEN},
+    constants::{NB, NDEN, NL},
     ctm::ctmlfq,
     diurnal::{diurn, diurn_parallel_boxes},
     path::tpath,
-    reader::{FortranReader, ModelReader, setday},
+    reader::{setday, FortranReader, ModelReader},
     solver::{fixrat, rplace, splace},
     state::ModelState,
 };
@@ -58,61 +58,61 @@ pub struct ImplicitSpecies {
     pub cl2o2: f64,
     pub brcl: f64,
     // Iodine family
-    pub i:     f64,
-    pub io:    f64,
-    pub hoi:   f64,
+    pub i: f64,
+    pub io: f64,
+    pub hoi: f64,
     pub iono2: f64,
-    pub hi:    f64,
-    pub oio:   f64,
-    pub i2:    f64,
-    pub i2o2:  f64,
-    pub i2o3:  f64,
-    pub i2o4:  f64,
+    pub hi: f64,
+    pub oio: f64,
+    pub i2: f64,
+    pub i2o2: f64,
+    pub i2o3: f64,
+    pub i2o4: f64,
 }
 
 impl ImplicitSpecies {
     fn from_state(s: &ModelState, ib: usize) -> Self {
         Self {
-            no:     s.dno[ib],
-            no2:    s.dno2[ib],
-            no3:    s.dno3[ib],
-            n2o5:   s.dn2o5[ib],
-            hno3:   s.dhno3[ib],
-            h:      s.dh[ib],
-            oh:     s.doh[ib],
-            ho2:    s.dho2[ib],
-            h2o2:   s.dh2o2[ib],
-            o:      s.do_[ib],
-            o3:     s.do3[ib],
-            bro:    s.dbro[ib],
-            br:     s.dbr[ib],
-            hbr:    s.dhbr[ib],
-            hno2:   s.dhno2[ib],
-            hcl:    s.dhcl[ib],
-            cl:     s.dcl[ib],
-            cl2:    s.dcl2[ib],
-            clo:    s.dclo[ib],
+            no: s.dno[ib],
+            no2: s.dno2[ib],
+            no3: s.dno3[ib],
+            n2o5: s.dn2o5[ib],
+            hno3: s.dhno3[ib],
+            h: s.dh[ib],
+            oh: s.doh[ib],
+            ho2: s.dho2[ib],
+            h2o2: s.dh2o2[ib],
+            o: s.do_[ib],
+            o3: s.do3[ib],
+            bro: s.dbro[ib],
+            br: s.dbr[ib],
+            hbr: s.dhbr[ib],
+            hno2: s.dhno2[ib],
+            hcl: s.dhcl[ib],
+            cl: s.dcl[ib],
+            cl2: s.dcl2[ib],
+            clo: s.dclo[ib],
             clono2: s.dclno3[ib],
-            hno4:   s.dhno4[ib],
-            hocl:   s.dhocl[ib],
+            hno4: s.dhno4[ib],
+            hocl: s.dhocl[ib],
             brono2: s.dbrno3[ib],
-            hobr:   s.dhobr[ib],
-            h2co:   s.dh2co[ib],
-            ch3o2:  s.droo[ib],
+            hobr: s.dhobr[ib],
+            h2co: s.dh2co[ib],
+            ch3o2: s.droo[ib],
             ch3o2h: s.drooh[ib],
-            oclo:   s.doclo[ib],
-            cl2o2:  s.dcl2o2[ib],
-            brcl:   s.dbrcl[ib],
-            i:      s.di_[ib],
-            io:     s.dio[ib],
-            hoi:    s.dhoi[ib],
-            iono2:  s.diono2[ib],
-            hi:     s.dhi[ib],
-            oio:    s.doio[ib],
-            i2:     s.di2[ib],
-            i2o2:   s.di2o2[ib],
-            i2o3:   s.di2o3[ib],
-            i2o4:   s.di2o4[ib],
+            oclo: s.doclo[ib],
+            cl2o2: s.dcl2o2[ib],
+            brcl: s.dbrcl[ib],
+            i: s.di_[ib],
+            io: s.dio[ib],
+            hoi: s.dhoi[ib],
+            iono2: s.diono2[ib],
+            hi: s.dhi[ib],
+            oio: s.doio[ib],
+            i2: s.di2[ib],
+            i2o2: s.di2o2[ib],
+            i2o3: s.di2o3[ib],
+            i2o4: s.di2o4[ib],
         }
     }
 
@@ -131,20 +131,46 @@ impl ImplicitSpecies {
             }
         };
         Self {
-            no:     get(0),  no2:    get(1),  no3:    get(2),  n2o5:   get(3),
-            hno3:   get(4),  h:      get(5),  oh:     get(6),  ho2:    get(7),
-            h2o2:   get(8),  o:      get(9),  o3:     get(10), bro:    get(11),
-            br:     get(12), hbr:    get(13), hno2:   get(14), hcl:    get(15),
-            cl:     get(16), cl2:    get(17), clo:    get(18), clono2: get(19),
-            hno4:   get(20), hocl:   get(21), brono2: get(22), hobr:   get(23),
-            h2co:   get(24), ch3o2:  get(25), ch3o2h: get(26), oclo:   get(27),
-            cl2o2:  get(28), brcl:   get(29),
-            i:      get(30), io:     get(31),
-            hoi:    get(32), iono2:  get(33),
-            hi:     get(34),
-            oio:    get(35), i2:     get(36),
-            i2o2:   get(37), i2o3:   get(38),
-            i2o4:   get(39),
+            no: get(0),
+            no2: get(1),
+            no3: get(2),
+            n2o5: get(3),
+            hno3: get(4),
+            h: get(5),
+            oh: get(6),
+            ho2: get(7),
+            h2o2: get(8),
+            o: get(9),
+            o3: get(10),
+            bro: get(11),
+            br: get(12),
+            hbr: get(13),
+            hno2: get(14),
+            hcl: get(15),
+            cl: get(16),
+            cl2: get(17),
+            clo: get(18),
+            clono2: get(19),
+            hno4: get(20),
+            hocl: get(21),
+            brono2: get(22),
+            hobr: get(23),
+            h2co: get(24),
+            ch3o2: get(25),
+            ch3o2h: get(26),
+            oclo: get(27),
+            cl2o2: get(28),
+            brcl: get(29),
+            i: get(30),
+            io: get(31),
+            hoi: get(32),
+            iono2: get(33),
+            hi: get(34),
+            oio: get(35),
+            i2: get(36),
+            i2o2: get(37),
+            i2o3: get(38),
+            i2o4: get(39),
         }
     }
 }
@@ -159,66 +185,66 @@ pub struct LongLivedMixingRatios {
     pub ch4: f64,
     pub co: f64,
     pub clx: f64,
-    pub cf2cl2: f64,   // CFC-12
-    pub cfcl3: f64,    // CFC-11
+    pub cf2cl2: f64, // CFC-12
+    pub cfcl3: f64,  // CFC-11
     pub ccl4: f64,
     pub ch3cl: f64,
-    pub ch3ccl3: f64,  // MeCl / CH₃CCl₃
+    pub ch3ccl3: f64, // MeCl / CH₃CCl₃
     pub h2: f64,
     pub h2o: f64,
     pub nh3: f64,
-    pub c5h8: f64,     // isoprene
-    pub brx: f64,      // total Bry
+    pub c5h8: f64, // isoprene
+    pub brx: f64,  // total Bry
     pub ch3br: f64,
     pub ocs: f64,
-    pub iodx: f64,     // total Iy
+    pub iodx: f64, // total Iy
 }
 
 impl LongLivedMixingRatios {
     fn from_state(s: &ModelState, ib: usize) -> Self {
         Self {
-            o3:      s.fo3[ib],
-            n2o:     s.fn2o[ib],
-            noy:     s.fnoy[ib],
-            ch4:     s.fch4[ib],
-            co:      s.fco[ib],
-            clx:     s.fclx[ib],
-            cf2cl2:  s.fcf2cl[ib],
-            cfcl3:   s.fcfcl3[ib],
-            ccl4:    s.fccl4[ib],
-            ch3cl:   s.fch3cl[ib],
+            o3: s.fo3[ib],
+            n2o: s.fn2o[ib],
+            noy: s.fnoy[ib],
+            ch4: s.fch4[ib],
+            co: s.fco[ib],
+            clx: s.fclx[ib],
+            cf2cl2: s.fcf2cl[ib],
+            cfcl3: s.fcfcl3[ib],
+            ccl4: s.fccl4[ib],
+            ch3cl: s.fch3cl[ib],
             ch3ccl3: s.fmecl[ib],
-            h2:      s.fh2[ib],
-            h2o:     s.fh2o[ib],
-            nh3:     s.fnh3[ib],
-            c5h8:    s.fc5h8[ib],
-            brx:     s.fbrx[ib],
-            ch3br:   s.fch3br[ib],
-            ocs:     s.focs[ib],
-            iodx:    s.fiodx[ib],
+            h2: s.fh2[ib],
+            h2o: s.fh2o[ib],
+            nh3: s.fnh3[ib],
+            c5h8: s.fc5h8[ib],
+            brx: s.fbrx[ib],
+            ch3br: s.fch3br[ib],
+            ocs: s.focs[ib],
+            iodx: s.fiodx[ib],
         }
     }
 
     fn apply_to_state(&self, s: &mut ModelState, ib: usize) {
-        s.fo3[ib]    = self.o3;
-        s.fn2o[ib]   = self.n2o;
-        s.fnoy[ib]   = self.noy;
-        s.fch4[ib]   = self.ch4;
-        s.fco[ib]    = self.co;
-        s.fclx[ib]   = self.clx;
+        s.fo3[ib] = self.o3;
+        s.fn2o[ib] = self.n2o;
+        s.fnoy[ib] = self.noy;
+        s.fch4[ib] = self.ch4;
+        s.fco[ib] = self.co;
+        s.fclx[ib] = self.clx;
         s.fcf2cl[ib] = self.cf2cl2;
         s.fcfcl3[ib] = self.cfcl3;
-        s.fccl4[ib]  = self.ccl4;
+        s.fccl4[ib] = self.ccl4;
         s.fch3cl[ib] = self.ch3cl;
-        s.fmecl[ib]  = self.ch3ccl3;
-        s.fh2[ib]    = self.h2;
-        s.fh2o[ib]   = self.h2o;
-        s.fnh3[ib]   = self.nh3;
-        s.fc5h8[ib]  = self.c5h8;
-        s.fbrx[ib]   = self.brx;
+        s.fmecl[ib] = self.ch3ccl3;
+        s.fh2[ib] = self.h2;
+        s.fh2o[ib] = self.h2o;
+        s.fnh3[ib] = self.nh3;
+        s.fc5h8[ib] = self.c5h8;
+        s.fbrx[ib] = self.brx;
         s.fch3br[ib] = self.ch3br;
-        s.focs[ib]   = self.ocs;
-        s.fiodx[ib]  = self.iodx;
+        s.focs[ib] = self.ocs;
+        s.fiodx[ib] = self.iodx;
     }
 }
 
@@ -250,14 +276,14 @@ pub struct JValues {
     pub brono2: f64,
     pub hobr: f64,
     pub n2o: f64,
-    pub cfc11: f64,    // CFCl₃
-    pub cfc12: f64,    // CF₂Cl₂
+    pub cfc11: f64, // CFCl₃
+    pub cfc12: f64, // CF₂Cl₂
     pub cfc113: f64,
     pub cfc114: f64,
     pub cfc115: f64,
     pub ccl4: f64,
     pub ch3cl: f64,
-    pub ch3ccl3: f64,  // MeCF
+    pub ch3ccl3: f64, // MeCF
     pub ch3br: f64,
     pub h1211: f64,
     pub h1301: f64,
@@ -282,58 +308,58 @@ pub struct JValues {
 impl JValues {
     fn from_state_alt(s: &ModelState, il: usize) -> Self {
         Self {
-            no:        s.vno[il],
-            o2:        s.vo2[il],
-            o3:        s.vo3[il],
-            o3_o1d:    s.vo3d[il],
-            h2co_a:    s.vh2coa[il],
-            h2co_b:    s.vh2cob[il],
-            h2o2:      s.vh2o2[il],
-            rooh:      s.vrooh[il],
-            no2:       s.vno2[il],
-            no3_x:     s.vno3x[il],
-            no3_l:     s.vno3l[il],
-            n2o5:      s.vn2o5[il],
-            hno2:      s.vhno2[il],
-            hno3:      s.vhno3[il],
-            hno4:      s.vhno4[il],
-            clono2:    s.vclno3[il],
-            cl2:       s.vcl2[il],
-            hocl:      s.vhocl[il],
-            oclo:      s.voclo[il],
-            cl2o2:     s.vcl2o2[il],
-            clo:       s.vclo[il],
-            bro:       s.vbro[il],
-            brono2:    s.vbrno3[il],
-            hobr:      s.vhobr[il],
-            n2o:       s.vn2o[il],
-            cfc11:     s.vcfcl3[il],
-            cfc12:     s.vf2cl2[il],
-            cfc113:    s.vf113[il],
-            cfc114:    s.vf114[il],
-            cfc115:    s.vf115[il],
-            ccl4:      s.vccl4[il],
-            ch3cl:     s.vch3cl[il],
-            ch3ccl3:   s.vmecf[il],
-            ch3br:     s.vch3br[il],
-            h1211:     s.vh1211[il],
-            h1301:     s.vh1301[il],
-            h2402:     s.vh2402[il],
-            hcfc22:    s.vh22[il],
-            hcfc123:   s.vh123[il],
-            hcfc141b:  s.vh141b[il],
-            chbr3:     s.vchbr3[il],
-            ch3i:      s.vch3i[il],
-            cf3i:      s.vcf3i[il],
-            ocs:       s.vocs[il],
-            io:        s.vio[il],
-            hoi:       s.vhoi[il],
-            iono2:     s.viono2[il],
-            oio:       s.voio[il],
-            i2:        s.vi2[il],
-            i2o2:      s.vi2o2[il],
-            i2o3:      s.vi2o3[il],
-            i2o4:      s.vi2o4[il],
+            no: s.vno[il],
+            o2: s.vo2[il],
+            o3: s.vo3[il],
+            o3_o1d: s.vo3d[il],
+            h2co_a: s.vh2coa[il],
+            h2co_b: s.vh2cob[il],
+            h2o2: s.vh2o2[il],
+            rooh: s.vrooh[il],
+            no2: s.vno2[il],
+            no3_x: s.vno3x[il],
+            no3_l: s.vno3l[il],
+            n2o5: s.vn2o5[il],
+            hno2: s.vhno2[il],
+            hno3: s.vhno3[il],
+            hno4: s.vhno4[il],
+            clono2: s.vclno3[il],
+            cl2: s.vcl2[il],
+            hocl: s.vhocl[il],
+            oclo: s.voclo[il],
+            cl2o2: s.vcl2o2[il],
+            clo: s.vclo[il],
+            bro: s.vbro[il],
+            brono2: s.vbrno3[il],
+            hobr: s.vhobr[il],
+            n2o: s.vn2o[il],
+            cfc11: s.vcfcl3[il],
+            cfc12: s.vf2cl2[il],
+            cfc113: s.vf113[il],
+            cfc114: s.vf114[il],
+            cfc115: s.vf115[il],
+            ccl4: s.vccl4[il],
+            ch3cl: s.vch3cl[il],
+            ch3ccl3: s.vmecf[il],
+            ch3br: s.vch3br[il],
+            h1211: s.vh1211[il],
+            h1301: s.vh1301[il],
+            h2402: s.vh2402[il],
+            hcfc22: s.vh22[il],
+            hcfc123: s.vh123[il],
+            hcfc141b: s.vh141b[il],
+            chbr3: s.vchbr3[il],
+            ch3i: s.vch3i[il],
+            cf3i: s.vcf3i[il],
+            ocs: s.vocs[il],
+            io: s.vio[il],
+            hoi: s.vhoi[il],
+            iono2: s.viono2[il],
+            oio: s.voio[il],
+            i2: s.vi2[il],
+            i2o2: s.vi2o2[il],
+            i2o3: s.vi2o3[il],
+            i2o4: s.vi2o4[il],
         }
     }
 }
@@ -354,7 +380,7 @@ pub struct CtmBoxSpec {
 #[derive(Debug, Clone)]
 pub struct CtmConfig {
     pub latitude_deg: f64,
-    pub julian_day: u16,       // 1..=366
+    pub julian_day: u16, // 1..=366
     pub integration_days: u32,
     pub boxes: Vec<CtmBoxSpec>,
     pub bromine: bool,
@@ -527,7 +553,12 @@ impl DiurnOutput {
         if nboxes == 0 {
             return Array2::zeros((0, 0));
         }
-        let ntimes = self.time_series.iter().map(|ts| ts.steps.len()).max().unwrap_or(0);
+        let ntimes = self
+            .time_series
+            .iter()
+            .map(|ts| ts.steps.len())
+            .max()
+            .unwrap_or(0);
         let mut arr = Array2::zeros((nboxes, ntimes));
         for (ib, ts) in self.time_series.iter().enumerate() {
             for (it, step) in ts.steps.iter().enumerate() {
@@ -545,7 +576,12 @@ impl DiurnOutput {
     /// Example: `output.jvalue_grid(|j| j.no2)` → J(NO₂) as `Array2<f64>`.
     pub fn jvalue_grid(&self, f: impl Fn(&JValues) -> f64) -> Array2<f64> {
         let nboxes = self.boxes.len();
-        let ntimes = self.time_series.iter().map(|ts| ts.steps.len()).max().unwrap_or(0);
+        let ntimes = self
+            .time_series
+            .iter()
+            .map(|ts| ts.steps.len())
+            .max()
+            .unwrap_or(0);
         let mut arr = Array2::zeros((nboxes, ntimes));
         for (ib, snap) in self.boxes.iter().enumerate() {
             let val = f(&snap.jvalues);
@@ -621,7 +657,9 @@ impl PratmoModel {
     /// Keeps the original Fortran-file workflow intact for backwards-compatibility
     /// testing and for overriding individual data files.
     pub fn new(data_dir: impl AsRef<Path>) -> Self {
-        Self { data_dir: Some(data_dir.as_ref().to_owned()) }
+        Self {
+            data_dir: Some(data_dir.as_ref().to_owned()),
+        }
     }
 
     /// Run the diurnal cycle (DIURN + TPATH) mode.
@@ -631,6 +669,7 @@ impl PratmoModel {
     pub fn run_diurn(&self, cfg: &DiurnConfig) -> Result<DiurnOutput> {
         let mut s = self.load_base_state()?;
         apply_diurn_config(&mut s, cfg)?;
+        validate_supported_mode(&s)?;
 
         s.out_unit7 = None;
         s.out_unit8 = None;
@@ -717,6 +756,7 @@ impl PratmoModel {
     pub fn run_ctm(&self, cfg: &CtmConfig) -> Result<CtmOutput> {
         let mut s = self.load_base_state()?;
         apply_ctm_config(&mut s, cfg);
+        validate_supported_mode(&s)?;
 
         s.out_unit7 = None;
         s.out_unit8 = None;
@@ -741,6 +781,25 @@ impl PratmoModel {
     }
 }
 
+/// Reject Fortran modes that are not silently approximated by the public Rust
+/// API.  A warning or no-op would make a parity run look successful while
+/// producing a different scientific calculation.
+fn validate_supported_mode(s: &ModelState) -> Result<()> {
+    if s.nd216 < 0 {
+        bail!(
+            "DERIVS mode (nd216={}) is not implemented; sensitivity Jacobians are unavailable",
+            s.nd216
+        );
+    }
+    if s.npstd > 0 {
+        bail!(
+            "PZSTD mode (NPSTD={}) is not implemented; pressure-to-standard-Z conversion is unavailable",
+            s.npstd
+        );
+    }
+    Ok(())
+}
+
 // ── Config application ─────────────────────────────────────────────────────────
 
 fn diurn_config_nbox(cfg: &DiurnConfig) -> usize {
@@ -762,27 +821,28 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
 
     let nbox = diurn_config_nbox(cfg);
     s.nbox = nbox;
-    s.nd216  = 0;
+    s.nd216 = 0;
     s.nd216s = 0;
 
     // Geographic parameters
     s.xlatd = cfg.latitude_deg;
-    s.xlat  = cfg.latitude_deg.to_radians();
+    s.xlat = cfg.latitude_deg.to_radians();
 
     // Solar declination from Julian day (OSIRIS formula, same as ctmlfq)
-    let pi  = std::f64::consts::PI;
+    let pi = std::f64::consts::PI;
     let xjd = 2.0 * pi * cfg.julian_day as f64 / 365.0;
-    let decang = 6.918e-3
-        - 0.399912 * xjd.cos()  + 0.070257 * xjd.sin()
-        - 6.758e-3 * (2.0 * xjd).cos() + 9.07e-4 * (2.0 * xjd).sin()
-        - 2.697e-3 * (3.0 * xjd).cos() + 1.480e-3 * (3.0 * xjd).sin();
+    let decang = 6.918e-3 - 0.399912 * xjd.cos() + 0.070257 * xjd.sin()
+        - 6.758e-3 * (2.0 * xjd).cos()
+        + 9.07e-4 * (2.0 * xjd).sin()
+        - 2.697e-3 * (3.0 * xjd).cos()
+        + 1.480e-3 * (3.0 * xjd).sin();
     s.xdecd = decang * 57.29578;
-    s.xdec  = decang;
+    s.xdec = decang;
 
     // Earth–Sun distance (monthly table, same as ctmlfq)
     const EDIST: [f64; 12] = [
-        0.9837, 0.9875, 0.9945, 1.0032, 1.0109, 1.0158,
-        1.0165, 1.0128, 1.0057, 0.9970, 0.9892, 0.9842,
+        0.9837, 0.9875, 0.9945, 1.0032, 1.0109, 1.0158, 1.0165, 1.0128, 1.0057, 0.9970, 0.9892,
+        0.9842,
     ];
     let mon = ((cfg.julian_day as i32 - 1) / 30).min(11) as usize;
     s.flscal = cfg.solar_flux_scale / (EDIST[mon] * EDIST[mon]);
@@ -790,9 +850,9 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     // Recompute diurnal time grid with updated lat/dec
     setday(s);
 
-    s.nday   = 1; // full 24-hour integration
+    s.nday = 1; // full 24-hour integration
     s.ndaysd = cfg.integration_days as i32;
-    s.lbrom  = cfg.bromine;
+    s.lbrom = cfg.bromine;
 
     // Box configuration.
     // fort02.x initial densities were rescaled by dm[ialt_old] during read_all.
@@ -800,7 +860,9 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     // physically consistent densities at the user's requested altitude.
     let ndval = s.ndval as usize;
     let custom_reference = if cfg.atmosphere.is_some() {
-        let ialt_ref = (s.nboxdo[0].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+        let ialt_ref = (s.nboxdo[0].unsigned_abs() as usize)
+            .saturating_sub(1)
+            .min(NL - 1);
         let mut densities = [0.0_f64; NDEN];
         for (id, value) in densities.iter_mut().take(ndval).enumerate() {
             *value = s.den_get(0, id);
@@ -811,7 +873,9 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     };
     for ib in 0..nbox {
         let spec = cfg.boxes.get(ib);
-        let ialt_old = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+        let ialt_old = (s.nboxdo[ib].unsigned_abs() as usize)
+            .saturating_sub(1)
+            .min(NL - 1);
         let ialt_new = if cfg.atmosphere.is_some() {
             let level = spec.map(|b| b.altitude_level).unwrap_or((ib + 1) as u8) as usize;
             if level == 0 {
@@ -847,14 +911,14 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
                 s.den_set(ib, id, v * scale);
             }
         }
-        s.nboxdo[ib]  = (ialt_new + 1) as i32;
-        s.boxaa[ib]   = spec.map(|b| b.albedo).unwrap_or(0.25);
-        s.boxtt[ib]   = spec.map(|b| b.temp_offset_k).unwrap_or(0.0);
-        s.nboxmx[ib]  = cfg.integration_days as i32;
-        s.nboxwt[ib]  = 1;
-        s.nboxpr[ib]  = 0;
-        s.nboxct[ib]  = 0;
-        s.boxrn[ib]   = (ib + 1) as f64;
+        s.nboxdo[ib] = (ialt_new + 1) as i32;
+        s.boxaa[ib] = spec.map(|b| b.albedo).unwrap_or(0.25);
+        s.boxtt[ib] = spec.map(|b| b.temp_offset_k).unwrap_or(0.0);
+        s.nboxmx[ib] = cfg.integration_days as i32;
+        s.nboxwt[ib] = 1;
+        s.nboxpr[ib] = 0;
+        s.nboxct[ib] = 0;
+        s.boxrn[ib] = (ib + 1) as f64;
         if cfg.atmosphere.is_some() && s.dm[ialt_new] > 0.0 {
             s.do3[ib] = s.do3ref[ialt_new];
             s.fo3[ib] = s.do3[ib] / s.dm[ialt_new];
@@ -870,7 +934,9 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     if let Some(ref init_mr) = cfg.initial_mixing_ratios {
         for (ib, mr) in init_mr.iter().take(nbox).enumerate() {
             mr.apply_to_state(s, ib);
-            let ialt = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+            let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
+                .saturating_sub(1)
+                .min(NL - 1);
             s.do3[ib] = s.fo3[ib] * s.dm[ialt];
         }
     }
@@ -979,7 +1045,9 @@ fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile
 }
 
 fn reconcile_custom_box_implicit_species(s: &mut ModelState, ib: usize) {
-    let ialt = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+    let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
+        .saturating_sub(1)
+        .min(NL - 1);
     let mut xn = [0.0f64; NDEN];
     rplace(s, &mut xn, ib);
     let old_ialt = s.ialt;
@@ -1046,36 +1114,37 @@ fn apply_ctm_config(s: &mut ModelState, cfg: &CtmConfig) {
     // only if boxin_gui.dat is absent; otherwise it reads the file.
     // We write the key fields directly so they take effect after boxin_gui.dat is parsed.
     s.xlatd = cfg.latitude_deg;
-    s.xlat  = cfg.latitude_deg.to_radians();
+    s.xlat = cfg.latitude_deg.to_radians();
 
-    let pi  = std::f64::consts::PI;
+    let pi = std::f64::consts::PI;
     let xjd = 2.0 * pi * cfg.julian_day as f64 / 365.0;
-    let decang = 6.918e-3
-        - 0.399912 * xjd.cos()  + 0.070257 * xjd.sin()
-        - 6.758e-3 * (2.0 * xjd).cos() + 9.07e-4 * (2.0 * xjd).sin()
-        - 2.697e-3 * (3.0 * xjd).cos() + 1.480e-3 * (3.0 * xjd).sin();
+    let decang = 6.918e-3 - 0.399912 * xjd.cos() + 0.070257 * xjd.sin()
+        - 6.758e-3 * (2.0 * xjd).cos()
+        + 9.07e-4 * (2.0 * xjd).sin()
+        - 2.697e-3 * (3.0 * xjd).cos()
+        + 1.480e-3 * (3.0 * xjd).sin();
     s.xdecd = decang * 57.29578;
-    s.xdec  = decang;
+    s.xdec = decang;
 
     const EDIST: [f64; 12] = [
-        0.9837, 0.9875, 0.9945, 1.0032, 1.0109, 1.0158,
-        1.0165, 1.0128, 1.0057, 0.9970, 0.9892, 0.9842,
+        0.9837, 0.9875, 0.9945, 1.0032, 1.0109, 1.0158, 1.0165, 1.0128, 1.0057, 0.9970, 0.9892,
+        0.9842,
     ];
     let mon = ((cfg.julian_day as i32 - 1) / 30).min(11) as usize;
     s.flscal = cfg.solar_flux_scale / (EDIST[mon] * EDIST[mon]);
 
     s.ndaysd = cfg.integration_days as i32;
-    s.lbrom  = cfg.bromine;
+    s.lbrom = cfg.bromine;
 
     for (ib, spec) in cfg.boxes.iter().take(nbox).enumerate() {
-        s.nboxdo[ib]  = spec.altitude_level as i32;
-        s.boxaa[ib]   = spec.albedo;
-        s.boxtt[ib]   = spec.temp_offset_k;
-        s.nboxmx[ib]  = cfg.integration_days as i32;
-        s.nboxwt[ib]  = 1;
-        s.nboxpr[ib]  = 0;
-        s.nboxct[ib]  = 0;
-        s.boxrn[ib]   = (ib + 1) as f64;
+        s.nboxdo[ib] = spec.altitude_level as i32;
+        s.boxaa[ib] = spec.albedo;
+        s.boxtt[ib] = spec.temp_offset_k;
+        s.nboxmx[ib] = cfg.integration_days as i32;
+        s.nboxwt[ib] = 1;
+        s.nboxpr[ib] = 0;
+        s.nboxct[ib] = 0;
+        s.boxrn[ib] = (ib + 1) as f64;
     }
     for ib in nbox..NB {
         s.nboxdo[ib] = 0;
@@ -1086,32 +1155,36 @@ fn apply_ctm_config(s: &mut ModelState, cfg: &CtmConfig) {
 // ── Output extraction ──────────────────────────────────────────────────────────
 
 fn extract_box_snapshot(s: &ModelState, ib: usize) -> BoxSnapshot {
-    let ialt = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+    let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
+        .saturating_sub(1)
+        .min(NL - 1);
     BoxSnapshot {
-        box_index:      ib,
-        altitude_km:    s.z[ialt] * 1e-5,
-        pressure_mb:    s.pstd[ialt],
-        temperature_k:  s.t[ialt] + s.boxtt[ib],
+        box_index: ib,
+        altitude_km: s.z[ialt] * 1e-5,
+        pressure_mb: s.pstd[ialt],
+        temperature_k: s.t[ialt] + s.boxtt[ib],
         air_density_cm3: s.dm[ialt],
-        implicit:       ImplicitSpecies::from_state(s, ib),
-        long_lived:     LongLivedMixingRatios::from_state(s, ib),
-        jvalues:        JValues::from_state_alt(s, ib),
+        implicit: ImplicitSpecies::from_state(s, ib),
+        long_lived: LongLivedMixingRatios::from_state(s, ib),
+        jvalues: JValues::from_state_alt(s, ib),
     }
 }
 
 fn extract_diurn_timeseries(s: &ModelState, ib: usize) -> DiurnBoxTimeSeries {
-    let ialt = (s.nboxdo[ib].unsigned_abs() as usize).saturating_sub(1).min(NL - 1);
+    let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
+        .saturating_sub(1)
+        .min(NL - 1);
     let ntimdo = s.ntimdo;
 
     let steps = (0..ntimdo)
         .map(|kt| DiurnTimeStep {
             time_hhmm: s.nhhmm[kt],
-            implicit:  ImplicitSpecies::from_timeseries(s, ib, kt),
+            implicit: ImplicitSpecies::from_timeseries(s, ib, kt),
         })
         .collect();
 
     DiurnBoxTimeSeries {
-        box_index:   ib,
+        box_index: ib,
         altitude_km: s.z[ialt] * 1e-5,
         pressure_mb: s.pstd[ialt],
         steps,
@@ -1133,7 +1206,10 @@ fn extract_diurn_output(s: &ModelState) -> DiurnOutput {
     DiurnOutput {
         boxes,
         time_series,
-        diagnostics: Diagnostics { raxloop: s.raxloop, radcount: s.radcount },
+        diagnostics: Diagnostics {
+            raxloop: s.raxloop,
+            radcount: s.radcount,
+        },
     }
 }
 
@@ -1146,6 +1222,31 @@ fn extract_ctm_output(s: &ModelState) -> CtmOutput {
 
     CtmOutput {
         boxes,
-        diagnostics: Diagnostics { raxloop: s.raxloop, radcount: s.radcount },
+        diagnostics: Diagnostics {
+            raxloop: s.raxloop,
+            radcount: s.radcount,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_supported_mode;
+    use crate::state::ModelState;
+
+    #[test]
+    fn unsupported_derivs_mode_is_rejected() {
+        let mut state = ModelState::new();
+        state.nd216 = -1;
+        let error = validate_supported_mode(&state).expect_err("DERIVS must be rejected");
+        assert!(error.to_string().contains("DERIVS"));
+    }
+
+    #[test]
+    fn unsupported_pzstd_mode_is_rejected() {
+        let mut state = ModelState::new();
+        state.npstd = 1;
+        let error = validate_supported_mode(&state).expect_err("PZSTD must be rejected");
+        assert!(error.to_string().contains("PZSTD"));
     }
 }

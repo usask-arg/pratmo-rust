@@ -1,3 +1,8 @@
+// Custom-atmosphere tests cover the normal physical DIURN API.  They are not
+// compiled under `fortran-parity`, which intentionally disables the legacy
+// reference executable's uninitialized photolysis multipliers.
+#![cfg(not(feature = "fortran-parity"))]
+
 use pratmo_core::api::{
     CustomAtmosphereProfile, DiurnBoxSpec, DiurnConfig, LongLivedMixingRatios,
     No2ConstrainedDiurnConfig, O3InputKind, PratmoModel,

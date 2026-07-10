@@ -7,10 +7,10 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use pratmo_core::api::{
-    CustomAtmosphereProfile,
-    BoxSnapshot, CtmBoxSpec, CtmConfig, CtmOutput, Diagnostics, DiurnBoxSpec, DiurnBoxTimeSeries,
-    DiurnConfig, DiurnOutput, DiurnTimeStep, ImplicitSpecies, JValues, LongLivedMixingRatios,
-    No2ConstrainedDiurnConfig, No2ConstrainedDiurnOutput, O3InputKind, PratmoModel,
+    BoxSnapshot, CtmBoxSpec, CtmConfig, CtmOutput, CustomAtmosphereProfile, Diagnostics,
+    DiurnBoxSpec, DiurnBoxTimeSeries, DiurnConfig, DiurnOutput, DiurnTimeStep, ImplicitSpecies,
+    JValues, LongLivedMixingRatios, No2ConstrainedDiurnConfig, No2ConstrainedDiurnOutput,
+    O3InputKind, PratmoModel,
 };
 
 // ── String-dispatch helpers ────────────────────────────────────────────────────
@@ -134,75 +134,145 @@ struct PyImplicitSpecies {
 #[pymethods]
 impl PyImplicitSpecies {
     #[getter]
-    fn no(&self) -> f64 { self.inner.no }
+    fn no(&self) -> f64 {
+        self.inner.no
+    }
     #[getter]
-    fn no2(&self) -> f64 { self.inner.no2 }
+    fn no2(&self) -> f64 {
+        self.inner.no2
+    }
     #[getter]
-    fn no3(&self) -> f64 { self.inner.no3 }
+    fn no3(&self) -> f64 {
+        self.inner.no3
+    }
     #[getter]
-    fn n2o5(&self) -> f64 { self.inner.n2o5 }
+    fn n2o5(&self) -> f64 {
+        self.inner.n2o5
+    }
     #[getter]
-    fn hno3(&self) -> f64 { self.inner.hno3 }
+    fn hno3(&self) -> f64 {
+        self.inner.hno3
+    }
     #[getter]
-    fn h(&self) -> f64 { self.inner.h }
+    fn h(&self) -> f64 {
+        self.inner.h
+    }
     #[getter]
-    fn oh(&self) -> f64 { self.inner.oh }
+    fn oh(&self) -> f64 {
+        self.inner.oh
+    }
     #[getter]
-    fn ho2(&self) -> f64 { self.inner.ho2 }
+    fn ho2(&self) -> f64 {
+        self.inner.ho2
+    }
     #[getter]
-    fn h2o2(&self) -> f64 { self.inner.h2o2 }
+    fn h2o2(&self) -> f64 {
+        self.inner.h2o2
+    }
     #[getter]
-    fn o(&self) -> f64 { self.inner.o }
+    fn o(&self) -> f64 {
+        self.inner.o
+    }
     #[getter]
-    fn o3(&self) -> f64 { self.inner.o3 }
+    fn o3(&self) -> f64 {
+        self.inner.o3
+    }
     #[getter]
-    fn bro(&self) -> f64 { self.inner.bro }
+    fn bro(&self) -> f64 {
+        self.inner.bro
+    }
     #[getter]
-    fn br(&self) -> f64 { self.inner.br }
+    fn br(&self) -> f64 {
+        self.inner.br
+    }
     #[getter]
-    fn hbr(&self) -> f64 { self.inner.hbr }
+    fn hbr(&self) -> f64 {
+        self.inner.hbr
+    }
     #[getter]
-    fn hno2(&self) -> f64 { self.inner.hno2 }
+    fn hno2(&self) -> f64 {
+        self.inner.hno2
+    }
     #[getter]
-    fn hcl(&self) -> f64 { self.inner.hcl }
+    fn hcl(&self) -> f64 {
+        self.inner.hcl
+    }
     #[getter]
-    fn cl(&self) -> f64 { self.inner.cl }
+    fn cl(&self) -> f64 {
+        self.inner.cl
+    }
     #[getter]
-    fn cl2(&self) -> f64 { self.inner.cl2 }
+    fn cl2(&self) -> f64 {
+        self.inner.cl2
+    }
     #[getter]
-    fn clo(&self) -> f64 { self.inner.clo }
+    fn clo(&self) -> f64 {
+        self.inner.clo
+    }
     #[getter]
-    fn clono2(&self) -> f64 { self.inner.clono2 }
+    fn clono2(&self) -> f64 {
+        self.inner.clono2
+    }
     #[getter]
-    fn hno4(&self) -> f64 { self.inner.hno4 }
+    fn hno4(&self) -> f64 {
+        self.inner.hno4
+    }
     #[getter]
-    fn hocl(&self) -> f64 { self.inner.hocl }
+    fn hocl(&self) -> f64 {
+        self.inner.hocl
+    }
     #[getter]
-    fn brono2(&self) -> f64 { self.inner.brono2 }
+    fn brono2(&self) -> f64 {
+        self.inner.brono2
+    }
     #[getter]
-    fn hobr(&self) -> f64 { self.inner.hobr }
+    fn hobr(&self) -> f64 {
+        self.inner.hobr
+    }
     #[getter]
-    fn h2co(&self) -> f64 { self.inner.h2co }
+    fn h2co(&self) -> f64 {
+        self.inner.h2co
+    }
     #[getter]
-    fn ch3o2(&self) -> f64 { self.inner.ch3o2 }
+    fn ch3o2(&self) -> f64 {
+        self.inner.ch3o2
+    }
     #[getter]
-    fn ch3o2h(&self) -> f64 { self.inner.ch3o2h }
+    fn ch3o2h(&self) -> f64 {
+        self.inner.ch3o2h
+    }
     #[getter]
-    fn oclo(&self) -> f64 { self.inner.oclo }
+    fn oclo(&self) -> f64 {
+        self.inner.oclo
+    }
     #[getter]
-    fn cl2o2(&self) -> f64 { self.inner.cl2o2 }
+    fn cl2o2(&self) -> f64 {
+        self.inner.cl2o2
+    }
     #[getter]
-    fn brcl(&self) -> f64 { self.inner.brcl }
+    fn brcl(&self) -> f64 {
+        self.inner.brcl
+    }
     #[getter]
-    fn i(&self) -> f64 { self.inner.i }
+    fn i(&self) -> f64 {
+        self.inner.i
+    }
     #[getter]
-    fn io(&self) -> f64 { self.inner.io }
+    fn io(&self) -> f64 {
+        self.inner.io
+    }
     #[getter]
-    fn hoi(&self) -> f64 { self.inner.hoi }
+    fn hoi(&self) -> f64 {
+        self.inner.hoi
+    }
     #[getter]
-    fn iono2(&self) -> f64 { self.inner.iono2 }
+    fn iono2(&self) -> f64 {
+        self.inner.iono2
+    }
     #[getter]
-    fn hi(&self) -> f64 { self.inner.hi }
+    fn hi(&self) -> f64 {
+        self.inner.hi
+    }
 
     /// Return all 35 species as a ``{name: value}`` dict (cm⁻³).
     fn to_dict(&self) -> HashMap<&'static str, f64> {
@@ -275,113 +345,221 @@ impl PyLongLivedMixingRatios {
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
-        o3: f64, n2o: f64, noy: f64, ch4: f64, co: f64,
-        clx: f64, cf2cl2: f64, cfcl3: f64, ccl4: f64, ch3cl: f64,
-        ch3ccl3: f64, h2: f64, h2o: f64, nh3: f64, c5h8: f64,
-        brx: f64, ch3br: f64, ocs: f64, iodx: f64,
+        o3: f64,
+        n2o: f64,
+        noy: f64,
+        ch4: f64,
+        co: f64,
+        clx: f64,
+        cf2cl2: f64,
+        cfcl3: f64,
+        ccl4: f64,
+        ch3cl: f64,
+        ch3ccl3: f64,
+        h2: f64,
+        h2o: f64,
+        nh3: f64,
+        c5h8: f64,
+        brx: f64,
+        ch3br: f64,
+        ocs: f64,
+        iodx: f64,
     ) -> Self {
         Self {
             inner: LongLivedMixingRatios {
-                o3, n2o, noy, ch4, co, clx, cf2cl2, cfcl3, ccl4,
-                ch3cl, ch3ccl3, h2, h2o, nh3, c5h8, brx, ch3br, ocs, iodx,
+                o3,
+                n2o,
+                noy,
+                ch4,
+                co,
+                clx,
+                cf2cl2,
+                cfcl3,
+                ccl4,
+                ch3cl,
+                ch3ccl3,
+                h2,
+                h2o,
+                nh3,
+                c5h8,
+                brx,
+                ch3br,
+                ocs,
+                iodx,
             },
         }
     }
 
     #[getter]
-    fn o3(&self) -> f64 { self.inner.o3 }
+    fn o3(&self) -> f64 {
+        self.inner.o3
+    }
     #[setter]
-    fn set_o3(&mut self, v: f64) { self.inner.o3 = v; }
+    fn set_o3(&mut self, v: f64) {
+        self.inner.o3 = v;
+    }
 
     #[getter]
-    fn n2o(&self) -> f64 { self.inner.n2o }
+    fn n2o(&self) -> f64 {
+        self.inner.n2o
+    }
     #[setter]
-    fn set_n2o(&mut self, v: f64) { self.inner.n2o = v; }
+    fn set_n2o(&mut self, v: f64) {
+        self.inner.n2o = v;
+    }
 
     #[getter]
-    fn noy(&self) -> f64 { self.inner.noy }
+    fn noy(&self) -> f64 {
+        self.inner.noy
+    }
     #[setter]
-    fn set_noy(&mut self, v: f64) { self.inner.noy = v; }
+    fn set_noy(&mut self, v: f64) {
+        self.inner.noy = v;
+    }
 
     #[getter]
-    fn ch4(&self) -> f64 { self.inner.ch4 }
+    fn ch4(&self) -> f64 {
+        self.inner.ch4
+    }
     #[setter]
-    fn set_ch4(&mut self, v: f64) { self.inner.ch4 = v; }
+    fn set_ch4(&mut self, v: f64) {
+        self.inner.ch4 = v;
+    }
 
     #[getter]
-    fn co(&self) -> f64 { self.inner.co }
+    fn co(&self) -> f64 {
+        self.inner.co
+    }
     #[setter]
-    fn set_co(&mut self, v: f64) { self.inner.co = v; }
+    fn set_co(&mut self, v: f64) {
+        self.inner.co = v;
+    }
 
     #[getter]
-    fn clx(&self) -> f64 { self.inner.clx }
+    fn clx(&self) -> f64 {
+        self.inner.clx
+    }
     #[setter]
-    fn set_clx(&mut self, v: f64) { self.inner.clx = v; }
+    fn set_clx(&mut self, v: f64) {
+        self.inner.clx = v;
+    }
 
     #[getter]
-    fn cf2cl2(&self) -> f64 { self.inner.cf2cl2 }
+    fn cf2cl2(&self) -> f64 {
+        self.inner.cf2cl2
+    }
     #[setter]
-    fn set_cf2cl2(&mut self, v: f64) { self.inner.cf2cl2 = v; }
+    fn set_cf2cl2(&mut self, v: f64) {
+        self.inner.cf2cl2 = v;
+    }
 
     #[getter]
-    fn cfcl3(&self) -> f64 { self.inner.cfcl3 }
+    fn cfcl3(&self) -> f64 {
+        self.inner.cfcl3
+    }
     #[setter]
-    fn set_cfcl3(&mut self, v: f64) { self.inner.cfcl3 = v; }
+    fn set_cfcl3(&mut self, v: f64) {
+        self.inner.cfcl3 = v;
+    }
 
     #[getter]
-    fn ccl4(&self) -> f64 { self.inner.ccl4 }
+    fn ccl4(&self) -> f64 {
+        self.inner.ccl4
+    }
     #[setter]
-    fn set_ccl4(&mut self, v: f64) { self.inner.ccl4 = v; }
+    fn set_ccl4(&mut self, v: f64) {
+        self.inner.ccl4 = v;
+    }
 
     #[getter]
-    fn ch3cl(&self) -> f64 { self.inner.ch3cl }
+    fn ch3cl(&self) -> f64 {
+        self.inner.ch3cl
+    }
     #[setter]
-    fn set_ch3cl(&mut self, v: f64) { self.inner.ch3cl = v; }
+    fn set_ch3cl(&mut self, v: f64) {
+        self.inner.ch3cl = v;
+    }
 
     #[getter]
-    fn ch3ccl3(&self) -> f64 { self.inner.ch3ccl3 }
+    fn ch3ccl3(&self) -> f64 {
+        self.inner.ch3ccl3
+    }
     #[setter]
-    fn set_ch3ccl3(&mut self, v: f64) { self.inner.ch3ccl3 = v; }
+    fn set_ch3ccl3(&mut self, v: f64) {
+        self.inner.ch3ccl3 = v;
+    }
 
     #[getter]
-    fn h2(&self) -> f64 { self.inner.h2 }
+    fn h2(&self) -> f64 {
+        self.inner.h2
+    }
     #[setter]
-    fn set_h2(&mut self, v: f64) { self.inner.h2 = v; }
+    fn set_h2(&mut self, v: f64) {
+        self.inner.h2 = v;
+    }
 
     #[getter]
-    fn h2o(&self) -> f64 { self.inner.h2o }
+    fn h2o(&self) -> f64 {
+        self.inner.h2o
+    }
     #[setter]
-    fn set_h2o(&mut self, v: f64) { self.inner.h2o = v; }
+    fn set_h2o(&mut self, v: f64) {
+        self.inner.h2o = v;
+    }
 
     #[getter]
-    fn nh3(&self) -> f64 { self.inner.nh3 }
+    fn nh3(&self) -> f64 {
+        self.inner.nh3
+    }
     #[setter]
-    fn set_nh3(&mut self, v: f64) { self.inner.nh3 = v; }
+    fn set_nh3(&mut self, v: f64) {
+        self.inner.nh3 = v;
+    }
 
     #[getter]
-    fn c5h8(&self) -> f64 { self.inner.c5h8 }
+    fn c5h8(&self) -> f64 {
+        self.inner.c5h8
+    }
     #[setter]
-    fn set_c5h8(&mut self, v: f64) { self.inner.c5h8 = v; }
+    fn set_c5h8(&mut self, v: f64) {
+        self.inner.c5h8 = v;
+    }
 
     #[getter]
-    fn brx(&self) -> f64 { self.inner.brx }
+    fn brx(&self) -> f64 {
+        self.inner.brx
+    }
     #[setter]
-    fn set_brx(&mut self, v: f64) { self.inner.brx = v; }
+    fn set_brx(&mut self, v: f64) {
+        self.inner.brx = v;
+    }
 
     #[getter]
-    fn ch3br(&self) -> f64 { self.inner.ch3br }
+    fn ch3br(&self) -> f64 {
+        self.inner.ch3br
+    }
     #[setter]
-    fn set_ch3br(&mut self, v: f64) { self.inner.ch3br = v; }
+    fn set_ch3br(&mut self, v: f64) {
+        self.inner.ch3br = v;
+    }
 
     #[getter]
-    fn ocs(&self) -> f64 { self.inner.ocs }
+    fn ocs(&self) -> f64 {
+        self.inner.ocs
+    }
     #[setter]
-    fn set_ocs(&mut self, v: f64) { self.inner.ocs = v; }
+    fn set_ocs(&mut self, v: f64) {
+        self.inner.ocs = v;
+    }
 
     #[getter]
-    fn iodx(&self) -> f64 { self.inner.iodx }
+    fn iodx(&self) -> f64 {
+        self.inner.iodx
+    }
     #[setter]
-    fn set_iodx(&mut self, v: f64) { self.inner.iodx = v; }
+    fn set_iodx(&mut self, v: f64) {
+        self.inner.iodx = v;
+    }
 
     /// Return all 19 species as a ``{name: value}`` dict (dimensionless mixing ratios).
     fn to_dict(&self) -> HashMap<&'static str, f64> {
@@ -429,99 +607,193 @@ struct PyJValues {
 #[pymethods]
 impl PyJValues {
     #[getter]
-    fn no(&self) -> f64 { self.inner.no }
+    fn no(&self) -> f64 {
+        self.inner.no
+    }
     #[getter]
-    fn o2(&self) -> f64 { self.inner.o2 }
+    fn o2(&self) -> f64 {
+        self.inner.o2
+    }
     #[getter]
-    fn o3(&self) -> f64 { self.inner.o3 }
+    fn o3(&self) -> f64 {
+        self.inner.o3
+    }
     #[getter]
-    fn o3_o1d(&self) -> f64 { self.inner.o3_o1d }
+    fn o3_o1d(&self) -> f64 {
+        self.inner.o3_o1d
+    }
     #[getter]
-    fn h2co_a(&self) -> f64 { self.inner.h2co_a }
+    fn h2co_a(&self) -> f64 {
+        self.inner.h2co_a
+    }
     #[getter]
-    fn h2co_b(&self) -> f64 { self.inner.h2co_b }
+    fn h2co_b(&self) -> f64 {
+        self.inner.h2co_b
+    }
     #[getter]
-    fn h2o2(&self) -> f64 { self.inner.h2o2 }
+    fn h2o2(&self) -> f64 {
+        self.inner.h2o2
+    }
     #[getter]
-    fn rooh(&self) -> f64 { self.inner.rooh }
+    fn rooh(&self) -> f64 {
+        self.inner.rooh
+    }
     #[getter]
-    fn no2(&self) -> f64 { self.inner.no2 }
+    fn no2(&self) -> f64 {
+        self.inner.no2
+    }
     #[getter]
-    fn no3_x(&self) -> f64 { self.inner.no3_x }
+    fn no3_x(&self) -> f64 {
+        self.inner.no3_x
+    }
     #[getter]
-    fn no3_l(&self) -> f64 { self.inner.no3_l }
+    fn no3_l(&self) -> f64 {
+        self.inner.no3_l
+    }
     #[getter]
-    fn n2o5(&self) -> f64 { self.inner.n2o5 }
+    fn n2o5(&self) -> f64 {
+        self.inner.n2o5
+    }
     #[getter]
-    fn hno2(&self) -> f64 { self.inner.hno2 }
+    fn hno2(&self) -> f64 {
+        self.inner.hno2
+    }
     #[getter]
-    fn hno3(&self) -> f64 { self.inner.hno3 }
+    fn hno3(&self) -> f64 {
+        self.inner.hno3
+    }
     #[getter]
-    fn hno4(&self) -> f64 { self.inner.hno4 }
+    fn hno4(&self) -> f64 {
+        self.inner.hno4
+    }
     #[getter]
-    fn clono2(&self) -> f64 { self.inner.clono2 }
+    fn clono2(&self) -> f64 {
+        self.inner.clono2
+    }
     #[getter]
-    fn cl2(&self) -> f64 { self.inner.cl2 }
+    fn cl2(&self) -> f64 {
+        self.inner.cl2
+    }
     #[getter]
-    fn hocl(&self) -> f64 { self.inner.hocl }
+    fn hocl(&self) -> f64 {
+        self.inner.hocl
+    }
     #[getter]
-    fn oclo(&self) -> f64 { self.inner.oclo }
+    fn oclo(&self) -> f64 {
+        self.inner.oclo
+    }
     #[getter]
-    fn cl2o2(&self) -> f64 { self.inner.cl2o2 }
+    fn cl2o2(&self) -> f64 {
+        self.inner.cl2o2
+    }
     #[getter]
-    fn clo(&self) -> f64 { self.inner.clo }
+    fn clo(&self) -> f64 {
+        self.inner.clo
+    }
     #[getter]
-    fn bro(&self) -> f64 { self.inner.bro }
+    fn bro(&self) -> f64 {
+        self.inner.bro
+    }
     #[getter]
-    fn brono2(&self) -> f64 { self.inner.brono2 }
+    fn brono2(&self) -> f64 {
+        self.inner.brono2
+    }
     #[getter]
-    fn hobr(&self) -> f64 { self.inner.hobr }
+    fn hobr(&self) -> f64 {
+        self.inner.hobr
+    }
     #[getter]
-    fn n2o(&self) -> f64 { self.inner.n2o }
+    fn n2o(&self) -> f64 {
+        self.inner.n2o
+    }
     #[getter]
-    fn cfc11(&self) -> f64 { self.inner.cfc11 }
+    fn cfc11(&self) -> f64 {
+        self.inner.cfc11
+    }
     #[getter]
-    fn cfc12(&self) -> f64 { self.inner.cfc12 }
+    fn cfc12(&self) -> f64 {
+        self.inner.cfc12
+    }
     #[getter]
-    fn cfc113(&self) -> f64 { self.inner.cfc113 }
+    fn cfc113(&self) -> f64 {
+        self.inner.cfc113
+    }
     #[getter]
-    fn cfc114(&self) -> f64 { self.inner.cfc114 }
+    fn cfc114(&self) -> f64 {
+        self.inner.cfc114
+    }
     #[getter]
-    fn cfc115(&self) -> f64 { self.inner.cfc115 }
+    fn cfc115(&self) -> f64 {
+        self.inner.cfc115
+    }
     #[getter]
-    fn ccl4(&self) -> f64 { self.inner.ccl4 }
+    fn ccl4(&self) -> f64 {
+        self.inner.ccl4
+    }
     #[getter]
-    fn ch3cl(&self) -> f64 { self.inner.ch3cl }
+    fn ch3cl(&self) -> f64 {
+        self.inner.ch3cl
+    }
     #[getter]
-    fn ch3ccl3(&self) -> f64 { self.inner.ch3ccl3 }
+    fn ch3ccl3(&self) -> f64 {
+        self.inner.ch3ccl3
+    }
     #[getter]
-    fn ch3br(&self) -> f64 { self.inner.ch3br }
+    fn ch3br(&self) -> f64 {
+        self.inner.ch3br
+    }
     #[getter]
-    fn h1211(&self) -> f64 { self.inner.h1211 }
+    fn h1211(&self) -> f64 {
+        self.inner.h1211
+    }
     #[getter]
-    fn h1301(&self) -> f64 { self.inner.h1301 }
+    fn h1301(&self) -> f64 {
+        self.inner.h1301
+    }
     #[getter]
-    fn h2402(&self) -> f64 { self.inner.h2402 }
+    fn h2402(&self) -> f64 {
+        self.inner.h2402
+    }
     #[getter]
-    fn hcfc22(&self) -> f64 { self.inner.hcfc22 }
+    fn hcfc22(&self) -> f64 {
+        self.inner.hcfc22
+    }
     #[getter]
-    fn hcfc123(&self) -> f64 { self.inner.hcfc123 }
+    fn hcfc123(&self) -> f64 {
+        self.inner.hcfc123
+    }
     #[getter]
-    fn hcfc141b(&self) -> f64 { self.inner.hcfc141b }
+    fn hcfc141b(&self) -> f64 {
+        self.inner.hcfc141b
+    }
     #[getter]
-    fn chbr3(&self) -> f64 { self.inner.chbr3 }
+    fn chbr3(&self) -> f64 {
+        self.inner.chbr3
+    }
     #[getter]
-    fn ch3i(&self) -> f64 { self.inner.ch3i }
+    fn ch3i(&self) -> f64 {
+        self.inner.ch3i
+    }
     #[getter]
-    fn cf3i(&self) -> f64 { self.inner.cf3i }
+    fn cf3i(&self) -> f64 {
+        self.inner.cf3i
+    }
     #[getter]
-    fn ocs(&self) -> f64 { self.inner.ocs }
+    fn ocs(&self) -> f64 {
+        self.inner.ocs
+    }
     #[getter]
-    fn io(&self) -> f64 { self.inner.io }
+    fn io(&self) -> f64 {
+        self.inner.io
+    }
     #[getter]
-    fn hoi(&self) -> f64 { self.inner.hoi }
+    fn hoi(&self) -> f64 {
+        self.inner.hoi
+    }
     #[getter]
-    fn iono2(&self) -> f64 { self.inner.iono2 }
+    fn iono2(&self) -> f64 {
+        self.inner.iono2
+    }
 
     /// Return all 47 J-values as a ``{name: value}`` dict (s⁻¹).
     fn to_dict(&self) -> HashMap<&'static str, f64> {
@@ -597,9 +869,13 @@ struct PyDiagnostics {
 #[pymethods]
 impl PyDiagnostics {
     #[getter]
-    fn raxloop(&self) -> f64 { self.inner.raxloop }
+    fn raxloop(&self) -> f64 {
+        self.inner.raxloop
+    }
     #[getter]
-    fn radcount(&self) -> f64 { self.inner.radcount }
+    fn radcount(&self) -> f64 {
+        self.inner.radcount
+    }
 
     fn __repr__(&self) -> String {
         format!(
@@ -620,27 +896,43 @@ struct PyBoxSnapshot {
 #[pymethods]
 impl PyBoxSnapshot {
     #[getter]
-    fn box_index(&self) -> usize { self.inner.box_index }
+    fn box_index(&self) -> usize {
+        self.inner.box_index
+    }
     #[getter]
-    fn altitude_km(&self) -> f64 { self.inner.altitude_km }
+    fn altitude_km(&self) -> f64 {
+        self.inner.altitude_km
+    }
     #[getter]
-    fn pressure_mb(&self) -> f64 { self.inner.pressure_mb }
+    fn pressure_mb(&self) -> f64 {
+        self.inner.pressure_mb
+    }
     #[getter]
-    fn temperature_k(&self) -> f64 { self.inner.temperature_k }
+    fn temperature_k(&self) -> f64 {
+        self.inner.temperature_k
+    }
     #[getter]
-    fn air_density_cm3(&self) -> f64 { self.inner.air_density_cm3 }
+    fn air_density_cm3(&self) -> f64 {
+        self.inner.air_density_cm3
+    }
 
     #[getter]
     fn implicit(&self) -> PyImplicitSpecies {
-        PyImplicitSpecies { inner: self.inner.implicit.clone() }
+        PyImplicitSpecies {
+            inner: self.inner.implicit.clone(),
+        }
     }
     #[getter]
     fn long_lived(&self) -> PyLongLivedMixingRatios {
-        PyLongLivedMixingRatios { inner: self.inner.long_lived.clone() }
+        PyLongLivedMixingRatios {
+            inner: self.inner.long_lived.clone(),
+        }
     }
     #[getter]
     fn jvalues(&self) -> PyJValues {
-        PyJValues { inner: self.inner.jvalues.clone() }
+        PyJValues {
+            inner: self.inner.jvalues.clone(),
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -666,11 +958,15 @@ struct PyDiurnTimeStep {
 impl PyDiurnTimeStep {
     /// Time in HHMM integer format (e.g. 1430 = 14:30 UTC).
     #[getter]
-    fn time_hhmm(&self) -> i32 { self.inner.time_hhmm }
+    fn time_hhmm(&self) -> i32 {
+        self.inner.time_hhmm
+    }
 
     #[getter]
     fn implicit(&self) -> PyImplicitSpecies {
-        PyImplicitSpecies { inner: self.inner.implicit.clone() }
+        PyImplicitSpecies {
+            inner: self.inner.implicit.clone(),
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -689,11 +985,17 @@ struct PyDiurnBoxTimeSeries {
 #[pymethods]
 impl PyDiurnBoxTimeSeries {
     #[getter]
-    fn box_index(&self) -> usize { self.inner.box_index }
+    fn box_index(&self) -> usize {
+        self.inner.box_index
+    }
     #[getter]
-    fn altitude_km(&self) -> f64 { self.inner.altitude_km }
+    fn altitude_km(&self) -> f64 {
+        self.inner.altitude_km
+    }
     #[getter]
-    fn pressure_mb(&self) -> f64 { self.inner.pressure_mb }
+    fn pressure_mb(&self) -> f64 {
+        self.inner.pressure_mb
+    }
 
     #[getter]
     fn steps(&self) -> Vec<PyDiurnTimeStep> {
@@ -733,7 +1035,11 @@ impl PyDiurnBoxSpec {
     #[new]
     #[pyo3(signature = (altitude_level, albedo=0.0, temp_offset_k=0.0))]
     fn new(altitude_level: u8, albedo: f64, temp_offset_k: f64) -> Self {
-        Self { altitude_level, albedo, temp_offset_k }
+        Self {
+            altitude_level,
+            albedo,
+            temp_offset_k,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -761,7 +1067,11 @@ impl PyCtmBoxSpec {
     #[new]
     #[pyo3(signature = (altitude_level, albedo=0.0, temp_offset_k=0.0))]
     fn new(altitude_level: u8, albedo: f64, temp_offset_k: f64) -> Self {
-        Self { altitude_level, albedo, temp_offset_k }
+        Self {
+            altitude_level,
+            albedo,
+            temp_offset_k,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -798,11 +1108,21 @@ impl PyCustomAtmosphereProfile {
         o3_kind: String,
         altitude_km: Option<Vec<f64>>,
     ) -> Self {
-        Self { pressure_mb, temperature_k, altitude_km, o3, o3_kind }
+        Self {
+            pressure_mb,
+            temperature_k,
+            altitude_km,
+            o3,
+            o3_kind,
+        }
     }
 
     fn __repr__(&self) -> String {
-        format!("CustomAtmosphereProfile({} levels, o3_kind='{}')", self.pressure_mb.len(), self.o3_kind)
+        format!(
+            "CustomAtmosphereProfile({} levels, o3_kind='{}')",
+            self.pressure_mb.len(),
+            self.o3_kind
+        )
     }
 }
 
@@ -917,9 +1237,10 @@ impl PyDiurnConfig {
             parallel_boxes: self.parallel_boxes,
             solar_flux_scale: self.solar_flux_scale,
             atmosphere: self.atmosphere.as_ref().map(|a| a.to_rust()).transpose()?,
-            initial_mixing_ratios: self.initial_mixing_ratios.as_ref().map(|v| {
-                v.iter().map(|mr| mr.inner.clone()).collect()
-            }),
+            initial_mixing_ratios: self
+                .initial_mixing_ratios
+                .as_ref()
+                .map(|v| v.iter().map(|mr| mr.inner.clone()).collect()),
         })
     }
 }
@@ -962,7 +1283,14 @@ impl PyCtmConfig {
         bromine: bool,
         solar_flux_scale: f64,
     ) -> Self {
-        Self { latitude_deg, julian_day, integration_days, boxes, bromine, solar_flux_scale }
+        Self {
+            latitude_deg,
+            julian_day,
+            integration_days,
+            boxes,
+            bromine,
+            solar_flux_scale,
+        }
     }
 }
 
@@ -999,7 +1327,11 @@ impl PyDiurnOutput {
     /// Daily-mean snapshot for each box.
     #[getter]
     fn boxes(&self) -> Vec<PyBoxSnapshot> {
-        self.inner.boxes.iter().map(|b| PyBoxSnapshot { inner: b.clone() }).collect()
+        self.inner
+            .boxes
+            .iter()
+            .map(|b| PyBoxSnapshot { inner: b.clone() })
+            .collect()
     }
 
     /// Full diurnal time series for each box.
@@ -1014,7 +1346,9 @@ impl PyDiurnOutput {
 
     #[getter]
     fn diagnostics(&self) -> PyDiagnostics {
-        PyDiagnostics { inner: self.inner.diagnostics.clone() }
+        PyDiagnostics {
+            inner: self.inner.diagnostics.clone(),
+        }
     }
 
     /// Return an implicit species as a 2-D numpy array of shape ``(n_boxes, n_timesteps)``.
@@ -1100,7 +1434,12 @@ impl PyNo2ConstrainedDiurnConfig {
         target_hhmm: i32,
         iterations: usize,
     ) -> Self {
-        Self { diurn, observed_no2_cm3, target_hhmm, iterations }
+        Self {
+            diurn,
+            observed_no2_cm3,
+            target_hhmm,
+            iterations,
+        }
     }
 }
 
@@ -1124,7 +1463,9 @@ struct PyNo2ConstrainedDiurnOutput {
 impl PyNo2ConstrainedDiurnOutput {
     #[getter]
     fn output(&self) -> PyDiurnOutput {
-        PyDiurnOutput { inner: self.inner.output.clone() }
+        PyDiurnOutput {
+            inner: self.inner.output.clone(),
+        }
     }
 
     #[getter]
@@ -1150,12 +1491,18 @@ impl PyCtmOutput {
     /// Final converged snapshot for each box.
     #[getter]
     fn boxes(&self) -> Vec<PyBoxSnapshot> {
-        self.inner.boxes.iter().map(|b| PyBoxSnapshot { inner: b.clone() }).collect()
+        self.inner
+            .boxes
+            .iter()
+            .map(|b| PyBoxSnapshot { inner: b.clone() })
+            .collect()
     }
 
     #[getter]
     fn diagnostics(&self) -> PyDiagnostics {
-        PyDiagnostics { inner: self.inner.diagnostics.clone() }
+        PyDiagnostics {
+            inner: self.inner.diagnostics.clone(),
+        }
     }
 
     /// Return an implicit species as a 1-D numpy array of shape ``(n_boxes,)``.
@@ -1230,7 +1577,9 @@ impl PyPratmoModel {
     /// Create a model using only compiled-in embedded science data. No files needed.
     #[staticmethod]
     fn with_defaults() -> Self {
-        Self { inner: PratmoModel::with_defaults() }
+        Self {
+            inner: PratmoModel::with_defaults(),
+        }
     }
 
     /// Create a model that reads science data from *data_dir* at runtime.
@@ -1240,7 +1589,9 @@ impl PyPratmoModel {
     /// CTM runs additionally need ``fort03_LLM.x``, ``fort05.x``, ``fort51.x``.
     #[staticmethod]
     fn from_data_dir(data_dir: PathBuf) -> Self {
-        Self { inner: PratmoModel::new(data_dir) }
+        Self {
+            inner: PratmoModel::new(data_dir),
+        }
     }
 
     /// Run the diurnal cycle (DIURN + TPATH) mode.

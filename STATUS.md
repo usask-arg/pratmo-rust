@@ -4,24 +4,45 @@ Faithful 1-to-1 Rust port of PRATMO v6.0 (Prather stratospheric photochemical bo
 
 ## Where we are
 
-**CTM mode is fully validated; DIURN mode is partially validated.**  
-`cargo build` is clean (warnings only). `cargo test` passes 49 tests (38 unit + 11 integration). CTM: all species match gfortran to ≥4 sig figs at all 25 altitude levels (60°N, March 16, 40 days). DIURN: fort08 species output matches Fortran at all 25 boxes; fort07 post-noon time series diverges due to a suspected pre-existing Fortran J-value bug at high altitude (physically correct in Rust).
+**CTM and short-lived species now match the compiled Fortran reference in the
+opt-in parity mode.**
+The original 40-species Fortran input now runs directly, and an opt-in
+`fortran-parity` feature reproduces known undesirable executable behavior.
+In the standard 60°N, day-75 case, atmospheric fields, long-lived families,
+photolysis rates, and all chemically meaningful radical fields match at output
+precision. See [FORTRAN_PARITY.md](FORTRAN_PARITY.md) for the differential
+command and measurements.
 
 ---
 
-## Validation summary (CTM mode, 60°N March 16, 25 boxes, 40 days)
+## Validation summary (original Fortran, 60°N day 75, 25 boxes, 40 days)
 
 | Quantity | Status | Notes |
 |---|---|---|
 | O3, N2O, NOy, CH4, H2O | **✓ 4 sig figs** | Exact altitude grid match |
 | Air density M, T, pressure | **✓ 4 sig figs** | |
-| J(O3→O1D) | **✓ +0.10%** | Altitude-independent |
-| J(H2O2), J(N2O5) | **✓ ~1%** | |
-| OH, HO2 noon | **✓ 4 sig figs** | Resolved by jcomp fix (bug #8) |
-| HNO3 | **✓ 4 sig figs** | Resolved by jcomp fix (bug #8) |
-| N2O5 | **✓ 4 sig figs** | Resolved by jcomp fix (bug #8) |
+| output J(BrNO3), J(NO2) | **✓ <0.01%** | Exact to printed precision in `fortran-parity` build |
+| OH, HO2 final noon | **✓ <0.01%** | Exact to printed precision |
+| HNO3 | **✓ <0.01%** | Exact to printed precision |
+| N2O5 | **✓ <0.01%** | Exact to printed precision |
 | NTIMDO | **✓ 34** | Matches Fortran after jj_fortran fix |
-| RADCOUNT | **✓ 33000** | 40 days × 25 boxes × 33 time steps |
+| RADCOUNT | **✓ 33066** | Matches the compiled Fortran run |
+
+---
+
+## Release sign-off gate
+
+The reproducible clean-room differential now passes in `fortran-parity` mode:
+
+```bash
+scripts/fortran_differential.sh
+```
+
+This compiles gfortran in a temporary normalized input tree, compares CTM
+`boxout.dat`, DIURN/TPATH `fort07`–`fort09`, and checks exact `RADCOUNT`. The
+default and parity Rust test matrices are also green. The remaining open gaps
+below are unsupported or broader-than-fixture Fortran entry paths, not failures
+of the validated CTM/DIURN parity gate.
 
 ---
 
@@ -51,7 +72,7 @@ Faithful 1-to-1 Rust port of PRATMO v6.0 (Prather stratospheric photochemical bo
 | # | Bug | Fix |
 |---|---|---|
 | 1 | `ssf[NQ] = 0.0` — silenced ALL J-values | Initialize to 1.0 in `ModelState::new()` |
-| 2 | `gmu0 = -0.14` hardcoded | Read from fort01.x (value: -0.12) |
+| 2 | `gmu0 = -0.14` hardcoded | Normal builds read fort01.x; `fortran-parity` reproduces -0.14 |
 | 3 | NTIMDO off by 2: `jj` didn't count noon step | `jj_fortran = jj + 1` in setday() |
 | 4 | N2O read from fort51.x: F7.4 format used | fort51.x uses F8.4 (8-char fields) |
 | 5 | CTM unit conversion missing | ppmv×M×1e-6 for O3, ppbv×M×1e-9 for NOy/N2O |
@@ -61,48 +82,89 @@ Faithful 1-to-1 Rust port of PRATMO v6.0 (Prather stratospheric photochemical bo
 | 9 | `read_initial_densities`: `fixmix` called without setting `s.ibox`/`s.ialt` | Set `s.ibox = ib; s.ialt = ialt` before `fixmix(s)` — mirrors Fortran `IBOX=I; IALT=IABS(NBOXDO(IBOX))` |
 | 10 | DIURN test-scaling (do3ref/dm × 1.049/1.066, T=280 K) applied before fort02.x was read | Moved scaling block to `read_all` after `read_initial_densities`, matching Fortran's bread.f order |
 | 11 | `diurn_unit7_header` wrote `s.n[j] + 1` for NT values; `s.n[j]` is already 1-based | Remove `+ 1` from NT computation in `diurn_unit7_header` |
+| 12 | `SETDAY` mirrored `DTIME` one slot late, changing the first evening integration weights | Use `NTIM-1-j` for the zero-based destination |
+| 13 | ODF ISR values were parsed together with their trailing wavelength-band annotation | Parse the first fixed-format token only |
+| 14 | Parity-mode CHEMPL omitted R177 from HNO3 in every mode, although Fortran includes it in CTM | Restrict the legacy omission to `nd216 == 0` (DIURN) |
+
+### `bugs.txt` follow-up
+
+- The current `boxin_gui.dat` has all 24 IPFR flags, and the Rust CTM reader
+  now rejects short or non-integer IPF/IPFR/IPJV lines instead of silently
+  padding them with zero.
+- The tracer boundary typo from item 12 is already corrected in Rust; tests
+  cover both Cly and CH3Cl out-of-range sentinel behavior.
+- Normal Rust Newton solves now use a conservative f64 cancellation floor for
+  `RAFPML`, covering the dark-BrCl precision case from item 19. The
+  `fortran-parity` feature retains the original strict Fortran criterion.
 
 ---
 
 ## Test coverage
 
-49 tests total (`cargo test`).
+73 tests pass in the default configuration; 5 policy-specific short-lived
+assertions are ignored in the normal build. The `fortran-parity` feature has a
+separate green policy/input configuration with 53 active tests (44 unit tests
+plus 9 feature-policy tests).
 
 | Suite | Count | What it covers |
 |---|---|---|
-| `tests/ctm_integration.rs` | 11 | Full model run vs gfortran reference (all 25 altitudes, all key species, full OH diurnal, sanity checks) |
-| `reader::tests` | 20 | `parse_e_field`, `parse_fixed_i32s`, `parse_fixed_f64s_fw`, `hystat` (logp + geometric), `setday` (ntim, weights, mirror symmetry, polar night, nday modes) |
-| `ctm::tests` | 7 | `interp2` (corners, midpoint, linear, uniform), `read_f8_4`, `read_f7_1` |
+| `tests/ctm_integration.rs` | 11 | 6 active CTM regressions + 5 policy-specific ignored comparisons |
+| `tests/custom_diurn.rs` | 4 | Public custom-atmosphere DIURN API |
+| `tests/fortran_parity_feature.rs` | 8 normal / 9 parity | Original 40-species input, ODF parsing, policy switches, public DIURN smoke, representative latitude/season matrix, and end-to-end parity CTM smoke coverage |
+| `tests/iodine_chemistry.rs` | 9 | Iodine chemistry and heterogeneous recycling |
+| `reader::tests` | 21 | `parse_e_field`, `parse_fixed_i32s`, `parse_fixed_f64s_fw`, `hystat` (logp + geometric), `setday` (ntim, weights, time-grid mirror, polar night, nday modes) |
+| `ctm::tests` | 8 | `interp2` (corners, midpoint, linear, uniform), strict boxin integer counts, `read_f8_4`, `read_f7_1` |
 | `output::tests` | 9 | `hunt` (interior, boundary, below/above range, hint, JDDO array), `fmt_e10p3` |
+| `solver::tests` | 2 | machine-precision convergence floor and cancellation guard |
+| `tracers::tests` | 2 | Cly/CH3Cl fit boundaries and out-of-range sentinels |
+| `api::tests` | 2 | Explicit rejection of DERIVS and PZSTD modes |
 
 ---
 
 ## Open gaps
 
-### 1. DIURN mode validation (nd216 = 0) — partially validated
+### 1. DIURN mode validation (nd216 = 0) — validated in parity mode
 
-DIURN mode has been compared against the Fortran reference (fort01_diurn.x, equatorial 30°N May, 25 boxes at levels 1–30). Three bugs were found and fixed:
+DIURN mode has been compared against the compiled Fortran reference (equatorial
+30°N May, 25 boxes at levels 1–30). The parity build now matches the complete
+DIURN/TPATH output sequence; the normal build intentionally retains physical
+photolysis and heterogeneous chemistry.
+
+The setup and output repairs include:
 
 - **Bug #9**: `read_initial_densities` did not set `s.ibox`/`s.ialt` before calling `fixmix` — fixmix always operated on stale box 0 instead of the current box, corrupting initial densities for all boxes.
 - **Bug #10**: Test-scaling block (do3ref/do3int × 1.066, dm × 1.049, T=280 K) was applied inside `read_ozone_profile` *before* fort02.x was read. Fortran applies it *after*. This caused initial species densities to be 1.049× too large in DIURN mode.
 - **Bug #11 (output)**: `diurn_unit7_header` wrote `s.n[j] + 1` for NT values but `s.n[j]` is already 1-based — producing NT values 1 too large.
+- **DIURN parity quirk**: the Fortran executable leaves `SSF` and
+  heterogeneous rates 170–177 at zero. The Rust feature gate reproduces this
+  observable behavior; default Rust runs keep both active.
+- **Path/output parity**: restored the pre-loop `PUNCH(0,0)` metadata record,
+  fixed fixed-width E-field blank handling in `fort02.x`, and emitted the
+  `LEND` final mixing-ratio snapshot.
 
-**Validation results** (equatorial May, 25 boxes levels 1–30):
-- **fort08.x** (TPATH species averages, segment 0): species values **match** the Fortran reference at all 25 boxes to ≥3 sig figs.
-- **fort07.x** (DIURN time series): initial noon values **match** exactly. Post-noon evolution differs: the Fortran DIURN produces near-zero O(1D) and OH at high-altitude boxes (levels 25–30, ~50–58 km) while the Rust computes physically plausible photo-steady-state values (~10³ cm⁻³ OH). This appears to be a pre-existing Fortran DIURN bug where high-altitude J-values are incorrectly near zero — confirmed by the inverted pattern (non-zero O1D at low altitude, zero at high altitude) inconsistent with UV physics.
-- **fort09.x** (TPATH rate averages, segment 0): rates differ as a consequence of the fort07 discrepancy.
+**Validation results** (equatorial May, 25 boxes levels 1–30, parity feature):
+- **fort07.x**: DIURN time series and metadata match to printed precision,
+  with one last-digit twilight roundoff.
+- **fort08.x / fort09.x**: all segment/day/box species and rate rows match.
+- **LEND snapshot**: final mixing-ratio records match the Fortran output.
 
 ### 2. CTM grid coverage
-The integration test only exercises ipath=415 (60°N, March half-month 6) because `boxin_gui.dat` constrains `nd216 = nd216s`. The other 70 latitudes × 24 half-months in the 71×24 climatology grid are untested. Next step: run with `nd216s=1` (full grid scan) and compare the full `boxout.dat` against Fortran.
+The clean-room differential now exercises the standard 60°N/day-75 CTM case,
+and the public DIURN matrix covers tropical, mid-latitude, and polar-night
+atmospheres. The other 70 latitudes × 24 half-months in the 71×24 CTM
+climatology grid remain untested as a full sweep. A future campaign can run
+with `nd216s=1` and compare the complete `boxout.dat` grid. The invariant
+matrix deliberately uses polar-night cases; polar-day edge cases that exceed
+the legacy 16-angle `STORJV` storage remain outside the supported fixture.
 
 ### 3. Known latent bug in `setday` (unreachable in standard run)
 When any `ATIME[j] * SSET > 0.5 * DAYSEC` (requires ATIME > ~2.4 for a 5-hour sunset), Fortran uses `DTIME[j]` in `SNIT` but Rust uses `DTIME[jj]` (the step before). This path is never triggered by the standard `fort01.x` (all ATIME ≤ 1.05), but would produce wrong night-step intervals for unusual configurations.
 
 ### 4. DERIVS mode (nd216 < 0)
-Sensitivity Jacobians (d(P-L)/d(O3) etc.). Fortran `SUBROUTINE DERIVS` perturbs species and re-runs DSTEP. Not translated. `main.rs` prints a warning.
+Sensitivity Jacobians (d(P-L)/d(O3) etc.). Fortran `SUBROUTINE DERIVS` perturbs species and re-runs DSTEP. Not translated. The CLI and public API now reject this mode explicitly instead of running a false-success no-op.
 
 ### 5. PZSTD
-Converts pressure to standard Z grid. Called from NEWATM when NPSTD > 0. Currently a stub (no-op). The standard fort01.x has NPSTD=0.
+Converts pressure to standard Z grid. Called from NEWATM when NPSTD > 0. Currently unsupported; the CLI, public API, and TPATH now reject `NPSTD > 0` explicitly. The standard fort01.x has NPSTD=0.
 
 ### 6. Multi-case loop
 `batmo.f` can loop over multiple cases (READIN → run → READIN with LEND=TRUE → T1DIFF → repeat). T1DIFF is a no-op. `main.rs` handles only the first case.

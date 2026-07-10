@@ -1,6 +1,7 @@
 // butil.f → output/diagnostic subroutines
 // PUNCH, PRTALL, PRTPTH, PRTAVG, PRTRAT
 
+use std::fmt::Write as FmtWrite;
 use std::io::Write;
 
 use crate::state::ModelState;
@@ -29,8 +30,12 @@ pub fn fmt_e10p3(v: f64) -> String {
 
 /// Fortran 1PE9.2: field width 9, 2 decimal places.
 fn fmt_e9p2(v: f64) -> String {
-    if !v.is_finite() { return "*********".to_string(); }
-    if v == 0.0 { return " 0.00E+00".to_string(); }
+    if !v.is_finite() {
+        return "*********".to_string();
+    }
+    if v == 0.0 {
+        return " 0.00E+00".to_string();
+    }
     let neg = v < 0.0;
     let raw = format!("{:.2E}", v.abs());
     let (mant, exp_str) = raw.split_once('E').unwrap_or((&raw, "0"));
@@ -42,8 +47,12 @@ fn fmt_e9p2(v: f64) -> String {
 
 /// Fortran 1PE11.4: field width 11, 4 decimal places.
 fn fmt_e11p4(v: f64) -> String {
-    if !v.is_finite() { return "***********".to_string(); }
-    if v == 0.0 { return " 0.0000E+00".to_string(); }
+    if !v.is_finite() {
+        return "***********".to_string();
+    }
+    if v == 0.0 {
+        return " 0.0000E+00".to_string();
+    }
     let neg = v < 0.0;
     let raw = format!("{:.4E}", v.abs());
     let (mant, exp_str) = raw.split_once('E').unwrap_or((&raw, "0"));
@@ -86,12 +95,75 @@ fn write_a8_line(w: &mut dyn Write, vals: &[&str]) {
     }
 }
 
+/// Fortran 1PE13.6 field used by READIN's final LEND save (unit 7).
+fn fmt_e13p6(v: f64) -> String {
+    if !v.is_finite() {
+        return "*************".to_string();
+    }
+    if v == 0.0 {
+        return " 0.000000E+00".to_string();
+    }
+    let neg = v < 0.0;
+    let raw = format!("{:.6E}", v.abs());
+    let (mant, exp_str) = raw.split_once('E').unwrap_or((&raw, "0"));
+    let exp: i32 = exp_str.parse().unwrap_or(0);
+    let sign = if neg { '-' } else { ' ' };
+    let es = if exp >= 0 { '+' } else { '-' };
+    format!("{}{}E{}{:02}", sign, mant, es, exp.unsigned_abs())
+}
+
+/// Write READIN's final mixing-ratio save when the path input reaches EOF.
+/// Fortran: bread.f label 90, FORMAT 100/301/302.
+pub fn lend_dump(s: &mut ModelState) {
+    if s.out_unit7.is_none() {
+        return;
+    }
+    let mut out = String::new();
+
+    let titler_line: String = s
+        .titler
+        .iter()
+        .map(|t| format!("{:<8}", &t[..t.len().min(8)]))
+        .collect();
+    let _ = writeln!(out, "{}", titler_line);
+
+    let ndval = s.ndval as usize;
+    let nfval = s.nfval as usize;
+    for j in 0..ndval + nfval {
+        let title = if j < s.titles.len() { &s.titles[j] } else { "" };
+        let _ = writeln!(out, "{:<8}", &title[..title.len().min(8)]);
+
+        let mut vals = Vec::with_capacity(s.nbox + 1);
+        for ib in 0..s.nbox {
+            if j < ndval {
+                let ialt = s.nboxdo[ib].unsigned_abs().saturating_sub(1) as usize;
+                vals.push(s.den_get(ib, j) / s.dm[ialt]);
+            } else {
+                vals.push(s.fff_get(ib, j - ndval + 1));
+            }
+        }
+        // Fortran appends DDDDDD(1,J) once more after the NBOX values.
+        if let Some(&first) = vals.first() {
+            vals.push(first);
+        }
+        for chunk in vals.chunks(6) {
+            for &v in chunk {
+                let _ = write!(out, "{}", fmt_e13p6(v));
+            }
+            let _ = writeln!(out);
+        }
+    }
+    if let Some(ref mut w) = s.out_unit7 {
+        let _ = w.write_all(out.as_bytes());
+    }
+}
+
 // ── RCOLUM accessor ──────────────────────────────────────────────────────────
 
 fn rcolum_get(s: &ModelState, j: usize) -> f64 {
     match j {
-        1..=30  => s.xr[j - 1],
-        31..=280  => s.r[j - 31],
+        1..=30 => s.xr[j - 1],
+        31..=280 => s.r[j - 31],
         281..=310 => s.rp[j - 281],
         311..=340 => s.rl[j - 311],
         341..=370 => s.rpf[j - 341],
@@ -133,7 +205,13 @@ pub fn diurn_unit7_header(s: &mut ModelState) {
     // WRITE(7,201) (NT(JJ),JJ=1,NTOTX)
     // NT(J) = N(J) = 1-based species slot index; s.n[j] is already 1-based in Rust
     let nt_vals: Vec<i32> = (0..s.ntotx)
-        .map(|j| if j < 30 { s.n[j] as i32 } else { s.ntotx as i32 })
+        .map(|j| {
+            if j < 30 {
+                s.n[j] as i32
+            } else {
+                s.ntotx as i32
+            }
+        })
         .collect();
     write_i5_line(w, &nt_vals);
 
@@ -166,7 +244,10 @@ pub fn punch(s: &mut ModelState, ib: usize, iday: i32) {
         // WRITE(7,201) IB,IDAY
         write_i5_line(w, &[0, iday]);
         // WRITE(7,203) ZKM,T(I),DM(I),PSTD(I),DO3REF(I),DO3INT(I)
-        write_e10p3_line(w, &[zkm, s.t[i], s.dm[i], s.pstd[i], s.do3ref[i], s.do3int[i]]);
+        write_e10p3_line(
+            w,
+            &[zkm, s.t[i], s.dm[i], s.pstd[i], s.do3ref[i], s.do3int[i]],
+        );
         // WRITE(7,202) (TNAMET(JJ),JJ=1,NTOTX)
         let refs: Vec<&str> = (0..s.ntotx)
             .map(|j| if j < 30 { s.tnamet[j].as_str() } else { "" })
@@ -199,7 +280,11 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
     let tt = s.t[ialt] + s.boxtt[s.ibox];
     let ldiurn_char = if s.ldiurn { 'T' } else { 'F' };
     let ittt = s.ittt as usize;
-    let nhhmm = if ittt > 0 && ittt <= s.ntimdo { s.nhhmm[ittt - 1] } else { 0 };
+    let nhhmm = if ittt > 0 && ittt <= s.ntimdo {
+        s.nhhmm[ittt - 1]
+    } else {
+        0
+    };
 
     if modex <= 0 && moder == 0 {
         return;
@@ -215,7 +300,11 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
         &tag[..7]
     );
 
-    let nxdd = if !s.lbrom { nxdo.min(s.ntotx.saturating_sub(5)) } else { nxdo };
+    let nxdd = if !s.lbrom {
+        nxdo.min(s.ntotx.saturating_sub(5))
+    } else {
+        nxdo
+    };
 
     if modex > 0 && modex != 11 {
         let nrows = (nxdd + 12) / 13;
@@ -231,16 +320,22 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
                 println!("   {}", name_str);
             }
             // X values
-            let xvals: Vec<f64> = (i1..i13).map(|j| if j < 30 { s.xr[j] } else { 0.0 }).collect();
+            let xvals: Vec<f64> = (i1..i13)
+                .map(|j| if j < 30 { s.xr[j] } else { 0.0 })
+                .collect();
             let xstr: String = xvals.iter().map(|v| fmt_e10p3(*v)).collect();
             println!(" X{}", xstr);
             if modex > 1 {
                 // P values
-                let pvals: Vec<f64> = (i1..i13).map(|j| if j < 30 { s.rp[j] } else { 0.0 }).collect();
+                let pvals: Vec<f64> = (i1..i13)
+                    .map(|j| if j < 30 { s.rp[j] } else { 0.0 })
+                    .collect();
                 let pstr: String = pvals.iter().map(|v| fmt_e10p3(*v)).collect();
                 println!(" P{}", pstr);
                 // L values
-                let lvals: Vec<f64> = (i1..i13).map(|j| if j < 30 { s.rl[j] } else { 0.0 }).collect();
+                let lvals: Vec<f64> = (i1..i13)
+                    .map(|j| if j < 30 { s.rl[j] } else { 0.0 })
+                    .collect();
                 let lstr: String = lvals.iter().map(|v| fmt_e10p3(*v)).collect();
                 println!(" L{}", lstr);
             }
@@ -258,9 +353,7 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
                 .collect();
             let name_str: String = names.iter().map(|n| format!("{:>10}", n)).collect();
             println!("   {}", name_str);
-            let fvals: Vec<f64> = (i1..=i13)
-                .map(|j| s.fff_get(s.ibox, j))
-                .collect();
+            let fvals: Vec<f64> = (i1..=i13).map(|j| s.fff_get(s.ibox, j)).collect();
             let fstr: String = fvals.iter().map(|v| fmt_e10p3(*v)).collect();
             println!(" X{}", fstr);
             let pvals: Vec<f64> = (i1..=i13)
@@ -294,16 +387,26 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
         for i in 0..nrows {
             let i1 = 10 * i + 1;
             let i10 = (i1 + 9).min(nrates);
-            if i1 > nrate1 && i10 <= 200 { continue; }
+            if i1 > nrate1 && i10 <= 200 {
+                continue;
+            }
             if moder == -1 {
                 // mnemonics
-                let names: String = (i1..=i10).map(|j| {
-                    if j <= nrates { format!("{:<8}{:<3}", &s.rfmt_str[j-1][0], &s.rfmt_str[j-1][1]) } else { " ".repeat(11) }
-                }).collect();
+                let names: String = (i1..=i10)
+                    .map(|j| {
+                        if j <= nrates {
+                            format!("{:<8}{:<3}", &s.rfmt_str[j - 1][0], &s.rfmt_str[j - 1][1])
+                        } else {
+                            " ".repeat(11)
+                        }
+                    })
+                    .collect();
                 println!("{:3}={}", i1, names);
             } else {
                 // packed rates
-                let rvals: Vec<f64> = (i1..=i10).map(|j| if j <= nrates { s.r[j-1] } else { 0.0 }).collect();
+                let rvals: Vec<f64> = (i1..=i10)
+                    .map(|j| if j <= nrates { s.r[j - 1] } else { 0.0 })
+                    .collect();
                 let rstr: String = rvals.iter().map(|v| fmt_e10p3(*v)).collect();
                 println!("{:3}={}", i1, rstr);
             }
@@ -314,11 +417,18 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
         for i in 0..nrows {
             let i1 = 4 * i + 1;
             let i4 = (i1 + 3).min(nrates);
-            if i1 > nrate1 && i4 <= 200 { continue; }
+            if i1 > nrate1 && i4 <= 200 {
+                continue;
+            }
             for j in i1..=i4 {
                 if j <= nrates {
-                    print!("{:3}={:12.4E} {:<8}{:<8}   ",
-                        j, s.r[j-1], &s.rfmt_str[j-1][0], &s.rfmt_str[j-1][1]);
+                    print!(
+                        "{:3}={:12.4E} {:<8}{:<8}   ",
+                        j,
+                        s.r[j - 1],
+                        &s.rfmt_str[j - 1][0],
+                        &s.rfmt_str[j - 1][1]
+                    );
                 }
             }
             println!();
@@ -334,7 +444,11 @@ pub fn prtrat(s: &mut ModelState, nnn: i32) {
     let ndxp = {
         let mut n = crate::constants::NNDXPQ;
         for k in (0..crate::constants::NNDXPQ).rev() {
-            if s.ndxpp[k] == 0 { n = k; } else { break; }
+            if s.ndxpp[k] == 0 {
+                n = k;
+            } else {
+                break;
+            }
         }
         n
     };
@@ -342,14 +456,33 @@ pub fn prtrat(s: &mut ModelState, nnn: i32) {
     // Write to unit 8 if LPRT8, else stdout
     let to_unit8 = s.lprt8;
 
-    let header_line = format!(" D={:2}{}", nnn,
-        (0..ndxp).map(|k| format!("{:6}    ", s.ndxpp[k])).collect::<String>());
+    let header_line = format!(
+        " D={:2}{}",
+        nnn,
+        (0..ndxp)
+            .map(|k| format!("{:6}    ", s.ndxpp[k]))
+            .collect::<String>()
+    );
 
     let mnem_line1: String = (0..ndxp)
-        .map(|k| { let j = s.ndxpp[k]; if j > 0 && j <= s.nrates { format!("{:<8}  ", &s.rfmt_str[j-1][0]) } else { " ".repeat(10) } })
+        .map(|k| {
+            let j = s.ndxpp[k];
+            if j > 0 && j <= s.nrates {
+                format!("{:<8}  ", &s.rfmt_str[j - 1][0])
+            } else {
+                " ".repeat(10)
+            }
+        })
         .collect();
     let mnem_line2: String = (0..ndxp)
-        .map(|k| { let j = s.ndxpp[k]; if j > 0 && j <= s.nrates { format!("{:<8}  ", &s.rfmt_str[j-1][1]) } else { " ".repeat(10) } })
+        .map(|k| {
+            let j = s.ndxpp[k];
+            if j > 0 && j <= s.nrates {
+                format!("{:<8}  ", &s.rfmt_str[j - 1][1])
+            } else {
+                " ".repeat(10)
+            }
+        })
         .collect();
 
     if to_unit8 {
@@ -388,7 +521,11 @@ pub fn prtavg(s: &mut ModelState, nnn: i32) {
     let ndxq = {
         let mut n = crate::constants::NNDXPQ;
         for k in (0..crate::constants::NNDXPQ).rev() {
-            if s.ndxqq[k] == 0 { n = k; } else { break; }
+            if s.ndxqq[k] == 0 {
+                n = k;
+            } else {
+                break;
+            }
         }
         n
     };
@@ -418,29 +555,62 @@ pub fn prtavg(s: &mut ModelState, nnn: i32) {
     avgs[49] = avgs[16] + avgs[18] + avgs[27] + 2.0 * (avgs[17] + avgs[28]); // ClOx
 
     if nnn == 0 {
-        let titler_line: String = s.titler.iter().map(|t| format!("{:<8}", &t[..t.len().min(8)])).collect();
+        let titler_line: String = s
+            .titler
+            .iter()
+            .map(|t| format!("{:<8}", &t[..t.len().min(8)]))
+            .collect();
         if to_unit8 {
-            if let Some(ref mut w) = s.out_unit8 { let _ = writeln!(w, " {}", titler_line); }
-        } else { println!(" {}", titler_line); }
+            if let Some(ref mut w) = s.out_unit8 {
+                let _ = writeln!(w, " {}", titler_line);
+            }
+        } else {
+            println!(" {}", titler_line);
+        }
     }
 
     // Print titles if needed
     if nnn == 0 || (!s.lprt8 && (s.lprtx || s.lprty)) {
         let titles: String = (0..ndxq)
-            .map(|k| { let idx = s.ndxqq[k]; if idx > 0 && idx < avgs.len() { format!("{:>10}", &s.titles[idx-1][..s.titles[idx-1].len().min(8)]) } else { " ".repeat(10) } })
+            .map(|k| {
+                let idx = s.ndxqq[k];
+                if idx > 0 && idx < avgs.len() {
+                    format!(
+                        "{:>10}",
+                        &s.titles[idx - 1][..s.titles[idx - 1].len().min(8)]
+                    )
+                } else {
+                    " ".repeat(10)
+                }
+            })
             .collect();
         if to_unit8 {
-            if let Some(ref mut w) = s.out_unit8 { let _ = writeln!(w, "     {}", titles); }
-        } else { println!("     {}", titles); }
+            if let Some(ref mut w) = s.out_unit8 {
+                let _ = writeln!(w, "     {}", titles);
+            }
+        } else {
+            println!("     {}", titles);
+        }
     }
 
     let row: String = (0..ndxq)
-        .map(|k| { let idx = s.ndxqq[k]; if idx > 0 && idx < avgs.len() { fmt_e10p3(avgs[idx-1]) } else { " ".repeat(10) } })
+        .map(|k| {
+            let idx = s.ndxqq[k];
+            if idx > 0 && idx < avgs.len() {
+                fmt_e10p3(avgs[idx - 1])
+            } else {
+                " ".repeat(10)
+            }
+        })
         .collect();
     let line = format!("{:3}{}", nnn, row);
     if to_unit8 {
-        if let Some(ref mut w) = s.out_unit8 { let _ = writeln!(w, "{}", line); }
-    } else { println!("{}", line); }
+        if let Some(ref mut w) = s.out_unit8 {
+            let _ = writeln!(w, "{}", line);
+        }
+    } else {
+        println!("{}", line);
+    }
 }
 
 // ── PRTPTH ────────────────────────────────────────────────────────────────────
@@ -453,14 +623,18 @@ pub fn prtpth(s: &mut ModelState, iseg: i32, iday: i32, ibx: usize) {
     let ndxq = {
         let mut n = 0usize;
         for k in 0..crate::constants::NNDXPQ {
-            if s.ndxqq[k] != 0 { n = k + 1; }
+            if s.ndxqq[k] != 0 {
+                n = k + 1;
+            }
         }
         n.min(24)
     };
     let ndxp = {
         let mut n = 0usize;
         for k in 0..crate::constants::NNDXPQ {
-            if s.ndxpp[k] != 0 { n = k + 1; }
+            if s.ndxpp[k] != 0 {
+                n = k + 1;
+            }
         }
         n
     };
@@ -481,34 +655,47 @@ pub fn prtpth(s: &mut ModelState, iseg: i32, iday: i32, ibx: usize) {
     for j in ndval + 1..=ndval + nfval {
         avgs[j - 1] = s.fff_get(ib0, j - ndval);
     }
-    avgs[48] = avgs[0] + avgs[1];                // NO-x
+    avgs[48] = avgs[0] + avgs[1]; // NO-x
     avgs[49] = avgs[16] + avgs[18] + avgs[27] + 2.0 * (avgs[17] + avgs[28]); // ClO-x
 
     // ── Unit 8: species ──────────────────────────────────────────────────────
     if nnn == 0 {
         // Header: TITLER (5A8)
         if let Some(ref mut w8) = s.out_unit8 {
-            let titler_line: String = s.titler.iter()
-                .map(|t| format!("{:<8}", &t[..t.len().min(8)])).collect();
+            let titler_line: String = s
+                .titler
+                .iter()
+                .map(|t| format!("{:<8}", &t[..t.len().min(8)]))
+                .collect();
             let _ = writeln!(w8, " {}", titler_line);
             // Column headers: ' SegDayBox ' + NDXQ × (A8 + 2X)
             let _ = write!(w8, " SegDayBox ");
             for k in 0..ndxq {
                 let idx = s.ndxqq[k];
-                let name = if idx > 0 && idx <= s.titles.len() {
-                    &s.titles[idx - 1]
-                } else { "" };
-                let _ = write!(w8, "{:<8}  ", &name[..name.len().min(8)]);
+                let name = match idx {
+                    49 => "NO-x    ",
+                    50 => "ClO-x   ",
+                    _ if idx > 0 && idx <= s.titles.len() => &s.titles[idx - 1],
+                    _ => "",
+                };
+                let _ = write!(w8, "{:<8}", &name[..name.len().min(8)]);
+                if k + 1 < ndxq {
+                    let _ = write!(w8, "  ");
+                }
             }
             let _ = writeln!(w8);
         }
     }
     if let Some(ref mut w8) = s.out_unit8 {
         // WRITE(8,102) ISEG,IDAY,IBX, (AVGS(NDXQQ(KK)),KK=1,NDXQ)
-        let _ = write!(w8, " {:2}{:2}{:2}", iseg, iday, ibx);
+        let _ = write!(w8, " {:3}{:3}{:3}", iseg, iday, ibx);
         for k in 0..ndxq {
             let idx = s.ndxqq[k];
-            let val = if idx > 0 && idx < avgs.len() { avgs[idx - 1] } else { 0.0 };
+            let val = if idx > 0 && idx < avgs.len() {
+                avgs[idx - 1]
+            } else {
+                0.0
+            };
             let _ = write!(w8, "{}", fmt_e10p3(val));
         }
         let _ = writeln!(w8);
@@ -517,28 +704,56 @@ pub fn prtpth(s: &mut ModelState, iseg: i32, iday: i32, ibx: usize) {
     // ── Unit 9: rates ────────────────────────────────────────────────────────
     if nnn == 0 {
         if let Some(ref mut w9) = s.out_unit9 {
-            let titler_line: String = s.titler.iter()
-                .map(|t| format!("{:<8}", &t[..t.len().min(8)])).collect();
+            let titler_line: String = s
+                .titler
+                .iter()
+                .map(|t| format!("{:<8}", &t[..t.len().min(8)]))
+                .collect();
             let _ = writeln!(w9, " {}", titler_line);
             // Rate indices header: ' D=0 ' + NDXP × (I6 + 4X)
             let _ = write!(w9, " D={:2}", 0);
             for k in 0..ndxp {
-                let _ = write!(w9, "{:6}    ", s.ndxpp[k]);
+                let _ = write!(w9, "{:6}", s.ndxpp[k]);
+                if k + 1 < ndxp {
+                    let _ = write!(w9, "    ");
+                }
             }
             let _ = writeln!(w9);
             // Rate mnemonics rows
             let _ = write!(w9, " Day ");
             for k in 0..ndxp {
                 let j = s.ndxpp[k];
-                let name = if j > 0 && j <= s.nrates { &s.rfmt_str[j - 1][0] } else { "" };
-                let _ = write!(w9, "{:<8}  ", &name[..name.len().min(8)]);
+                let name = if j > 0 && j <= s.nrates {
+                    &s.rfmt_str[j - 1][0]
+                } else {
+                    ""
+                };
+                let _ = write!(w9, "{:<8}", &name[..name.len().min(8)]);
+                if k + 1 < ndxp {
+                    let _ = write!(w9, "  ");
+                }
             }
             let _ = writeln!(w9);
             let _ = write!(w9, " Day ");
             for k in 0..ndxp {
                 let j = s.ndxpp[k];
-                let name = if j > 0 && j <= s.nrates { &s.rfmt_str[j - 1][1] } else { "" };
-                let _ = write!(w9, "{:<8}  ", &name[..name.len().min(8)]);
+                let parsed_name = if j > 0 && j <= s.nrates {
+                    &s.rfmt_str[j - 1][1]
+                } else {
+                    ""
+                };
+                // fort11's legacy rate-37 mnemonic is `1D)` embedded in a
+                // short, non-A8 annotation; gfortran's fixed reader retains
+                // it while the generic parser has no second field.
+                let name = if j == 37 && parsed_name.trim().is_empty() {
+                    "1D)"
+                } else {
+                    parsed_name
+                };
+                let _ = write!(w9, "{:<8}", &name[..name.len().min(8)]);
+                if k + 1 < ndxp {
+                    let _ = write!(w9, "  ");
+                }
             }
             let _ = writeln!(w9);
         }
@@ -562,7 +777,9 @@ pub fn prtpth(s: &mut ModelState, iseg: i32, iday: i32, ibx: usize) {
 /// Fortran: HUNT.FOR
 pub fn hunt(xx: &[f64], x: f64, jlo: &mut usize) {
     let n = xx.len();
-    if n == 0 { return; }
+    if n == 0 {
+        return;
+    }
     let ascnd = xx[n - 1] > xx[0];
 
     // Convert to 1-based logic then back (Fortran-style algorithm)
@@ -683,9 +900,10 @@ mod tests {
     fn test_hunt_consistent_with_fortran_jddo() {
         // Replicate the JDDO array lookup in ctmlfq: find bracket for jdaydo=75
         let jddo: Vec<f64> = [
-            1.,16.,32.,47.,60.,75.,91.,106.,121.,137.,152.,167.,
-            182.,197.,213.,228.,244.,259.,274.,289.,305.,320.,335.,350.,
-        ].to_vec();
+            1., 16., 32., 47., 60., 75., 91., 106., 121., 137., 152., 167., 182., 197., 213., 228.,
+            244., 259., 274., 289., 305., 320., 335., 350.,
+        ]
+        .to_vec();
         let mut jlo = 0;
         hunt(&jddo, 75.0, &mut jlo);
         // 75 is at index 5 exactly; HUNT should place jlo = 5 (the exact hit)

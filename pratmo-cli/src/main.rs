@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::Parser;
 use pratmo_core::{
     ctm::ctmlfq,
@@ -33,8 +33,23 @@ fn main() -> Result<()> {
     let mut reader = FortranReader::new(&args.input_dir);
     reader.read_all(&mut state)?;
 
+    if state.nd216 < 0 {
+        bail!(
+            "DERIVS mode (nd216={}) is not implemented; sensitivity Jacobians are unavailable",
+            state.nd216
+        );
+    }
+    if state.npstd > 0 {
+        bail!(
+            "PZSTD mode (NPSTD={}) is not implemented; pressure-to-standard-Z conversion is unavailable",
+            state.npstd
+        );
+    }
+
     // Open output files (Fortran units 7, 8, 9)
-    let out_dir = args.output.as_deref()
+    let out_dir = args
+        .output
+        .as_deref()
         .and_then(|p| p.parent())
         .unwrap_or(&args.input_dir);
     if let Ok(f) = std::fs::File::create(out_dir.join("fort07.x")) {
@@ -55,8 +70,6 @@ fn main() -> Result<()> {
         } else if state.nd216 == 0 {
             diurn(&mut state)?;
             tpath(&mut state)?;
-        } else {
-            eprintln!("DERIVS mode (nd216={}) not yet implemented", state.nd216);
         }
     }
 

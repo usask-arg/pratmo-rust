@@ -7,6 +7,11 @@ edition = "2021"
 name = "pratmo"
 path = "src/main.rs"
 
+[features]
+default = []
+# Forward the core's opt-in legacy policy to the command-line binary.
+fortran-parity = ["pratmo-core/fortran-parity"]
+
 [dependencies]
 pratmo-core = { path = "../pratmo-core" }
 anyhow = "1"

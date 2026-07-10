@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use std::sync::OnceLock;
 
 use crate::{
-    chemistry::{chems, setupr},
+    chemistry::chems,
     constants::{NDEN, NNDXPQ, NPMEAN, NSLOWM},
     jvalue::sol,
     output,
@@ -22,8 +22,8 @@ use crate::{
 ///                   (341..370)=RPF, (371..400)=RLF, (401..430)=RQF
 fn rcolum_get(s: &ModelState, j: usize) -> f64 {
     match j {
-        1..=30  => s.xr[j - 1],
-        31..=280  => s.r[j - 31],
+        1..=30 => s.xr[j - 1],
+        31..=280 => s.r[j - 31],
         281..=310 => s.rp[j - 281],
         311..=340 => s.rl[j - 311],
         341..=370 => s.rpf[j - 341],
@@ -37,7 +37,12 @@ fn rafday_reuse_jacobian_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
         std::env::var("PRATMO_RAFDAY_REUSE_JACOBIAN")
-            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"))
+            .map(|v| {
+                matches!(
+                    v.as_str(),
+                    "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+                )
+            })
             .unwrap_or(false)
     })
 }
@@ -48,6 +53,14 @@ fn rafday_reuse_jacobian_enabled() -> bool {
 /// Iterates over all boxes, calls RAFDAY or DAILY, stores results.
 /// Fortran: SUBROUTINE DIURN
 pub fn diurn(s: &mut ModelState) -> Result<()> {
+    // The original DIURN executable leaves COMMON/CHRIS/SSF uninitialized
+    // (gfortran's static storage makes it zero), which suppresses all
+    // photolysis in the legacy reference run.  Keep the physically useful
+    // Rust default SSF=1 outside parity mode, but reproduce that observable
+    // behavior when byte/numerical parity is explicitly requested.
+    #[cfg(feature = "fortran-parity")]
+    s.ssf.fill(0.0);
+
     // Compute total box weight for global averaging
     let ibsum: i32 = (0..s.nbox).map(|ib| s.nboxwt[ib]).sum();
     let mut qmean = [0.0f64; NPMEAN];
@@ -56,6 +69,16 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
 
     // Write unit-7 header before box loop (before PUNCH(0,0))
     output::diurn_unit7_header(s);
+
+    // Fortran calls PUNCH(0,0) before entering the box loop.  At this point
+    // IALT still contains the last altitude selected while loading fort02.x
+    // (the final BOXDO entry), which is the legacy altitude written in the
+    // unit-7 metadata record.  Parity mode keeps this pre-loop ordering;
+    // normal Rust mode writes the metadata after selecting the first valid
+    // box, which is the less surprising API behavior but has a different
+    // legacy altitude record.
+    #[cfg(feature = "fortran-parity")]
+    output::punch(s, 0, 0);
 
     for ib in 0..s.nbox {
         s.ibox = ib;
@@ -78,10 +101,14 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
             daily(s, 1)?;
         }
 
-        // PUNCH(0, 0): write altitude/name header on first box (IB=1 in Fortran)
+        #[cfg(not(feature = "fortran-parity"))]
         if ib == 0 {
+            // Normal Rust mode emits PUNCH metadata here, after the first box
+            // selected its altitude.  Parity mode emitted the Fortran
+            // pre-loop record above instead.
             output::punch(s, 0, 0);
         }
+
         // PUNCH(IB+1, 1): write time series for this box
         output::punch(s, ib + 1, 1);
 
@@ -119,10 +146,15 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
         // LPRTX per-box printout (NBOXPR > 1)
         if s.lprtx && s.nboxpr[ib] > 1 {
             s.ittt = 1;
-            println!("\n ----AVERAGE(OVER 24 HRS)-----L=AVG(P-L)-----Box:{:5}", ib + 1);
+            println!(
+                "\n ----AVERAGE(OVER 24 HRS)-----L=AVG(P-L)-----Box:{:5}",
+                ib + 1
+            );
             let ntotx = s.ntotx;
             let nboxpr_val = s.nboxpr[ib];
-            for ii in 0..430 { s.xr[ii.min(29)] = rcolum_get(s, ii + 1); } // simplified
+            for ii in 0..430 {
+                s.xr[ii.min(29)] = rcolum_get(s, ii + 1);
+            } // simplified
             output::prtall(s, 2, nboxpr_val - 2, ntotx);
             let nfval = s.nfval as usize;
             output::prtall(s, 11, 0, nfval);
@@ -408,7 +440,7 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
     // Local arrays (NSLOWM = 11 max)
     let mut fxdder = Array2::<f64>::zeros((NSLOWM, NSLOWM));
     let mut fxo = [0.0f64; NSLOWM];
-    let mut xo  = [0.0f64; NSLOWM];
+    let mut xo = [0.0f64; NSLOWM];
     let mut xoo = [0.0f64; NDEN];
 
     let mut lcnvrg = false;
@@ -488,10 +520,9 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
                 let epslon = s.dayeps * s.xnold[ntjn0];
                 s.xnold[ntjn0] += epslon;
 
-                {
-                    let xnold_snap = s.xnold;
-                    fixrat(&mut { let mut tmp = xnold_snap; tmp }, s, s.ibox);
-                }
+                let mut fixed = s.xnold;
+                fixrat(&mut fixed, s, s.ibox);
+                s.xnold = fixed;
                 daily(s, 102)?;
 
                 for jj in 0..nnr {
@@ -566,7 +597,11 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
     s.lprtx = lpsave;
 
     if nnr > 0 && !lcnvrg {
-        eprintln!(" ***RAFDAY NON-CONV AT BOX/ALT={}/{}", s.ibox + 1, s.ialt + 1);
+        eprintln!(
+            " ***RAFDAY NON-CONV AT BOX/ALT={}/{}",
+            s.ibox + 1,
+            s.ialt + 1
+        );
     }
 
     Ok(())

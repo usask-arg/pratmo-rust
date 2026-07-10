@@ -5,12 +5,12 @@ use anyhow::Result;
 
 use crate::{
     chemistry::chems,
+    constants::{NDEN, NJH2O},
     jvalue::sol,
     output,
     reader::{hystat, setday},
-    solver::{rplace, splace, fixmix},
+    solver::{fixmix, rplace, splace},
     state::ModelState,
-    constants::{NJH2O, NDEN},
 };
 
 // ── TPATH ────────────────────────────────────────────────────────────────────
@@ -21,6 +21,13 @@ use crate::{
 /// Note: NEWATM reading from fort01 requires the caller to supply the remaining
 /// path records via the `records` iterator. Pass an empty slice for no-path-reset.
 pub fn tpath(s: &mut ModelState) -> Result<()> {
+    if s.npstd > 0 {
+        anyhow::bail!(
+            "PZSTD mode (NPSTD={}) is not implemented; TPATH cannot continue",
+            s.npstd
+        );
+    }
+
     // Initial PRTPTH(0,1,IB) for each box + set NBOXDO positive
     let nbox = s.nbox;
     for ib in 0..nbox {
@@ -32,6 +39,13 @@ pub fn tpath(s: &mut ModelState) -> Result<()> {
         // Read next path record via NEWATM
         s.lresol = true;
         if !newatm(s)? {
+            // Fortran READIN emits the final mixing-ratio snapshot to unit 7
+            // when NEWATM reaches EOF (LEND=.TRUE.).  Normal Rust path runs
+            // stop after the last requested segment and intentionally omit
+            // this legacy diagnostic; parity mode restores it so fort07.x
+            // has the same trailing LEND records as the reference.
+            #[cfg(feature = "fortran-parity")]
+            output::lend_dump(s);
             break;
         }
 
@@ -40,8 +54,12 @@ pub fn tpath(s: &mut ModelState) -> Result<()> {
             dstep(s, ipath as i32, ib)?;
 
             if s.lprtx {
-                println!("\n----Seg/Day/Box: {:3}{:3}{:3}-----24-hr L=AVG(P-L)",
-                    ipath, s.ndaysd, ib + 1);
+                println!(
+                    "\n----Seg/Day/Box: {:3}{:3}{:3}-----24-hr L=AVG(P-L)",
+                    ipath,
+                    s.ndaysd,
+                    ib + 1
+                );
                 // Copy PMEAN into RCOLUM (simplified: just call prtall directly)
                 let ntotx = s.ntotx;
                 let nprtrr = s.nprtrr;
@@ -183,17 +201,31 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
                 s.xnold[j] = s.xnoft[[j, it - 1]];
             }
 
-            // H2O photolysis rate at current altitude and time
-            s.xjdo = hunt_xjh2o(s, s.z[s.ialt] * 1e-5).max(0.0)
-                * s.utime[it].max(0.0);
-
-
-
+            // The Fortran executable leaves XJDO at zero during NEWRAF and only
+            // updates it for the diagnostic CHEMS call below.  Parity mode
+            // preserves that stale-zero ordering.  Normal Rust mode computes
+            // the H2O photolysis source before NEWRAF, so the solver includes
+            // the physically relevant source term.
+            #[cfg(feature = "fortran-parity")]
+            {
+                s.xjdo = 0.0;
+            }
+            #[cfg(not(feature = "fortran-parity"))]
+            {
+                s.xjdo = hunt_xjh2o(s, s.z[s.ialt] * 1e-5).max(0.0) * s.utime[it].max(0.0);
+            }
             // Newton-Raphson integration
             let result = crate::solver::newraf(s, DAMP1, &mut xn, s.ntot);
             if result.is_err() {
                 s.lprts = true;
                 crate::solver::newraf(s, DAMP1, &mut xn, s.ntot)?;
+            }
+
+            // After the parity solve, restore the real H2O photolysis value
+            // for CHEMS/rate output, matching the Fortran call order.
+            #[cfg(feature = "fortran-parity")]
+            {
+                s.xjdo = hunt_xjh2o(s, s.z[s.ialt] * 1e-5).max(0.0) * s.utime[it].max(0.0);
             }
 
             // Update XR and call chemistry for rates
@@ -254,11 +286,13 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
             if ntj <= s.ntot || s.ndiff[j] == 0 {
                 continue;
             }
-            let xadd = s.ppmean[[ntj, ib]] * s.daysec;
+            let xadd = s.ppmean[[ntj - 1, ib]] * s.daysec;
             let cur = s.den_get(ib, j);
             let new_val = cur + xadd;
             s.den_set(ib, j, new_val);
-            if ntj >= 1 { s.xnoft[[ntj - 1, 0]] = new_val; }
+            if ntj >= 1 {
+                s.xnoft[[ntj - 1, 0]] = new_val;
+            }
         }
 
         // Explicit integration of long-lived mixing ratios (NFLO > 0)
@@ -268,8 +302,8 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
             }
             let xadd = s.ppmean[[30 + j, ib]] * s.daysec / densty;
             // FFFFFF(IB,J) += XADD → update long-lived mixing ratio j for box ib
-            let old_val = s.fff_get(ib, j);
-            s.fff_set(ib, j, old_val + xadd);
+            let old_val = s.fff_get(ib, j + 1);
+            s.fff_set(ib, j + 1, old_val + xadd);
         }
 
         // Renormalize O3: DO3(IB) = FO3(IB)*DENSTY or FO3(IB) = DO3(IB)/DENSTY
@@ -277,7 +311,9 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
         let n11 = s.n[10]; // 1-based slot value
         if n11 > s.ntot {
             s.do3[ib] = s.fo3[ib] * densty;
-            if n11 >= 1 { s.xnoft[[n11 - 1, 0]] = s.do3[ib]; }
+            if n11 >= 1 {
+                s.xnoft[[n11 - 1, 0]] = s.do3[ib];
+            }
         } else {
             s.fo3[ib] = s.do3[ib] / densty;
         }
@@ -289,29 +325,43 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
             rplace(s, &mut xn_tmp, ib);
 
             // Helper: get xn_tmp by 1-based slot index
-            let xn = |ni: usize| -> f64 { if ni >= 1 && ni <= 30 { xn_tmp[ni - 1] } else { 0.0 } };
+            let xn = |ni: usize| -> f64 {
+                if ni >= 1 && ni <= 30 {
+                    xn_tmp[ni - 1]
+                } else {
+                    0.0
+                }
+            };
             let n = s.n;
             if s.nflo[2] <= 0 {
                 // FNOY = (XN(N1)+XN(N2)+XN(N3)+XN(N4)+XN(N4)+XN(N5)+XN(N15)+XN(N21)+XN(N20)+XN(N23))
-                let fnoy = (xn(n[0]) + xn(n[1]) + xn(n[2])
-                    + xn(n[3]) + xn(n[3])
-                    + xn(n[4]) + xn(n[14]) + xn(n[20])
-                    + xn(n[19]) + xn(n[22]))
+                let fnoy = (xn(n[0])
+                    + xn(n[1])
+                    + xn(n[2])
+                    + xn(n[3])
+                    + xn(n[3])
+                    + xn(n[4])
+                    + xn(n[14])
+                    + xn(n[20])
+                    + xn(n[19])
+                    + xn(n[22]))
                     / densty;
                 s.fnoy[ib] = fnoy;
             }
             if s.nflo[5] <= 0 {
-                let fclx = (xn(n[15]) + xn(n[16]) + xn(n[18])
+                let fclx = (xn(n[15])
+                    + xn(n[16])
+                    + xn(n[18])
                     + xn(n[21])
-                    + xn(n[27]) + 2.0 * (xn(n[17]) + xn(n[28]))
-                    + xn(n[19]) + xn(n[29]))
+                    + xn(n[27])
+                    + 2.0 * (xn(n[17]) + xn(n[28]))
+                    + xn(n[19])
+                    + xn(n[29]))
                     / densty;
                 s.fclx[ib] = fclx;
             }
             if s.nflo[15] <= 0 {
-                let fbrx = (xn(n[11]) + xn(n[12]) + xn(n[13])
-                    + xn(n[23])
-                    + xn(n[22]) + xn(n[29]))
+                let fbrx = (xn(n[11]) + xn(n[12]) + xn(n[13]) + xn(n[23]) + xn(n[22]) + xn(n[29]))
                     / densty;
                 s.fbrx[ib] = fbrx;
             }
@@ -361,10 +411,14 @@ fn newatm_from_record_inner(s: &mut ModelState, record: &str) -> Result<bool> {
         return Ok(false);
     }
     let titatm = record.get(2..10).unwrap_or("").trim().to_string();
-    let tito3  = record.get(12..20).unwrap_or("").trim().to_string();
+    let tito3 = record.get(12..20).unwrap_or("").trim().to_string();
 
-    let ndaysd: i32 = record.get(20..25).unwrap_or("    0")
-        .trim().parse().unwrap_or(0);
+    let ndaysd: i32 = record
+        .get(20..25)
+        .unwrap_or("    0")
+        .trim()
+        .parse()
+        .unwrap_or(0);
     s.ndaysd = ndaysd;
     if ndaysd == 0 {
         return Ok(false);
@@ -373,12 +427,35 @@ fn newatm_from_record_inner(s: &mut ModelState, record: &str) -> Result<bool> {
     let xlatd: f64 = parse_e10(record, 25);
     let xdecd: f64 = parse_e10(record, 35);
     let xo3col: f64 = parse_e10(record, 45);
-    let kalt: i32 = record.get(55..60).unwrap_or("    0")
-        .trim().parse().unwrap_or(0);
-    let xarea: f64 = record.get(60..65).unwrap_or("    0")
-        .trim().parse().unwrap_or(0.0);
-    let xrain: f64 = record.get(65..70).unwrap_or("    0")
-        .trim().parse().unwrap_or(0.0);
+    let kalt: i32 = record
+        .get(55..60)
+        .unwrap_or("    0")
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    let xarea: f64 = record
+        .get(60..65)
+        .unwrap_or("    0")
+        .trim()
+        .parse()
+        .unwrap_or(0.0);
+    let xrain: f64 = record
+        .get(65..70)
+        .unwrap_or("    0")
+        .trim()
+        .parse()
+        .unwrap_or(0.0);
+
+    // Retain densities from the atmosphere that is about to be replaced.
+    let mut dmold = [0.0f64; crate::constants::NB];
+    for (ib, old_dm) in dmold.iter_mut().enumerate().take(s.nbox) {
+        let ialt = s.nboxdo[ib].unsigned_abs() as usize;
+        *old_dm = if ialt > 0 && ialt <= s.nc {
+            s.dm[ialt - 1]
+        } else {
+            1.0
+        };
+    }
 
     const CRAD: f64 = 57.295_779_513;
     s.xlatd = xlatd;
@@ -404,24 +481,22 @@ fn newatm_from_record_inner(s: &mut ModelState, record: &str) -> Result<bool> {
 
     // Rescale densities if atmosphere changed or altitude shift
     if newat > 0 || kalt != 0 {
-        // Save old densities before altitude shift
-        let mut dmold = [0.0f64; crate::constants::NB];
-        for ib in 0..s.nbox {
-            let ialt_old = s.nboxdo[ib].unsigned_abs() as usize;
-            dmold[ib] = if ialt_old > 0 && ialt_old <= s.nc { s.dm[ialt_old - 1] } else { 1.0 };
-        }
         for ib in 0..s.nbox {
             s.nboxdo[ib] += kalt;
             let ialt = (s.nboxdo[ib].unsigned_abs() as usize).min(s.nc);
             let dmfact = if dmold[ib] > 0.0 {
                 s.dm[ialt.saturating_sub(1)] / dmold[ib]
-            } else { 1.0 };
+            } else {
+                1.0
+            };
             for j in 0..s.ndval as usize {
                 let old = s.den_get(ib, j);
                 s.den_set(ib, j, old * dmfact);
             }
+            s.ibox = ib;
+            s.ialt = ialt.saturating_sub(1);
+            fixmix(s);
         }
-        fixmix(s);
     }
 
     // Rescale O3 column if XO3COL > 0
@@ -473,24 +548,20 @@ fn parse_e10(line: &str, off: usize) -> f64 {
 /// Load a labelled T-profile from fort13 lines into state.
 fn load_atmosphere(s: &mut ModelState, label: &str, lines: &[String]) -> Result<()> {
     let nc = s.nc;
-    let mut i = 0;
-    while i + 1 < lines.len() {
+    let values_per_record = 46usize;
+    let data_lines = (values_per_record + 7) / 8;
+    let mut i = 1; // file title
+    while i + data_lines < lines.len() {
         let hdr = &lines[i];
         let tita = hdr.get(2..10).unwrap_or("").trim();
         if tita == label {
-            // Read T(1..46) from next line(s) in 8E10.3 format
-            let tline = &lines[i + 1];
-            let mut t = Vec::new();
-            let mut off = 0;
-            while off + 10 <= tline.len() && t.len() < 46 {
-                let v: f64 = tline[off..off + 10].trim()
-                    .parse().unwrap_or(200.0);
-                t.push(v);
-                off += 10;
-            }
+            let t = fixed_e10_values(lines, i + 1, values_per_record)?;
             for j in 0..nc.min(t.len()) {
                 s.t[j] = t[j];
             }
+            s.press0 = parse_e10(hdr, 10);
+            s.grav = parse_e10(hdr, 20);
+            s.rad = parse_e10(hdr, 30);
             // Z grid: 2 km spacing
             for j in 0..nc {
                 s.z[j] = 2.0e5 * j as f64;
@@ -499,7 +570,7 @@ fn load_atmosphere(s: &mut ModelState, label: &str, lines: &[String]) -> Result<
             hystat(s, logp);
             return Ok(());
         }
-        i += 2;
+        i += 1 + data_lines;
     }
     anyhow::bail!("Atmosphere label '{}' not found in fort13", label);
 }
@@ -507,23 +578,21 @@ fn load_atmosphere(s: &mut ModelState, label: &str, lines: &[String]) -> Result<
 /// Load a labelled O3 profile from fort14 lines into state.
 fn load_ozone_profile(s: &mut ModelState, label: &str, lines: &[String]) -> Result<()> {
     let nc = s.nc;
-    let mut i = 0;
-    // Skip header line
-    i += 1;
-    while i + 1 < lines.len() {
+    if lines.len() < 2 {
+        anyhow::bail!("fort14 contains no ozone profiles");
+    }
+    let ndddz = lines[1]
+        .split_whitespace()
+        .last()
+        .and_then(|field| field.parse::<usize>().ok())
+        .unwrap_or(32);
+    let data_lines = (ndddz + 7) / 8;
+    let mut i = 2; // file title and PTS/PROFIL record
+    while i + data_lines < lines.len() {
         let hdr = &lines[i];
         let titz = hdr.get(2..10).unwrap_or("").trim();
         if titz == label {
-            let dline = &lines[i + 1];
-            let mut do3 = Vec::new();
-            let mut off = 0;
-            while off + 10 <= dline.len() && do3.len() < nc {
-                let v: f64 = dline[off..off + 10].trim()
-                    .parse().unwrap_or(0.0);
-                do3.push(v);
-                off += 10;
-            }
-            let ndddz = do3.len();
+            let do3 = fixed_e10_values(lines, i + 1, ndddz)?;
             for j in 0..ndddz.min(nc) {
                 s.do3ref[j] = do3[j];
             }
@@ -535,9 +604,40 @@ fn load_ozone_profile(s: &mut ModelState, label: &str, lines: &[String]) -> Resu
             }
             return Ok(());
         }
-        i += 2;
+        i += 1 + data_lines;
     }
     anyhow::bail!("O3 label '{}' not found in fort14", label);
+}
+
+/// Read a Fortran `8E10.3` array spanning as many physical lines as needed.
+fn fixed_e10_values(lines: &[String], start: usize, count: usize) -> Result<Vec<f64>> {
+    let mut values = Vec::with_capacity(count);
+    let mut line_index = start;
+    while values.len() < count && line_index < lines.len() {
+        let line = &lines[line_index];
+        for off in (0..line.len()).step_by(10) {
+            if values.len() == count {
+                break;
+            }
+            let field = line
+                .get(off..(off + 10).min(line.len()))
+                .unwrap_or("")
+                .trim();
+            if !field.is_empty() {
+                values.push(
+                    field
+                        .replace(|c: char| c == 'd' || c == 'D', "e")
+                        .parse::<f64>()
+                        .map_err(|e| anyhow::anyhow!("invalid E10.3 value '{field}': {e}"))?,
+                );
+            }
+        }
+        line_index += 1;
+    }
+    if values.len() != count {
+        anyhow::bail!("expected {count} E10.3 values, found {}", values.len());
+    }
+    Ok(values)
 }
 
 /// Linear interpolation into the H2O photolysis rate table.
@@ -558,8 +658,8 @@ fn hunt_xjh2o(s: &ModelState, zkm: f64) -> f64 {
 /// RCOLUM(j) accessor — 1-based j, mirrors EQUIVALENCE in CCRTS.
 fn rcolum_get(s: &ModelState, j: usize) -> f64 {
     match j {
-        1..=30  => s.xr[j - 1],
-        31..=280  => s.r[j - 31],
+        1..=30 => s.xr[j - 1],
+        31..=280 => s.r[j - 31],
         281..=310 => s.rp[j - 281],
         311..=340 => s.rl[j - 311],
         341..=370 => s.rpf[j - 341],

@@ -106,6 +106,8 @@ GitHub Actions runs these Rust checks, the Python tests, a strict documentation
 build, and the complete cross-platform wheel build on every push and pull
 request. Built distributions are retained as workflow artifacts. The publish
 job runs only for release tags matching `v*` and uses PyPI Trusted Publishing.
+The extension uses PyO3's Python 3.9 stable ABI, so each platform build produces
+one `cp39-abi3` wheel compatible with Python 3.9 and newer.
 
 The clean-room compiled-Fortran differential is available separately:
 

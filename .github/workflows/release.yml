@@ -37,7 +37,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist
           manylinux: auto
       - name: Upload wheels
         uses: actions/upload-artifact@v6
@@ -68,7 +68,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist
           manylinux: musllinux_1_2
       - name: Upload wheels
         uses: actions/upload-artifact@v6
@@ -101,7 +101,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:
@@ -127,7 +127,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist
       - name: Upload wheels
         uses: actions/upload-artifact@v6
         with:

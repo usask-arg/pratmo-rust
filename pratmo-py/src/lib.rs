@@ -178,7 +178,7 @@ fn unknown_field_error(kind: &str, requested: &str, valid_names: &[&str]) -> PyE
 
 // ── ImplicitSpecies ────────────────────────────────────────────────────────────
 
-#[pyclass(name = "ImplicitSpecies", frozen)]
+#[pyclass(name = "ImplicitSpecies", frozen, from_py_object)]
 #[derive(Clone)]
 struct PyImplicitSpecies {
     inner: ImplicitSpecies,
@@ -405,7 +405,7 @@ impl PyImplicitSpecies {
 
 // ── LongLivedMixingRatios ──────────────────────────────────────────────────────
 
-#[pyclass(name = "LongLivedMixingRatios")]
+#[pyclass(name = "LongLivedMixingRatios", from_py_object)]
 #[derive(Clone)]
 struct PyLongLivedMixingRatios {
     inner: LongLivedMixingRatios,
@@ -676,7 +676,7 @@ impl PyLongLivedMixingRatios {
 
 // ── JValues ────────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "JValues", frozen)]
+#[pyclass(name = "JValues", frozen, from_py_object)]
 #[derive(Clone)]
 struct PyJValues {
     inner: JValues,
@@ -963,7 +963,7 @@ impl PyJValues {
 
 // ── Diagnostics ────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "Diagnostics", frozen)]
+#[pyclass(name = "Diagnostics", frozen, from_py_object)]
 #[derive(Clone)]
 struct PyDiagnostics {
     inner: Diagnostics,
@@ -1013,7 +1013,7 @@ impl PyDiagnostics {
 
 // ── BoxSnapshot ────────────────────────────────────────────────────────────────
 
-#[pyclass(name = "BoxSnapshot", frozen)]
+#[pyclass(name = "BoxSnapshot", frozen, from_py_object)]
 #[derive(Clone)]
 struct PyBoxSnapshot {
     inner: BoxSnapshot,
@@ -1074,7 +1074,7 @@ impl PyBoxSnapshot {
 
 // ── DiurnTimeStep ──────────────────────────────────────────────────────────────
 
-#[pyclass(name = "DiurnTimeStep", frozen)]
+#[pyclass(name = "DiurnTimeStep", frozen, from_py_object)]
 #[derive(Clone)]
 struct PyDiurnTimeStep {
     inner: DiurnTimeStep,
@@ -1111,7 +1111,7 @@ impl PyDiurnTimeStep {
 
 // ── DiurnBoxTimeSeries ─────────────────────────────────────────────────────────
 
-#[pyclass(name = "DiurnBoxTimeSeries", frozen)]
+#[pyclass(name = "DiurnBoxTimeSeries", frozen, from_py_object)]
 #[derive(Clone)]
 struct PyDiurnBoxTimeSeries {
     inner: DiurnBoxTimeSeries,
@@ -1158,7 +1158,7 @@ impl PyDiurnBoxTimeSeries {
 // ── Config: DiurnBoxSpec / CtmBoxSpec ──────────────────────────────────────────
 
 /// Per-box configuration for a DIURN run. ``altitude_level`` is a 1-based pressure level index.
-#[pyclass(name = "DiurnBoxSpec")]
+#[pyclass(name = "DiurnBoxSpec", from_py_object)]
 #[derive(Clone)]
 struct PyDiurnBoxSpec {
     #[pyo3(get, set)]
@@ -1201,7 +1201,7 @@ impl PyDiurnBoxSpec {
 }
 
 /// Per-box configuration for a CTM run. ``altitude_level`` is a 1-based pressure level index.
-#[pyclass(name = "CtmBoxSpec")]
+#[pyclass(name = "CtmBoxSpec", from_py_object)]
 #[derive(Clone)]
 struct PyCtmBoxSpec {
     #[pyo3(get, set)]
@@ -1243,7 +1243,7 @@ impl PyCtmBoxSpec {
     }
 }
 
-#[pyclass(name = "CustomAtmosphereProfile")]
+#[pyclass(name = "CustomAtmosphereProfile", from_py_object)]
 #[derive(Clone)]
 struct PyCustomAtmosphereProfile {
     #[pyo3(get, set)]
@@ -1311,7 +1311,7 @@ impl PyCustomAtmosphereProfile {
 // ── DiurnConfig ────────────────────────────────────────────────────────────────
 
 /// Configuration for a diurnal cycle (DIURN) run.
-#[pyclass(name = "DiurnConfig")]
+#[pyclass(name = "DiurnConfig", from_py_object)]
 #[derive(Clone)]
 struct PyDiurnConfig {
     #[pyo3(get, set)]

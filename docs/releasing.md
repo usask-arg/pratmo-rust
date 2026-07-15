@@ -9,6 +9,10 @@ and macOS, plus a source distribution, and retains them as workflow artifacts.
 For tags beginning with `v`, the same successfully built files are uploaded to
 PyPI using Trusted Publishing.
 
+The extension targets PyO3's `abi3-py39` stable ABI. Each platform therefore
+produces one `cp39-abi3` wheel that can be installed on Python 3.9 and newer,
+instead of rebuilding the extension for every Python minor version.
+
 Every pushed commit and pull request also runs `.github/workflows/ci.yml`. CI
 checks Rust formatting and Clippy, runs both the default and all-feature Rust
 test suites, builds and installs a representative Linux wheel, runs the Python

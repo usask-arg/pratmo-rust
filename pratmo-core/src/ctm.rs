@@ -566,8 +566,8 @@ fn ctoutp_impl(
                         "{:5}{:5}     {:<8}{:<8}",
                         k + 1,
                         kr,
-                        &s.rfmt_str[kr - 1][0],
-                        &s.rfmt_str[kr - 1][1]
+                        s.rfmt_str[kr - 1][0],
+                        s.rfmt_str[kr - 1][1]
                     );
                 }
             }

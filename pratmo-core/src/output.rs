@@ -347,7 +347,7 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
                 let names: String = (i1..=i10)
                     .map(|j| {
                         if j <= nrates {
-                            format!("{:<8}{:<3}", &s.rfmt_str[j - 1][0], &s.rfmt_str[j - 1][1])
+                            format!("{:<8}{:<3}", s.rfmt_str[j - 1][0], s.rfmt_str[j - 1][1])
                         } else {
                             " ".repeat(11)
                         }
@@ -378,8 +378,8 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
                         "{:3}={:12.4E} {:<8}{:<8}   ",
                         j,
                         s.r[j - 1],
-                        &s.rfmt_str[j - 1][0],
-                        &s.rfmt_str[j - 1][1]
+                        s.rfmt_str[j - 1][0],
+                        s.rfmt_str[j - 1][1]
                     );
                 }
             }
@@ -420,7 +420,7 @@ pub fn prtrat(s: &mut ModelState, nnn: i32) {
         .map(|k| {
             let j = s.ndxpp[k];
             if j > 0 && j <= s.nrates {
-                format!("{:<8}  ", &s.rfmt_str[j - 1][0])
+                format!("{:<8}  ", s.rfmt_str[j - 1][0])
             } else {
                 " ".repeat(10)
             }
@@ -430,7 +430,7 @@ pub fn prtrat(s: &mut ModelState, nnn: i32) {
         .map(|k| {
             let j = s.ndxpp[k];
             if j > 0 && j <= s.nrates {
-                format!("{:<8}  ", &s.rfmt_str[j - 1][1])
+                format!("{:<8}  ", s.rfmt_str[j - 1][1])
             } else {
                 " ".repeat(10)
             }

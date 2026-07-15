@@ -1,9 +1,5 @@
-import os
-import sys
-
-# The installed package must be importable for autodoc and notebook execution.
-# Run `uv run maturin develop` before building docs.
-sys.path.insert(0, os.path.abspath("../src"))
+# Autodoc and notebook execution use the installed wheel or editable package.
+# Run `uv run maturin develop` before a local documentation build.
 
 project = "pratmo"
 author = "PRATMO Authors"

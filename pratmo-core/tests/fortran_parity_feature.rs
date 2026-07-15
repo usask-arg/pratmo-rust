@@ -3,7 +3,9 @@
 //! the executable's GMU0/280-K, SSF, heterogeneous-rate, and R177 quirks,
 //! while normal mode preserves the corrected/input-driven behavior.
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use common::input_dir;
 
 use pratmo_core::{
     api::{DiurnBoxSpec, DiurnConfig, PratmoModel},
@@ -16,18 +18,11 @@ use pratmo_core::{
 #[cfg(feature = "fortran-parity")]
 use pratmo_core::ctm::ctmlfq;
 
-fn input_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("fortran")
-}
-
 #[test]
 fn original_40_species_spectral_file_is_supported() {
     let dir = input_dir();
     let mut state = ModelState::new();
-    let mut reader = FortranReader::new(&dir);
+    let mut reader = FortranReader::new(dir);
     reader
         .read_spectral_data(&mut state)
         .expect("read_spectral_data failed");
@@ -42,7 +37,7 @@ fn original_40_species_spectral_file_is_supported() {
 fn original_odf_isr_annotations_are_parsed() {
     let dir = input_dir();
     let mut state = ModelState::new();
-    let mut reader = FortranReader::new(&dir);
+    let mut reader = FortranReader::new(dir);
     reader
         .read_spectral_data(&mut state)
         .expect("read_spectral_data failed");
@@ -57,7 +52,7 @@ fn original_odf_isr_annotations_are_parsed() {
 fn read_all_uses_the_selected_legacy_policy() {
     let dir = input_dir();
     let mut state = ModelState::new();
-    let mut reader = FortranReader::new(&dir);
+    let mut reader = FortranReader::new(dir);
     reader.read_all(&mut state).expect("read_all failed");
 
     #[cfg(feature = "fortran-parity")]
@@ -213,7 +208,7 @@ fn parity_ctm_smoke_completes_reference_grid() {
     let dir = input_dir();
     let mut state = ModelState::new();
     state.cinpdir = dir.to_string_lossy().into_owned();
-    let mut reader = FortranReader::new(&dir);
+    let mut reader = FortranReader::new(dir);
     reader.read_all(&mut state).expect("read_all failed");
     ctmlfq(&mut state).expect("parity CTM run failed");
 
@@ -229,7 +224,7 @@ fn parity_ctm_smoke_completes_reference_grid() {
 fn diurn_parity_zeros_legacy_heterogeneous_rates() {
     let dir = input_dir();
     let mut state = ModelState::new();
-    let mut reader = FortranReader::new(&dir);
+    let mut reader = FortranReader::new(dir);
     reader.read_all(&mut state).expect("read_all failed");
 
     state.nd216 = 0;

@@ -3,6 +3,8 @@
 // input/J/aerosol quirks make this normal-mode fixture inappropriate there.
 #![cfg(not(feature = "fortran-parity"))]
 
+mod common;
+
 /// Full-model integration tests: run PRATMO CTM mode and compare the validated
 /// fields at every active altitude against the gfortran reference output
 /// (60°N, day 75, 25 boxes, 40 days). Known short-lived parity gaps remain as
@@ -16,23 +18,15 @@ use pratmo_core::{
     reader::{FortranReader, ModelReader},
     state::ModelState,
 };
-use std::{
-    path::{Path, PathBuf},
-    sync::OnceLock,
-};
+use std::{path::Path, sync::OnceLock};
 
-fn input_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("fortran")
-}
+use common::input_dir;
 
 fn run_ctm() -> Box<ModelState> {
     let dir = input_dir();
     let mut s = ModelState::new();
     s.cinpdir = dir.to_string_lossy().into_owned();
-    let mut reader = FortranReader::new(&dir);
+    let mut reader = FortranReader::new(dir);
     reader.read_all(&mut s).expect("read_all failed");
     ctmlfq(&mut s).expect("ctmlfq failed");
     s

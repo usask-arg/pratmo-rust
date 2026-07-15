@@ -14,7 +14,7 @@ use ndarray::Array2;
 
 use crate::{
     constants::{NB, NDEN, NL},
-    ctm::ctmlfq,
+    ctm::ctmlfq_in_memory,
     diurnal::{diurn, diurn_parallel_boxes},
     path::tpath,
     reader::{setday, FortranReader, ModelReader},
@@ -24,7 +24,7 @@ use crate::{
 
 // ── Species types ──────────────────────────────────────────────────────────────
 
-/// Number densities (cm⁻³) for the 30 implicit (Newton-Raphson) species.
+/// Number densities (cm⁻³) for the 40 implicit (Newton-Raphson) species.
 #[derive(Debug, Clone, Default)]
 pub struct ImplicitSpecies {
     pub no: f64,
@@ -175,7 +175,7 @@ impl ImplicitSpecies {
     }
 }
 
-/// Dimensionless mixing ratios for the 18 long-lived species.
+/// Dimensionless mixing ratios for the 19 long-lived species.
 /// Used both as initial conditions (input) and daily-mean output.
 #[derive(Debug, Clone, Default)]
 pub struct LongLivedMixingRatios {
@@ -248,7 +248,7 @@ impl LongLivedMixingRatios {
     }
 }
 
-/// Photolysis rates (s⁻¹) for all 47 J-value channels.
+/// Photolysis rates (s⁻¹) for all 52 J-value channels.
 #[derive(Debug, Clone, Default)]
 pub struct JValues {
     pub no: f64,
@@ -371,7 +371,10 @@ impl JValues {
 pub struct CtmBoxSpec {
     /// 1-based standard pressure level index (1 = surface, NL = top).
     pub altitude_level: u8,
-    pub albedo: f64,
+    /// Generic aerosol surface area density in um2/cm3.
+    pub aerosol_surface_area_um2_cm3: f64,
+    /// Sea-salt surface area density in um2/cm3 (iodine recycling only).
+    pub sea_salt_surface_area_um2_cm3: f64,
     pub temp_offset_k: f64,
 }
 
@@ -384,6 +387,7 @@ pub struct CtmConfig {
     pub integration_days: u32,
     pub boxes: Vec<CtmBoxSpec>,
     pub bromine: bool,
+    pub iodine: bool,
     pub solar_flux_scale: f64,
 }
 
@@ -395,6 +399,7 @@ impl Default for CtmConfig {
             integration_days: 40,
             boxes: Vec::new(),
             bromine: false,
+            iodine: true,
             solar_flux_scale: 1.0,
         }
     }
@@ -405,7 +410,10 @@ impl Default for CtmConfig {
 pub struct DiurnBoxSpec {
     /// 1-based standard pressure level index (1 = surface, NL = top).
     pub altitude_level: u8,
-    pub albedo: f64,
+    /// Generic aerosol surface area density in um2/cm3.
+    pub aerosol_surface_area_um2_cm3: f64,
+    /// Sea-salt surface area density in um2/cm3 (iodine recycling only).
+    pub sea_salt_surface_area_um2_cm3: f64,
     pub temp_offset_k: f64,
 }
 
@@ -489,6 +497,12 @@ pub struct No2ConstrainedDiurnOutput {
 pub struct Diagnostics {
     pub raxloop: f64,
     pub radcount: f64,
+    pub newraf_nonconvergence_count: usize,
+    pub rafday_nonconvergence_count: usize,
+    /// Maximum final RAFDAY relative-correction metric across calls and boxes.
+    pub rafday_max_final_relative_correction: f64,
+    /// Maximum number of RAFDAY Newton corrections across calls and boxes.
+    pub rafday_max_correction_iterations: usize,
 }
 
 /// Snapshot of a single box's state (daily mean or final converged value).
@@ -512,7 +526,9 @@ pub struct BoxSnapshot {
 /// One time-step in a diurnal time series.
 #[derive(Debug, Clone)]
 pub struct DiurnTimeStep {
-    /// Time in HHMM integer format (e.g. 1430 = 14:30 UTC).
+    /// Monotonic seconds since the noon start of the integrated 24-hour orbit.
+    pub elapsed_seconds: f64,
+    /// Local clock label. Both orbit endpoints are noon (`1200`).
     pub time_hhmm: i32,
     pub implicit: ImplicitSpecies,
 }
@@ -593,13 +609,17 @@ impl DiurnOutput {
     }
 }
 
+fn hhmm_to_minutes(hhmm: i32) -> Option<i32> {
+    let hours = hhmm.div_euclid(100);
+    let minutes = hhmm.rem_euclid(100);
+    ((0..24).contains(&hours) && minutes < 60).then_some(hours * 60 + minutes)
+}
+
 fn time_distance_hhmm(a: i32, b: i32) -> i32 {
-    let to_min = |hhmm: i32| -> i32 {
-        let hh = hhmm.div_euclid(100);
-        let mm = hhmm.rem_euclid(100);
-        hh * 60 + mm
-    };
-    (to_min(a) - to_min(b)).abs()
+    let a_minutes = hhmm_to_minutes(a).expect("model time labels must be valid HHMM values");
+    let b_minutes = hhmm_to_minutes(b).expect("validated target must be a valid HHMM value");
+    let direct = (a_minutes - b_minutes).abs();
+    direct.min(24 * 60 - direct)
 }
 
 fn no2_at_hhmm(out: &DiurnOutput, target_hhmm: i32) -> Result<Vec<f64>> {
@@ -626,6 +646,11 @@ impl CtmOutput {
     /// Extract one J-value as a `(n_boxes,)` altitude profile.
     pub fn jvalue_profile(&self, f: impl Fn(&JValues) -> f64) -> Vec<f64> {
         self.boxes.iter().map(|b| f(&b.jvalues)).collect()
+    }
+
+    /// Extract one long-lived mixing ratio as a `(n_boxes,)` altitude profile.
+    pub fn long_lived_profile(&self, f: impl Fn(&LongLivedMixingRatios) -> f64) -> Vec<f64> {
+        self.boxes.iter().map(|b| f(&b.long_lived)).collect()
     }
 }
 
@@ -667,6 +692,7 @@ impl PratmoModel {
     /// Loads base chemistry setup, then overrides geographic/temporal/box
     /// parameters from `cfg`. Returns structured output without writing any files.
     pub fn run_diurn(&self, cfg: &DiurnConfig) -> Result<DiurnOutput> {
+        validate_diurn_config(cfg)?;
         let mut s = self.load_base_state()?;
         apply_diurn_config(&mut s, cfg)?;
         validate_supported_mode(&s)?;
@@ -689,6 +715,13 @@ impl PratmoModel {
         &self,
         cfg: &No2ConstrainedDiurnConfig,
     ) -> Result<No2ConstrainedDiurnOutput> {
+        validate_diurn_config(&cfg.diurn)?;
+        if hhmm_to_minutes(cfg.target_hhmm).is_none() {
+            bail!(
+                "target_hhmm must be a valid local-time HHMM value from 0000 to 2359, got {}",
+                cfg.target_hhmm
+            );
+        }
         let nbox = diurn_config_nbox(&cfg.diurn);
         if cfg.observed_no2_cm3.len() != nbox {
             bail!(
@@ -754,6 +787,7 @@ impl PratmoModel {
     /// Climatology data (fort03_LLM.x / fort05.x / fort51.x) is only available
     /// when using [`PratmoModel::new`] with a directory that contains those files.
     pub fn run_ctm(&self, cfg: &CtmConfig) -> Result<CtmOutput> {
+        validate_ctm_config(cfg)?;
         let mut s = self.load_base_state()?;
         apply_ctm_config(&mut s, cfg);
         validate_supported_mode(&s)?;
@@ -762,7 +796,7 @@ impl PratmoModel {
         s.out_unit8 = None;
         s.out_unit9 = None;
 
-        ctmlfq(&mut s)?;
+        ctmlfq_in_memory(&mut s)?;
 
         Ok(extract_ctm_output(&s))
     }
@@ -779,6 +813,172 @@ impl PratmoModel {
         reader.read_all(&mut s)?;
         Ok(s)
     }
+}
+
+fn validate_common_config(
+    mode: &str,
+    latitude_deg: f64,
+    julian_day: u16,
+    integration_days: u32,
+    solar_flux_scale: f64,
+) -> Result<()> {
+    if !(latitude_deg.is_finite() && (-90.0..=90.0).contains(&latitude_deg)) {
+        bail!("{mode} latitude_deg must be finite and between -90 and 90");
+    }
+    if !(1..=366).contains(&julian_day) {
+        bail!("{mode} julian_day must be between 1 and 366, got {julian_day}");
+    }
+    if integration_days == 0 || integration_days > i32::MAX as u32 {
+        bail!("{mode} integration_days must be between 1 and {}", i32::MAX);
+    }
+    if !(solar_flux_scale.is_finite() && solar_flux_scale > 0.0) {
+        bail!("{mode} solar_flux_scale must be finite and positive");
+    }
+    Ok(())
+}
+
+fn validate_box_spec(
+    mode: &str,
+    index: usize,
+    altitude_level: u8,
+    max_altitude_level: usize,
+    aerosol_surface_area_um2_cm3: f64,
+    sea_salt_surface_area_um2_cm3: f64,
+    temp_offset_k: f64,
+) -> Result<()> {
+    if altitude_level == 0 || altitude_level as usize > max_altitude_level {
+        bail!(
+            "{mode} boxes[{index}].altitude_level must be between 1 and {max_altitude_level}, got {altitude_level}"
+        );
+    }
+    if !(aerosol_surface_area_um2_cm3.is_finite() && aerosol_surface_area_um2_cm3 >= 0.0) {
+        bail!("{mode} boxes[{index}].aerosol_surface_area_um2_cm3 must be finite and non-negative");
+    }
+    if !(sea_salt_surface_area_um2_cm3.is_finite() && sea_salt_surface_area_um2_cm3 >= 0.0) {
+        bail!(
+            "{mode} boxes[{index}].sea_salt_surface_area_um2_cm3 must be finite and non-negative"
+        );
+    }
+    if !temp_offset_k.is_finite() {
+        bail!("{mode} boxes[{index}].temp_offset_k must be finite");
+    }
+    Ok(())
+}
+
+fn validate_initial_mixing_ratios(ratios: &[LongLivedMixingRatios]) -> Result<()> {
+    for (index, ratio) in ratios.iter().enumerate() {
+        let values = [
+            ("o3", ratio.o3),
+            ("n2o", ratio.n2o),
+            ("noy", ratio.noy),
+            ("ch4", ratio.ch4),
+            ("co", ratio.co),
+            ("clx", ratio.clx),
+            ("cf2cl2", ratio.cf2cl2),
+            ("cfcl3", ratio.cfcl3),
+            ("ccl4", ratio.ccl4),
+            ("ch3cl", ratio.ch3cl),
+            ("ch3ccl3", ratio.ch3ccl3),
+            ("h2", ratio.h2),
+            ("h2o", ratio.h2o),
+            ("nh3", ratio.nh3),
+            ("c5h8", ratio.c5h8),
+            ("brx", ratio.brx),
+            ("ch3br", ratio.ch3br),
+            ("ocs", ratio.ocs),
+            ("iodx", ratio.iodx),
+        ];
+        for (name, value) in values {
+            if !(value.is_finite() && value >= 0.0) {
+                bail!(
+                    "DIURN initial_mixing_ratios[{index}].{name} must be finite and non-negative"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_diurn_config(cfg: &DiurnConfig) -> Result<()> {
+    validate_common_config(
+        "DIURN",
+        cfg.latitude_deg,
+        cfg.julian_day,
+        cfg.integration_days,
+        cfg.solar_flux_scale,
+    )?;
+    if cfg.boxes.len() > NB {
+        bail!("DIURN supports at most {NB} boxes, got {}", cfg.boxes.len());
+    }
+    let max_altitude_level = cfg
+        .atmosphere
+        .as_ref()
+        .map_or(NL, |profile| profile.pressure_mb.len());
+    if cfg.boxes.is_empty() {
+        let profile_levels = cfg
+            .atmosphere
+            .as_ref()
+            .map(|profile| profile.pressure_mb.len())
+            .unwrap_or(0);
+        if profile_levels == 0 {
+            bail!("DIURN requires at least one box or a non-empty custom atmosphere");
+        }
+        if profile_levels > NB {
+            bail!(
+                "a custom atmosphere used without explicit boxes may contain at most {NB} levels, got {profile_levels}"
+            );
+        }
+    }
+    for (index, box_) in cfg.boxes.iter().enumerate() {
+        validate_box_spec(
+            "DIURN",
+            index,
+            box_.altitude_level,
+            max_altitude_level,
+            box_.aerosol_surface_area_um2_cm3,
+            box_.sea_salt_surface_area_um2_cm3,
+            box_.temp_offset_k,
+        )?;
+    }
+    if let Some(ratios) = &cfg.initial_mixing_ratios {
+        let nbox = diurn_config_nbox(cfg);
+        if ratios.len() != nbox {
+            bail!(
+                "DIURN initial_mixing_ratios length ({}) must match box count ({nbox})",
+                ratios.len()
+            );
+        }
+        validate_initial_mixing_ratios(ratios)?;
+    }
+    Ok(())
+}
+
+fn validate_ctm_config(cfg: &CtmConfig) -> Result<()> {
+    validate_common_config(
+        "CTM",
+        cfg.latitude_deg,
+        cfg.julian_day,
+        cfg.integration_days,
+        cfg.solar_flux_scale,
+    )?;
+    if cfg.boxes.is_empty() {
+        bail!("CTM requires at least one box");
+    }
+    if cfg.boxes.len() > NB {
+        bail!("CTM supports at most {NB} boxes, got {}", cfg.boxes.len());
+    }
+    for (index, box_) in cfg.boxes.iter().enumerate() {
+        validate_box_spec(
+            "CTM",
+            index,
+            box_.altitude_level,
+            NL,
+            box_.aerosol_surface_area_um2_cm3,
+            box_.sea_salt_surface_area_um2_cm3,
+            box_.temp_offset_k,
+        )?;
+    }
+    Ok(())
 }
 
 /// Reject Fortran modes that are not silently approximated by the public Rust
@@ -912,7 +1112,8 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
             }
         }
         s.nboxdo[ib] = (ialt_new + 1) as i32;
-        s.boxaa[ib] = spec.map(|b| b.albedo).unwrap_or(0.25);
+        s.boxaa[ib] = spec.map(|b| b.aerosol_surface_area_um2_cm3).unwrap_or(0.25);
+        s.boxss[ib] = spec.map(|b| b.sea_salt_surface_area_um2_cm3).unwrap_or(0.0);
         s.boxtt[ib] = spec.map(|b| b.temp_offset_k).unwrap_or(0.0);
         s.nboxmx[ib] = cfg.integration_days as i32;
         s.nboxwt[ib] = 1;
@@ -942,10 +1143,10 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     }
 
     if !cfg.iodine {
-        disable_iodine(s);
+        disable_iodine(s, cfg.atmosphere.is_none());
     }
 
-    if cfg.atmosphere.is_some() {
+    if cfg.atmosphere.is_some() || cfg.initial_mixing_ratios.is_some() {
         for ib in 0..nbox {
             reconcile_custom_box_implicit_species(s, ib);
         }
@@ -1066,16 +1267,49 @@ fn reconcile_custom_box_implicit_species(s: &mut ModelState, ib: usize) {
     }
 }
 
-fn disable_iodine(s: &mut ModelState) {
-    s.liod = false;
-
-    for j in 30..40 {
-        s.n[j] = 0;
-        s.ntsav[j] = 0;
+fn disable_iodine(s: &mut ModelState, preserve_structure: bool) {
+    if !preserve_structure {
+        s.liod = false;
+        for j in 30..40 {
+            s.n[j] = 0;
+            s.ntsav[j] = 0;
+        }
+        s.ntotx = s.ntotx.min(30);
+        s.ntot = s.ntot.min(30);
+        let mut nnr = 0usize;
+        for j in 0..s.nnr {
+            let species = s.nnrt[j];
+            if species <= 30 {
+                s.nnrt[nnr] = species;
+                nnr += 1;
+            }
+        }
+        for j in nnr..s.nnrt.len() {
+            s.nnrt[j] = 0;
+        }
+        s.nnr = nnr;
+        for ib in 0..NB {
+            s.fiodx[ib] = 0.0;
+            s.di_[ib] = 0.0;
+            s.dio[ib] = 0.0;
+            s.dhoi[ib] = 0.0;
+            s.diono2[ib] = 0.0;
+            s.dhi[ib] = 0.0;
+            s.doio[ib] = 0.0;
+            s.di2[ib] = 0.0;
+            s.di2o2[ib] = 0.0;
+            s.di2o3[ib] = 0.0;
+            s.di2o4[ib] = 0.0;
+        }
+        return;
     }
-    s.ntotx = s.ntotx.min(30);
-    s.ntot = s.ntot.min(30);
 
+    // Keep the 40-species system structurally intact and use a negligible Iy
+    // numerical floor. Removing the last ten rows makes the legacy Newton
+    // system follow a different, cancellation-limited convergence path and is
+    // not a reproducible iodine-off control.
+    const IODINE_OFF_FLOOR: f64 = 1.0e-20;
+    s.liod = true;
     let mut nnr = 0usize;
     for j in 0..s.nnr {
         let species = s.nnrt[j];
@@ -1088,20 +1322,22 @@ fn disable_iodine(s: &mut ModelState) {
         s.nnrt[j] = 0;
     }
     s.nnr = nnr;
-
     for ib in 0..NB {
-        s.fiodx[ib] = 0.0;
-        s.fi2[ib] = 0.0;
-        s.di_[ib] = 0.0;
-        s.dio[ib] = 0.0;
-        s.dhoi[ib] = 0.0;
-        s.diono2[ib] = 0.0;
-        s.dhi[ib] = 0.0;
-        s.doio[ib] = 0.0;
-        s.di2[ib] = 0.0;
-        s.di2o2[ib] = 0.0;
-        s.di2o3[ib] = 0.0;
-        s.di2o4[ib] = 0.0;
+        s.fiodx[ib] = IODINE_OFF_FLOOR;
+        let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
+            .saturating_sub(1)
+            .min(NL - 1);
+        let one_iodine = IODINE_OFF_FLOOR * s.dm[ialt] / 10.0;
+        s.di_[ib] = one_iodine;
+        s.dio[ib] = one_iodine;
+        s.dhoi[ib] = one_iodine;
+        s.diono2[ib] = one_iodine;
+        s.dhi[ib] = one_iodine;
+        s.doio[ib] = one_iodine;
+        s.di2[ib] = 0.5 * one_iodine;
+        s.di2o2[ib] = 0.5 * one_iodine;
+        s.di2o3[ib] = 0.5 * one_iodine;
+        s.di2o4[ib] = 0.5 * one_iodine;
     }
 }
 
@@ -1138,7 +1374,8 @@ fn apply_ctm_config(s: &mut ModelState, cfg: &CtmConfig) {
 
     for (ib, spec) in cfg.boxes.iter().take(nbox).enumerate() {
         s.nboxdo[ib] = spec.altitude_level as i32;
-        s.boxaa[ib] = spec.albedo;
+        s.boxaa[ib] = spec.aerosol_surface_area_um2_cm3;
+        s.boxss[ib] = spec.sea_salt_surface_area_um2_cm3;
         s.boxtt[ib] = spec.temp_offset_k;
         s.nboxmx[ib] = cfg.integration_days as i32;
         s.nboxwt[ib] = 1;
@@ -1149,6 +1386,10 @@ fn apply_ctm_config(s: &mut ModelState, cfg: &CtmConfig) {
     for ib in nbox..NB {
         s.nboxdo[ib] = 0;
         s.nboxwt[ib] = 0;
+    }
+
+    if !cfg.iodine {
+        disable_iodine(s, true);
     }
 }
 
@@ -1178,6 +1419,7 @@ fn extract_diurn_timeseries(s: &ModelState, ib: usize) -> DiurnBoxTimeSeries {
 
     let steps = (0..ntimdo)
         .map(|kt| DiurnTimeStep {
+            elapsed_seconds: s.dtime[kt],
             time_hhmm: s.nhhmm[kt],
             implicit: ImplicitSpecies::from_timeseries(s, ib, kt),
         })
@@ -1209,6 +1451,10 @@ fn extract_diurn_output(s: &ModelState) -> DiurnOutput {
         diagnostics: Diagnostics {
             raxloop: s.raxloop,
             radcount: s.radcount,
+            newraf_nonconvergence_count: s.newraf_nonconvergence_count,
+            rafday_nonconvergence_count: s.rafday_nonconvergence_count,
+            rafday_max_final_relative_correction: s.rafday_max_final_relative_correction,
+            rafday_max_correction_iterations: s.rafday_max_correction_iterations,
         },
     }
 }
@@ -1225,13 +1471,20 @@ fn extract_ctm_output(s: &ModelState) -> CtmOutput {
         diagnostics: Diagnostics {
             raxloop: s.raxloop,
             radcount: s.radcount,
+            newraf_nonconvergence_count: s.newraf_nonconvergence_count,
+            rafday_nonconvergence_count: s.rafday_nonconvergence_count,
+            rafday_max_final_relative_correction: s.rafday_max_final_relative_correction,
+            rafday_max_correction_iterations: s.rafday_max_correction_iterations,
         },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::validate_supported_mode;
+    use super::{
+        time_distance_hhmm, validate_ctm_config, validate_diurn_config, validate_supported_mode,
+        CtmBoxSpec, CtmConfig, DiurnBoxSpec, DiurnConfig, JValues, LongLivedMixingRatios,
+    };
     use crate::state::ModelState;
 
     #[test]
@@ -1248,5 +1501,82 @@ mod tests {
         state.npstd = 1;
         let error = validate_supported_mode(&state).expect_err("PZSTD must be rejected");
         assert!(error.to_string().contains("PZSTD"));
+    }
+
+    #[test]
+    fn hhmm_distance_wraps_across_midnight() {
+        assert_eq!(time_distance_hhmm(2359, 1), 2);
+        assert_eq!(time_distance_hhmm(1200, 1200), 0);
+    }
+
+    #[test]
+    fn empty_box_configs_are_rejected() {
+        let ctm_error = validate_ctm_config(&CtmConfig::default())
+            .expect_err("an empty CTM box list must be rejected");
+        assert!(ctm_error.to_string().contains("at least one box"));
+
+        let diurn_error = validate_diurn_config(&DiurnConfig::default())
+            .expect_err("DIURN needs boxes unless it has a custom atmosphere");
+        assert!(diurn_error.to_string().contains("at least one box"));
+    }
+
+    #[test]
+    fn invalid_box_and_mixing_ratio_values_are_rejected() {
+        let ctm = CtmConfig {
+            boxes: vec![CtmBoxSpec {
+                altitude_level: 42,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
+                temp_offset_k: 0.0,
+            }],
+            ..CtmConfig::default()
+        };
+        let ctm_error = validate_ctm_config(&ctm).expect_err("level 42 exceeds the model grid");
+        assert!(ctm_error.to_string().contains("altitude_level"));
+
+        let diurn = DiurnConfig {
+            boxes: vec![DiurnBoxSpec {
+                altitude_level: 1,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
+                temp_offset_k: 0.0,
+            }],
+            initial_mixing_ratios: Some(vec![LongLivedMixingRatios {
+                o3: f64::NAN,
+                ..LongLivedMixingRatios::default()
+            }]),
+            ..DiurnConfig::default()
+        };
+        let diurn_error =
+            validate_diurn_config(&diurn).expect_err("NaN mixing ratios must be rejected");
+        assert!(diurn_error.to_string().contains(".o3"));
+    }
+
+    #[test]
+    fn iodine_jvalue_fields_map_to_their_own_state_arrays() {
+        let mut state = ModelState::new();
+        state.vio[0] = 1.0;
+        state.vhoi[0] = 2.0;
+        state.viono2[0] = 3.0;
+        state.voio[0] = 4.0;
+        state.vi2[0] = 5.0;
+        state.vi2o2[0] = 6.0;
+        state.vi2o3[0] = 7.0;
+        state.vi2o4[0] = 8.0;
+
+        let values = JValues::from_state_alt(&state, 0);
+        assert_eq!(
+            [
+                values.io,
+                values.hoi,
+                values.iono2,
+                values.oio,
+                values.i2,
+                values.i2o2,
+                values.i2o3,
+                values.i2o4,
+            ],
+            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+        );
     }
 }

@@ -10,7 +10,7 @@ use crate::state::ModelState;
 /// Fortran: SUBROUTINE SOL
 pub fn sol(s: &mut ModelState, gmu: f64) {
     s.gmu = gmu;
-    s.rflect = s.clouds.max(0.0).min(1.0);
+    s.rflect = s.clouds.clamp(0.0, 1.0);
     s.u0 = gmu;
     s.sza = gmu.acos() * 57.29578;
 
@@ -73,7 +73,7 @@ pub fn sol(s: &mut ModelState, gmu: f64) {
         // Per-box mode: J-values indexed by box number (JB → 0-based jb)
         let nbox = s.nbox;
         for jb in 0..nbox {
-            let j = (s.nboxdo[jb].abs() as usize).saturating_sub(1); // 0-based altitude level
+            let j = (s.nboxdo[jb].unsigned_abs() as usize).saturating_sub(1); // 0-based altitude level
             let tt = s.t[j] + s.boxtt[jb];
             for k in nw1..=nw2 {
                 let qo3tot = xseco3(k, tt, s);
@@ -103,7 +103,7 @@ fn interp_tfact(tt: f64, tq1: f64, tq2: f64) -> f64 {
     if tq2 <= tq1 {
         0.0
     } else {
-        ((tt - tq1) / (tq2 - tq1)).max(0.0).min(1.0)
+        ((tt - tq1) / (tq2 - tq1)).clamp(0.0, 1.0)
     }
 }
 
@@ -134,8 +134,6 @@ fn jvalue(s: &mut ModelState) {
     let nw1 = s.nw1.saturating_sub(1); // 0-based
     let nwsrb = s.nwsrb; // 0-based count
     let nsr = s.nsr;
-    let nodf = s.nodf;
-
     // ── Main wavelength loop ──────────────────────────────────────────────────
     for k in nw1..=nw2 {
         let wave = s.wl[k];
@@ -195,7 +193,7 @@ fn jvalue(s: &mut ModelState) {
             if !s.lprtjv {
                 let nbox = s.nbox;
                 for jb in 0..nbox {
-                    let j = (s.nboxdo[jb].abs() as usize).saturating_sub(1); // 0-based
+                    let j = (s.nboxdo[jb].unsigned_abs() as usize).saturating_sub(1); // 0-based
                     let fl_k = s.fl[k];
                     let fopt = fl_k
                         * trans[j]
@@ -223,7 +221,7 @@ fn optau(
     xqo2: &[f64; 41],
     xqo3: &[f64; 41],
     xqray: f64,
-    xqaer: f64,
+    _xqaer: f64,
 ) -> [f64; 41] {
     let nc = s.nc;
     let j1 = s.nlbatm.saturating_sub(1); // 0-based
@@ -509,8 +507,8 @@ fn matin3(b: &mut [[f64; 3]; 3]) {
     b[0][1] += b[0][2] * b[2][1];
     b[1][0] = b[1][1] * b[1][0] + b[1][2] * b[2][0];
     b[1][1] += b[1][2] * b[2][1];
-    b[2][0] = b[2][2] * b[2][0];
-    b[2][1] = b[2][2] * b[2][1];
+    b[2][0] *= b[2][2];
+    b[2][1] *= b[2][2];
 }
 
 // ── SPHERE — spherical geometry air mass weights ──────────────────────────────
@@ -679,12 +677,10 @@ pub fn flint(tint: f64, t1: f64, t2: f64, t3: f64, f1: f64, f2: f64, f3: f64) ->
         } else {
             f1 + (f2 - f1) * (tint - t1) / (t2 - t1)
         }
+    } else if tint >= t3 {
+        f3
     } else {
-        if tint >= t3 {
-            f3
-        } else {
-            f2 + (f3 - f2) * (tint - t2) / (t3 - t2)
-        }
+        f2 + (f3 - f2) * (tint - t2) / (t3 - t2)
     }
 }
 

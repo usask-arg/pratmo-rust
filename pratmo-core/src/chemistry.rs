@@ -4,7 +4,7 @@
 use crate::constants::NDEN;
 use crate::state::ModelState;
 
-// ── Index helpers (Fortran 1-based N1..N35 stored as s.n[0]..s.n[34]) ────────
+// ── Index helpers (Fortran 1-based N1..N40 stored as s.n[0]..s.n[39]) ────────
 
 /// Read XR for species Ni (where ni = s.n[i-1], 1-based Fortran value).
 #[inline(always)]
@@ -18,9 +18,203 @@ fn idx(ni: usize) -> usize {
     ni - 1
 }
 
+#[derive(Clone, Copy)]
+struct StoichTerm {
+    species: usize,
+    coefficient: f64,
+}
+
+#[inline(always)]
+const fn st(species: usize, coefficient: f64) -> StoichTerm {
+    StoichTerm {
+        species,
+        coefficient,
+    }
+}
+
+/// Visit every iodine reaction once.  CHEMPL and RHSLHS both consume this
+/// table, so their stoichiometry cannot silently diverge.
+fn for_each_iodine_reaction(
+    n: &[usize; NDEN],
+    bromine: bool,
+    mut visit: impl FnMut(usize, &[StoichTerm], &[StoichTerm]),
+) {
+    macro_rules! reaction {
+        ($rate:expr, [$($reactant:expr),* $(,)?], [$($product:expr),* $(,)?]) => {
+            visit($rate, &[$($reactant),*], &[$($product),*]);
+        };
+    }
+
+    reaction!(221, [st(n[30], 1.0), st(n[10], 1.0)], [st(n[31], 1.0)]); // I + O3 -> IO + O2
+    reaction!(222, [st(n[31], 1.0), st(n[9], 1.0)], [st(n[30], 1.0)]); // IO + O -> I + O2
+    reaction!(
+        223,
+        [st(n[31], 1.0), st(n[0], 1.0)],
+        [st(n[30], 1.0), st(n[1], 1.0)]
+    ); // IO + NO
+    reaction!(224, [st(n[31], 1.0), st(n[7], 1.0)], [st(n[32], 1.0)]); // IO + HO2
+    reaction!(225, [st(n[31], 1.0), st(n[1], 1.0)], [st(n[33], 1.0)]); // IO + NO2 + M
+    reaction!(226, [st(n[30], 1.0), st(n[7], 1.0)], [st(n[34], 1.0)]); // I + HO2
+    reaction!(227, [st(n[34], 1.0), st(n[6], 1.0)], [st(n[30], 1.0)]); // HI + OH
+
+    // IO + ClO branches.  The unavailable ICl branch is combined with the
+    // atomic branch as an instantaneous-photolysis proxy (r262).
+    reaction!(
+        228,
+        [st(n[31], 1.0), st(n[18], 1.0)],
+        [st(n[30], 1.0), st(n[27], 1.0)]
+    );
+    reaction!(
+        262,
+        [st(n[31], 1.0), st(n[18], 1.0)],
+        [st(n[30], 1.0), st(n[16], 1.0)]
+    );
+    if bromine {
+        reaction!(
+            229,
+            [st(n[31], 1.0), st(n[11], 1.0)],
+            [st(n[30], 1.0), st(n[12], 1.0)]
+        );
+        reaction!(
+            263,
+            [st(n[31], 1.0), st(n[11], 1.0)],
+            [st(n[35], 1.0), st(n[12], 1.0)]
+        );
+    }
+
+    reaction!(230, [st(n[31], 1.0)], [st(n[30], 1.0), st(n[9], 1.0)]); // J(IO)
+    reaction!(231, [st(n[32], 1.0)], [st(n[30], 1.0), st(n[6], 1.0)]); // J(HOI)
+    reaction!(232, [st(n[33], 1.0)], [st(n[30], 1.0), st(n[2], 1.0)]); // J(IONO2)
+    reaction!(234, [st(n[31], 2.0)], [st(n[35], 1.0), st(n[30], 1.0)]); // IO self: OIO + I
+    reaction!(236, [st(n[31], 2.0)], [st(n[37], 1.0)]); // IO self: I2O2
+    reaction!(
+        237,
+        [st(n[35], 1.0), st(n[0], 1.0)],
+        [st(n[31], 1.0), st(n[1], 1.0)]
+    );
+    reaction!(239, [st(n[31], 1.0), st(n[35], 1.0)], [st(n[38], 1.0)]);
+    reaction!(240, [st(n[35], 2.0)], [st(n[39], 1.0)]);
+    reaction!(
+        241,
+        [st(n[36], 1.0), st(n[6], 1.0)],
+        [st(n[32], 1.0), st(n[30], 1.0)]
+    );
+
+    // Sea-salt recycling is represented as rapid ICl/IBr photolysis.  It
+    // conserves gas-phase iodine and returns the coupled halogen radicals.
+    if bromine {
+        reaction!(
+            91,
+            [st(n[32], 1.0)],
+            [st(n[30], 1.0), st(n[16], 0.5), st(n[12], 0.5)]
+        );
+        reaction!(
+            92,
+            [st(n[33], 1.0)],
+            [st(n[30], 1.0), st(n[16], 0.5), st(n[12], 0.5)]
+        );
+    } else {
+        reaction!(91, [st(n[32], 1.0)], [st(n[30], 1.0), st(n[16], 0.5)]);
+        reaction!(92, [st(n[33], 1.0)], [st(n[30], 1.0), st(n[16], 0.5)]);
+    }
+
+    reaction!(243, [st(n[35], 1.0)], [st(n[30], 1.0)]); // J(OIO)
+    reaction!(244, [st(n[36], 1.0)], [st(n[30], 2.0)]); // J(I2)
+    reaction!(245, [st(n[37], 1.0)], [st(n[30], 1.0), st(n[35], 1.0)]); // J(I2O2)
+    reaction!(246, [st(n[38], 1.0)], [st(n[31], 1.0), st(n[35], 1.0)]); // J(I2O3)
+    reaction!(247, [st(n[39], 1.0)], [st(n[35], 2.0)]); // J(I2O4)
+
+    reaction!(250, [st(n[31], 1.0), st(n[10], 1.0)], [st(n[35], 1.0)]); // IO + O3
+    reaction!(
+        251,
+        [st(n[31], 1.0), st(n[6], 1.0)],
+        [st(n[30], 1.0), st(n[7], 1.0)]
+    ); // IO + OH
+    reaction!(
+        252,
+        [st(n[36], 1.0), st(n[9], 1.0)],
+        [st(n[31], 1.0), st(n[30], 1.0)]
+    ); // I2 + O
+    reaction!(
+        253,
+        [st(n[30], 1.0), st(n[2], 1.0)],
+        [st(n[31], 1.0), st(n[1], 1.0)]
+    ); // I + NO3
+    reaction!(
+        254,
+        [st(n[31], 1.0), st(n[2], 1.0)],
+        [st(n[35], 1.0), st(n[1], 1.0)]
+    ); // IO + NO3
+    reaction!(
+        255,
+        [st(n[36], 1.0), st(n[2], 1.0)],
+        [st(n[30], 1.0), st(n[33], 1.0)]
+    ); // I2 + NO3
+    reaction!(
+        256,
+        [st(n[30], 1.0), st(n[33], 1.0)],
+        [st(n[36], 1.0), st(n[2], 1.0)]
+    ); // I + IONO2
+    reaction!(257, [st(n[32], 1.0), st(n[6], 1.0)], [st(n[31], 1.0)]); // HOI + OH
+    reaction!(
+        258,
+        [st(n[34], 1.0), st(n[2], 1.0)],
+        [st(n[30], 1.0), st(n[4], 1.0)]
+    ); // HI + NO3
+    reaction!(259, [st(n[37], 1.0)], [st(n[35], 1.0), st(n[30], 1.0)]); // I2O2 thermal
+    reaction!(260, [st(n[37], 1.0)], [st(n[31], 2.0)]); // I2O2 thermal
+    reaction!(261, [st(n[39], 1.0)], [st(n[35], 2.0)]); // I2O4 thermal
+}
+
+#[inline]
+fn saiz_io_oio_rate(temperature_k: f64, pressure_hpa: f64) -> f64 {
+    if pressure_hpa < 20.0 {
+        return 3.0e-11;
+    }
+    let p = 0.75 * pressure_hpa;
+    let w1 = 4.687e-10 - 1.3855e-5 * (-p / 1.62265).exp() + 5.51868e-10 * (-p / 199.328).exp();
+    let w2 = -0.00331 - 0.00514 * (-p / 325.68711).exp() - 0.00444 * (-p / 40.81609).exp();
+    (w1 * (w2 * temperature_k).exp()).max(0.0)
+}
+
+#[inline]
+fn saiz_oio_oio_rate(temperature_k: f64, pressure_hpa: f64) -> f64 {
+    let p = 0.75 * pressure_hpa;
+    let w1 = 1.1659e-9 - 7.79644e-10 * (-p / 22.09281).exp() + 1.03779e-9 * (-p / 568.15381).exp();
+    let w2 = -0.00813 - 0.00382 * (-p / 45.57591).exp() - 0.00643 * (-p / 417.95061).exp();
+    (w1 * (w2 * temperature_k).exp()).max(0.0)
+}
+
+#[inline]
+fn saiz_i2o2_to_oio_i_rate(temperature_k: f64, pressure_hpa: f64) -> f64 {
+    let p = 0.75 * pressure_hpa;
+    let w1 = 3.54288e10 + 1.8523e11 * p - 1.45435e8 * p.powi(2) + 60_799.434_4 * p.powi(3);
+    let w2 = -9681.65989 + 346.95538 * (-p / 343.25322).exp() + 251.78032 * (-p / 44.1466).exp();
+    (w1 * (w2 / temperature_k).exp()).max(0.0)
+}
+
+#[inline]
+fn saiz_i2o2_to_io_io_rate(temperature_k: f64, pressure_hpa: f64) -> f64 {
+    let p = 0.75 * pressure_hpa;
+    let w1 = 2.55335e11 - 4.41888e9 * p + 8.56186e7 * p.powi(2) + 14_218.81 * p.powi(3);
+    let w2 = -11466.82304 + 597.01334 * (-p / 1382.62325).exp() - 167.3391 * (-p / 43.75089).exp();
+    (w1 * (w2 / temperature_k).exp()).max(0.0)
+}
+
+#[inline]
+fn saiz_i2o4_to_oio_oio_rate(temperature_k: f64, pressure_hpa: f64) -> f64 {
+    if pressure_hpa < 8.0 {
+        return 0.0;
+    }
+    let p = 0.75 * pressure_hpa;
+    let w1 = -1.92626e14 + 4.67414e13 * p - 3.68651e8 * p.powi(2) - 3.09109e6 * p.powi(3);
+    let w2 = -12302.15294 + 252.78367 * (-p / 46.12733).exp() + 437.62868 * (-p / 428.4413).exp();
+    (w1 * (w2 / temperature_k).exp()).max(0.0)
+}
+
 // ── SETUPR — temperature-dependent rate constants ─────────────────────────────
 
-/// Compute all RATEK(1..221) for current T, M, altitude.
+/// Compute temperature/pressure-dependent rate constants.
 /// Fortran: SUBROUTINE SETUPR
 pub fn setupr(s: &mut ModelState) {
     let ialt = s.ialt; // 0-based
@@ -43,6 +237,7 @@ pub fn setupr(s: &mut ModelState) {
         s.boxaa[ibox] = s.asa[ialt];
     }
     let zaersl = 675.0 * tt.sqrt() * s.boxaa[ibox] * 1.0e-8;
+    let zseasl = 675.0 * tt.sqrt() * s.boxss[ibox] * 1.0e-8;
     let zraino = s.boxrn[ibox] / 86400.0;
 
     // Arrhenius helpers
@@ -223,7 +418,9 @@ pub fn setupr(s: &mut ModelState) {
         s.ratek[220] = fk(tt, 220); // ClO+BrO (third channel)
     }
 
-    // Iodine reactions (221–229, bimolecular; 225 termolecular)
+    // Iodine chemistry: Saiz-Lopez et al. (2014) with Lewis et al. (2020)
+    // higher-oxide photolysis data.  Pressure-dependent channels are evaluated
+    // directly because they are not Troe fall-off reactions.
     if s.liod {
         s.ratek[221] = fk(tt, 221); // I + O3 → IO + O2
         s.ratek[222] = fk(tt, 222); // IO + O → I + O2
@@ -232,24 +429,37 @@ pub fn setupr(s: &mut ModelState) {
         s.ratek[225] = fknasa(tt300, zdnum, 225, s); // IO + NO2 + M → IONO2
         s.ratek[226] = fk(tt, 226); // I + HO2 → HI + O2
         s.ratek[227] = fk(tt, 227); // HI + OH → I + H2O
-        s.ratek[228] = fk(tt, 228); // IO + ClO → Cl + I + O2
+        s.ratek[228] = fk(tt, 228); // IO + ClO → I + OClO
         s.ratek[229] = fk(tt, 229); // IO + BrO → Br + I + O2
-        s.ratek[234] = fk(tt, 234); // IO + IO → OIO + I
-        s.ratek[235] = fk(tt, 235); // IO + IO → I2 + O2
-        s.ratek[236] = fknasa(tt300, zdnum, 236, s); // IO + IO + M → I2O2
+
+        let pressure_hpa = s.pstd[ialt].max(0.0);
+        let pressure_factor = (-pressure_hpa / 191.42).exp();
+        s.ratek[234] = 2.13e-11 * (180.0 / tt).exp() * (1.0 + pressure_factor);
+        s.ratek[235] = 0.0; // obsolete IO + IO -> I2 branch
+        s.ratek[236] = 3.27e-11 * (180.0 / tt).exp() * (1.0 - 0.65 * pressure_factor);
         s.ratek[237] = fk(tt, 237); // OIO + NO → IO + NO2
-        s.ratek[238] = fk(tt, 238); // OIO + OH → HOI + O2
-        s.ratek[239] = fk(tt, 239); // IO + OIO → I2O3
-        s.ratek[240] = fk(tt, 240); // OIO + OIO → I2O4
+        s.ratek[238] = 0.0; // removed unsupported OIO + OH -> HOI estimate
+        s.ratek[239] = saiz_io_oio_rate(tt, pressure_hpa);
+        s.ratek[240] = saiz_oio_oio_rate(tt, pressure_hpa);
         s.ratek[241] = fk(tt, 241); // I2 + OH → HOI + I
-                                    // Saiz-Lopez et al. (2014) Table 3 sea-salt heterogeneous uptake.
-                                    // PRATMO does not yet carry IBr/ICl, so HOI/IONO2 uptake is folded
-                                    // back to atomic iodine as an iodine-conserving recycling proxy.
-        s.ratek[91] = 0.06 * zaersl; // HOI → 0.5 IBr + 0.5 ICl
-        s.ratek[92] = 0.01 * zaersl; // IONO2 → 0.5 IBr + 0.5 ICl
-        s.ratek[242] = 0.01 * zaersl; // I2O2 sea-salt uptake
-        s.ratek[248] = 0.01 * zaersl; // I2O3 sea-salt uptake
-        s.ratek[249] = 0.01 * zaersl; // I2O4 sea-salt uptake
+
+        // Sea salt is tracked separately from sulfate/other aerosol. IBr/ICl
+        // are represented by their rapid photolysis products until those
+        // reservoirs are added explicitly.
+        s.ratek[91] = 0.06 * zseasl;
+        s.ratek[92] = 0.01 * zseasl;
+        s.ratek[242] = 0.0; // particulate iodine is not a modeled family member
+        s.ratek[248] = 0.0;
+        s.ratek[249] = 0.0;
+
+        for rate in 250..=258 {
+            s.ratek[rate] = fk(tt, rate);
+        }
+        s.ratek[259] = saiz_i2o2_to_oio_i_rate(tt, pressure_hpa);
+        s.ratek[260] = saiz_i2o2_to_io_io_rate(tt, pressure_hpa);
+        s.ratek[261] = saiz_i2o4_to_oio_oio_rate(tt, pressure_hpa);
+        s.ratek[262] = fk(tt, 262); // IO + ClO atomic/ICl-proxy branch
+        s.ratek[263] = fk(tt, 263); // IO + BrO -> Br + OIO
     }
 
     // Heterogeneous reactions 170–177 via hetprob
@@ -328,7 +538,7 @@ fn fknasa(t300lg: f64, densty: f64, ii: usize, s: &ModelState) -> f64 {
 
 // ── CHEMS — compute all reaction rates ───────────────────────────────────────
 
-/// Compute all 221 reaction rates (s.r[0..220]) from current species densities.
+/// Compute reaction rates from current species densities.
 /// Fortran: SUBROUTINE CHEMS
 pub fn chems(s: &mut ModelState) {
     let iv = s.ibox; // 0-based; J-values loaded per box
@@ -497,7 +707,6 @@ pub fn chems(s: &mut ModelState) {
     let jvh123 = s.vh123[iv];
     let jvh141b = s.vh141b[iv];
     let jvchbr3 = s.vchbr3[iv];
-    let jvch3i = s.vch3i[iv];
     let jvcf3i = s.vcf3i[iv];
     let jvocs = s.vocs[iv];
     let jvio = s.vio[iv];
@@ -724,7 +933,6 @@ pub fn chems(s: &mut ModelState) {
 
     // Iodine reactions (221–233)
     if s.liod {
-        let zdnum = s.zdnum;
         r[221] = s.ratek[221] * xi_ * xo3; // I + O3 → IO + O2
         r[222] = s.ratek[222] * xio * xo; // IO + O → I + O2
         r[223] = s.ratek[223] * xio * xno; // IO + NO → I + NO2
@@ -732,30 +940,44 @@ pub fn chems(s: &mut ModelState) {
         r[225] = s.ratek[225] * xio * xno2; // IO + NO2 + M → IONO2
         r[226] = s.ratek[226] * xi_ * xho2; // I + HO2 → HI + O2
         r[227] = s.ratek[227] * xhi * xoh; // HI + OH → I + H2O
-        r[228] = s.ratek[228] * xio * xclo; // IO + ClO → Cl + I + O2
+        r[228] = s.ratek[228] * xio * xclo; // IO + ClO → I + OClO
         r[229] = s.ratek[229] * xio * xbro; // IO + BrO → Br + I + O2
         r[230] = jvio * xio; // IO + hν → I + O
         r[231] = jvhoi * xhoi; // HOI + hν → I + OH
         r[232] = jviono2 * xiono2; // IONO2 + hν → products
         r[233] = 0.0; // CH3I source suppressed: fiodx is inorganic Iy, not CH3I
         r[234] = s.ratek[234] * xio * xio; // IO + IO → OIO + I
-        r[235] = s.ratek[235] * xio * xio; // IO + IO → I2 + O2
-        r[236] = s.ratek[236] * xio * xio; // IO + IO + M → I2O2
+        r[235] = 0.0; // obsolete IO + IO → I2 + O2 branch
+        r[236] = s.ratek[236] * xio * xio; // IO + IO → I2O2
         r[237] = s.ratek[237] * xoio * xno; // OIO + NO → IO + NO2
-        r[238] = s.ratek[238] * xoio * xoh; // OIO + OH → HOI + O2
+        r[238] = 0.0; // unsupported legacy estimate removed
         r[239] = s.ratek[239] * xio * xoio; // IO + OIO → I2O3
         r[240] = s.ratek[240] * xoio * xoio; // OIO + OIO → I2O4
         r[241] = s.ratek[241] * xi2 * xoh; // I2 + OH → HOI + I
         r[91] = s.ratek[91] * xhoi; // HOI sea-salt recycling
         r[92] = s.ratek[92] * xiono2; // IONO2 sea-salt recycling
-        r[242] = s.ratek[242] * xi2o2; // I2O2 sea-salt uptake
+        r[242] = 0.0; // no untracked particulate-I sink
         r[243] = jvoio * xoio; // OIO + hν → I + O2
         r[244] = jvi2 * xi2; // I2 + hν → 2I
-        r[245] = jvi2o2 * xi2o2; // I2O2 + hν → 2IO
+        r[245] = jvi2o2 * xi2o2; // I2O2 + hν → I + OIO
         r[246] = jvi2o3 * xi2o3; // I2O3 + hν → IO + OIO
         r[247] = jvi2o4 * xi2o4; // I2O4 + hν → 2OIO
-        r[248] = s.ratek[248] * xi2o3; // I2O3 sea-salt uptake
-        r[249] = s.ratek[249] * xi2o4; // I2O4 sea-salt uptake
+        r[248] = 0.0;
+        r[249] = 0.0;
+        r[250] = s.ratek[250] * xio * xo3; // IO + O3 → OIO + O2
+        r[251] = s.ratek[251] * xio * xoh; // IO + OH → I + HO2
+        r[252] = s.ratek[252] * xi2 * xo; // I2 + O → IO + I
+        r[253] = s.ratek[253] * xi_ * xno3; // I + NO3 → IO + NO2
+        r[254] = s.ratek[254] * xio * xno3; // IO + NO3 → OIO + NO2
+        r[255] = s.ratek[255] * xi2 * xno3; // I2 + NO3 → I + IONO2
+        r[256] = s.ratek[256] * xi_ * xiono2; // I + IONO2 → I2 + NO3
+        r[257] = s.ratek[257] * xhoi * xoh; // HOI + OH → IO + H2O
+        r[258] = s.ratek[258] * xhi * xno3; // HI + NO3 → I + HNO3
+        r[259] = s.ratek[259] * xi2o2; // I2O2 → OIO + I
+        r[260] = s.ratek[260] * xi2o2; // I2O2 → 2IO
+        r[261] = s.ratek[261] * xi2o4; // I2O4 → 2OIO
+        r[262] = s.ratek[262] * xio * xclo; // IO + ClO → I + Cl/ICl proxy
+        r[263] = s.ratek[263] * xio * xbro; // IO + BrO → Br + OIO
     }
 
     // ── O(1D) instant steady-state ───────────────────────────────────────────
@@ -785,12 +1007,39 @@ pub fn chems(s: &mut ModelState) {
 
 // ── CHEMPL — production/loss for each implicit species ───────────────────────
 
+fn apply_iodine_production_loss(s: &mut ModelState) {
+    if !s.liod {
+        return;
+    }
+    let n = s.n;
+    let rates = s.r;
+    let ntot = s.ntot;
+    for_each_iodine_reaction(&n, s.lbrom, |rate_index, reactants, products| {
+        let rate = rates[rate_index];
+        if rate == 0.0 {
+            return;
+        }
+        for term in reactants {
+            if term.species > 0 && term.species <= ntot {
+                s.rl[idx(term.species)] += term.coefficient * rate;
+            }
+        }
+        for term in products {
+            if term.species > 0 && term.species <= ntot {
+                s.rp[idx(term.species)] += term.coefficient * rate;
+            }
+        }
+    });
+}
+
 /// Compute s.rp, s.rl, s.rpf, s.rlf from s.r.
 /// Fortran: SUBROUTINE CHEMPL
 pub fn chempl(s: &mut ModelState) {
     let n = s.n;
-    let r = s.r; // copy (250 × f64 = 2 kB) to avoid borrow conflicts
-    let ib = s.ibox;
+    let r = s.r; // copy to avoid borrow conflicts
+
+    s.rp.fill(0.0);
+    s.rl.fill(0.0);
 
     // Intermediates
     let rpch3o = r[50] + r[52] + r[52] + r[53];
@@ -810,8 +1059,7 @@ pub fn chempl(s: &mut ModelState) {
         - r[8]
         - r[9]
         - r[21]
-        - r[112]
-        + r[230]; // IO + hν → I + O
+        - r[112];
     rl[idx(n[9])] = r[12]
         + r[12]
         + r[15]
@@ -829,8 +1077,7 @@ pub fn chempl(s: &mut ModelState) {
         + r[125]
         + r[201]
         + r[205]
-        + r[148]
-        + r[222]; // IO + O → I + O2
+        + r[148];
 
     // CH3O2 = ROO
     rp[idx(n[25])] = r[6] + r[48] + r[54] + r[103] + r[141] + r[143] + r[146];
@@ -914,8 +1161,7 @@ pub fn chempl(s: &mut ModelState) {
         + r[160]
         + r[160]
         + r[220]
-        + 2.0 * (r[198] + r[199])
-        + r[228]; // IO + ClO → Cl + I + O2
+        + 2.0 * (r[198] + r[199]);
 
     // Cl
     rp[idx(n[16])] = r[99]
@@ -934,8 +1180,7 @@ pub fn chempl(s: &mut ModelState) {
         + r[159]
         + r[159]
         + r[160]
-        + 2.0 * r[198]
-        + r[228]; // IO + ClO → Cl + I + O2
+        + 2.0 * r[198];
     rl[idx(n[16])] = r[96]
         + r[103]
         + r[104]
@@ -988,8 +1233,7 @@ pub fn chempl(s: &mut ModelState) {
             + r[209]
             + r[218]
             + r[220]
-            + r[149]
-            + r[229]; // IO + BrO → Br + I + O2
+            + r[149];
 
         // Br
         rp[idx(n[12])] = r[205]
@@ -1005,8 +1249,7 @@ pub fn chempl(s: &mut ModelState) {
             + r[219]
             + r[220]
             + 2.0 * r[175]
-            + r[149]
-            + r[229]; // IO + BrO → Br + I + O2
+            + r[149];
         rl[idx(n[12])] = r[204] + r[203] + r[217];
 
         // BrCl
@@ -1014,94 +1257,9 @@ pub fn chempl(s: &mut ModelState) {
         rl[idx(n[29])] = r[219];
     }
 
-    if s.liod {
-        // I (atomic iodine)
-        if n[30] > 0 {
-            rp[idx(n[30])] = r[222]
-                + r[223]
-                + r[227]
-                + r[228]
-                + r[229]
-                + r[230]
-                + r[231]
-                + r[234]
-                + r[241]
-                + r[243]
-                + 2.0 * r[244]
-                + r[91]
-                + r[92];
-            rl[idx(n[30])] = r[221] + r[226];
-        }
-
-        // IO — IONO2+hν→IO+NO2 is the main photolysis channel (JPL 2019, by analogy with BrONO2)
-        if n[31] > 0 {
-            rp[idx(n[31])] = r[221] + r[232] + r[237] + 2.0 * r[245] + r[246];
-            rl[idx(n[31])] = r[222]
-                + r[223]
-                + r[224]
-                + r[225]
-                + r[228]
-                + r[229]
-                + r[230]
-                + 2.0 * r[234]
-                + 2.0 * r[235]
-                + 2.0 * r[236]
-                + r[239];
-        }
-
-        // HOI
-        if n[32] > 0 {
-            rp[idx(n[32])] = r[224] + r[238] + r[241];
-            rl[idx(n[32])] = r[231] + r[91];
-        }
-
-        // IONO2
-        if n[33] > 0 {
-            rp[idx(n[33])] = r[225];
-            rl[idx(n[33])] = r[232] + r[92];
-        }
-
-        // HI
-        if n[34] > 0 {
-            rp[idx(n[34])] = r[226];
-            rl[idx(n[34])] = r[227];
-        }
-
-        // OIO
-        if n[35] > 0 {
-            rp[idx(n[35])] = r[234] + r[246] + 2.0 * r[247];
-            rl[idx(n[35])] = r[237] + r[238] + r[239] + 2.0 * r[240] + r[243];
-        }
-
-        // I2
-        if n[36] > 0 {
-            rp[idx(n[36])] = r[235];
-            rl[idx(n[36])] = r[241] + r[244];
-        }
-
-        // I2O2
-        if n[37] > 0 {
-            rp[idx(n[37])] = r[236];
-            rl[idx(n[37])] = r[245] + r[242];
-        }
-
-        // I2O3
-        if n[38] > 0 {
-            rp[idx(n[38])] = r[239];
-            rl[idx(n[38])] = r[246] + r[248];
-        }
-
-        // I2O4
-        if n[39] > 0 {
-            rp[idx(n[39])] = r[240];
-            rl[idx(n[39])] = r[247] + r[249];
-        }
-    }
-
     // NO
     rp[idx(n[0])] = r[79] + r[77] + r[19] + r[18] + r[68] + r[177];
-    rl[idx(n[0])] =
-        r[22] + r[78] + r[41] + r[20] + r[66] + r[50] + r[206] + r[115] + r[162] + r[223] + r[237]; // iodine + NO → NO2
+    rl[idx(n[0])] = r[22] + r[78] + r[41] + r[20] + r[66] + r[50] + r[206] + r[115] + r[162];
 
     // NO2
     rp[idx(n[1])] = r[62]
@@ -1127,12 +1285,8 @@ pub fn chempl(s: &mut ModelState) {
         + r[162]
         + r[166]
         + r[172]
-        + r[178]
-        + r[223]
-        + r[232]
-        + r[237]; // iodine NO2 production
-    rl[idx(n[1])] =
-        r[27] + r[23] + r[81] + r[19] + r[18] + r[67] + r[71] + r[121] + r[213] + r[61] + r[225]; // IO + NO2 + M → IONO2
+        + r[178];
+    rl[idx(n[1])] = r[27] + r[23] + r[81] + r[19] + r[18] + r[67] + r[71] + r[121] + r[213] + r[61];
 
     // NO3
     rp[idx(n[2])] = r[27]
@@ -1174,8 +1328,7 @@ pub fn chempl(s: &mut ModelState) {
         + r[112]
         + r[42]
         + r[102]
-        + r[14]
-        + r[231]; // HOI + hν → I + OH
+        + r[14];
     rl[idx(n[6])] = r[15]
         + r[46]
         + r[47]
@@ -1203,10 +1356,7 @@ pub fn chempl(s: &mut ModelState) {
         + r[126]
         + r[129]
         + r[163]
-        + r[149]
-        + r[227]
-        + r[238]
-        + r[241]; // iodine + OH sinks
+        + r[149];
 
     // HO2
     rp[idx(n[7])] = r[31] + r[17] + r[25] + r[40] + r[72] + r[108] + r[149] + rpch3o + rpcho;
@@ -1227,24 +1377,14 @@ pub fn chempl(s: &mut ModelState) {
         + r[127]
         + r[107]
         + r[120]
-        + r[102]
-        + r[224]
-        + r[226]; // IO + HO2 and I + HO2
+        + r[102];
 
     // O3
     rp[idx(n[10])] = r[10] + r[167] + r[120];
-    rl[idx(n[10])] = r[24]
-        + r[25]
-        + r[2]
-        + r[11]
-        + r[20]
-        + r[26]
-        + r[27]
-        + r[113]
-        + r[204]
-        + r[207]
-        + r[21]
-        + r[221]; // I + O3 → IO + O2
+    rl[idx(n[10])] =
+        r[24] + r[25] + r[2] + r[11] + r[20] + r[26] + r[27] + r[113] + r[204] + r[207] + r[21];
+
+    apply_iodine_production_loss(s);
 
     // ── Diagnostic rates ─────────────────────────────────────────────────────
 
@@ -1336,6 +1476,11 @@ pub fn chempl(s: &mut ModelState) {
             + r[22];
         let trupox = r[0] + r[0] + r[41] + r[50] + r[73] + r[63] + r[167];
         r136 = r136 - r135 + trupox;
+        if s.liod {
+            // Direct ozone consumption by I and IO.  Without these terms the
+            // explicit O3 family was identical in iodine-on/off integrations.
+            r136 += r[221] + r[250];
+        }
         r135 = trupox;
         (r135, r136)
     };
@@ -1897,84 +2042,11 @@ pub fn rhslhs_jacobian(s: &mut ModelState) {
         );
     }
 
-    // Divide by species densities to get d/dX out of loss
     let ntot = s.ntot;
     if s.liod {
-        rct!(r[221], n[30] as i32, n[10] as i32, 0, n[31] as i32, 0); // I + O3 → IO + O2
-        rct!(r[222], n[31] as i32, n[9] as i32, 0, n[30] as i32, 0); // IO + O → I + O2
-        rct!(
-            r[223],
-            n[31] as i32,
-            n[0] as i32,
-            0,
-            n[30] as i32,
-            n[1] as i32
-        ); // IO + NO → I + NO2
-        rct!(r[224], n[31] as i32, n[7] as i32, 0, n[32] as i32, 0); // IO + HO2 → HOI + O2
-        rct!(r[225], n[31] as i32, n[1] as i32, 0, n[33] as i32, 0); // IO + NO2 + M → IONO2
-        rct!(r[226], n[30] as i32, n[7] as i32, 0, n[34] as i32, 0); // I + HO2 → HI + O2
-        rct!(r[227], n[34] as i32, n[6] as i32, 0, n[30] as i32, 0); // HI + OH → I + H2O
-        rct!(
-            r[228],
-            n[31] as i32,
-            n[18] as i32,
-            0,
-            n[16] as i32,
-            n[30] as i32
-        ); // IO + ClO → Cl + I + O2
-        if s.lbrom {
-            rct!(
-                r[229],
-                n[31] as i32,
-                n[11] as i32,
-                0,
-                n[12] as i32,
-                n[30] as i32
-            ); // IO + BrO → Br + I + O2
-        }
-        rct!(r[230], n[31] as i32, 0, 0, n[30] as i32, n[9] as i32); // IO + hν → I + O
-        rct!(r[231], n[32] as i32, 0, 0, n[30] as i32, n[6] as i32); // HOI + hν → I + OH
-        rct!(r[232], n[33] as i32, 0, 0, n[30] as i32, n[1] as i32); // IONO2 + hν → I + NO2
-                                                                     // r[233] is a constant source (no variable reactant); no Jacobian entry
-        rct!(
-            r[234],
-            n[31] as i32,
-            n[31] as i32,
-            0,
-            n[35] as i32,
-            n[30] as i32
-        ); // IO + IO → OIO + I
-        rct!(r[235], n[31] as i32, n[31] as i32, 0, n[36] as i32, 0); // IO + IO → I2 + O2
-        rct!(r[236], n[31] as i32, n[31] as i32, 0, n[37] as i32, 0); // IO + IO + M → I2O2
-        rct!(
-            r[237],
-            n[35] as i32,
-            n[0] as i32,
-            0,
-            n[31] as i32,
-            n[1] as i32
-        ); // OIO + NO → IO + NO2
-        rct!(r[238], n[35] as i32, n[6] as i32, 0, n[32] as i32, 0); // OIO + OH → HOI + O2
-        rct!(r[239], n[31] as i32, n[35] as i32, 0, n[38] as i32, 0); // IO + OIO → I2O3
-        rct!(r[240], n[35] as i32, n[35] as i32, 0, n[39] as i32, 0); // OIO + OIO → I2O4
-        rct!(
-            r[241],
-            n[36] as i32,
-            n[6] as i32,
-            0,
-            n[32] as i32,
-            n[30] as i32
-        ); // I2 + OH → HOI + I
-        rct!(r[91], n[32] as i32, 0, 0, n[30] as i32, 0); // HOI sea-salt recycling proxy
-        rct!(r[92], n[33] as i32, 0, 0, n[30] as i32, 0); // IONO2 sea-salt recycling proxy
-        rct!(r[242], n[37] as i32, 0, 0, 0, 0); // I2O2 sea-salt uptake
-        rct!(r[243], n[35] as i32, 0, 0, n[30] as i32, 0); // OIO + hν → I + O2
-        rct!(r[244], n[36] as i32, 0, 0, n[30] as i32, n[30] as i32); // I2 + hν → 2I
-        rct!(r[245], n[37] as i32, 0, 0, n[31] as i32, n[31] as i32); // I2O2 + hν → 2IO
-        rct!(r[246], n[38] as i32, 0, 0, n[31] as i32, n[35] as i32); // I2O3 + hν → IO + OIO
-        rct!(r[247], n[39] as i32, 0, 0, n[35] as i32, n[35] as i32); // I2O4 + hν → 2OIO
-        rct!(r[248], n[38] as i32, 0, 0, 0, 0); // I2O3 sea-salt uptake
-        rct!(r[249], n[39] as i32, 0, 0, 0, 0); // I2O4 sea-salt uptake
+        for_each_iodine_reaction(&n, s.lbrom, |rate_index, reactants, products| {
+            react_stoich(a, r[rate_index], reactants, products, ntot);
+        });
     }
 
     // Divide by species densities to get d/dX out of loss
@@ -2032,6 +2104,35 @@ pub fn rhslhs_jacobian(s: &mut ModelState) {
 }
 
 // ── REACT — accumulate Jacobian entries ──────────────────────────────────────
+
+fn react_stoich(
+    a: &mut [f64],
+    rate: f64,
+    reactants: &[StoichTerm],
+    products: &[StoichTerm],
+    ntot: usize,
+) {
+    if rate == 0.0 || reactants.is_empty() {
+        return;
+    }
+    for differentiated in reactants {
+        if differentiated.species == 0 || differentiated.species > ntot {
+            continue;
+        }
+        let column = idx(differentiated.species);
+        let derivative_scale = differentiated.coefficient * rate;
+        for term in reactants {
+            if term.species > 0 && term.species <= ntot {
+                a[column * NDEN + idx(term.species)] -= term.coefficient * derivative_scale;
+            }
+        }
+        for term in products {
+            if term.species > 0 && term.species <= ntot {
+                a[column * NDEN + idx(term.species)] += term.coefficient * derivative_scale;
+            }
+        }
+    }
+}
 
 /// Update A for one reaction. nl1, nl2, nl3 are reactants (1-based, may be negative);
 /// np1, np2 are products (1-based, positive or zero).
@@ -2096,5 +2197,215 @@ fn react(a: &mut [f64], rrate: f64, nl1: i32, nl2: i32, nl3: i32, np1: i32, np2:
     }
     if np2 > 0 {
         a[kol3 * NDEN + idx(np2 as usize)] += rrate;
+    }
+}
+
+#[cfg(test)]
+mod iodine_tests {
+    use super::*;
+
+    fn assert_relative(actual: f64, expected: f64, tolerance: f64) {
+        let relative_error = (actual / expected - 1.0).abs();
+        assert!(
+            relative_error <= tolerance,
+            "actual={actual:.17e}, expected={expected:.17e}, relative error={relative_error:.3e}"
+        );
+    }
+
+    fn identity_species_map() -> [usize; NDEN] {
+        let mut n = [0usize; NDEN];
+        for (index, slot) in n.iter_mut().enumerate() {
+            *slot = index + 1;
+        }
+        n
+    }
+
+    fn iodine_atoms(species_slot: usize) -> f64 {
+        match species_slot {
+            31..=36 => 1.0,
+            37..=40 => 2.0,
+            _ => 0.0,
+        }
+    }
+
+    #[test]
+    fn shared_iodine_reaction_table_conserves_iodine_atoms() {
+        let n = identity_species_map();
+        for_each_iodine_reaction(&n, true, |rate, reactants, products| {
+            let lhs: f64 = reactants
+                .iter()
+                .map(|term| term.coefficient * iodine_atoms(term.species))
+                .sum();
+            let rhs: f64 = products
+                .iter()
+                .map(|term| term.coefficient * iodine_atoms(term.species))
+                .sum();
+            assert!(
+                (lhs - rhs).abs() < 1.0e-12,
+                "iodine is not conserved in r[{rate}]: lhs={lhs} rhs={rhs}"
+            );
+        });
+    }
+
+    #[test]
+    fn iono2_photolysis_has_the_expected_independent_products() {
+        let mut s = ModelState::new();
+        s.n = identity_species_map();
+        s.ntot = NDEN;
+        s.ntotx = NDEN;
+        s.liod = true;
+        s.dm[0] = 1.0;
+        s.r[232] = 2.5;
+
+        chempl(&mut s);
+
+        assert_eq!(s.rl[idx(s.n[33])], 2.5, "IONO2 loss");
+        assert_eq!(s.rp[idx(s.n[30])], 2.5, "I production");
+        assert_eq!(s.rp[idx(s.n[2])], 2.5, "NO3 production");
+        assert_eq!(s.rp[idx(s.n[1])], 0.0, "NO2 must not be a product");
+    }
+
+    #[test]
+    fn representative_higher_oxide_channels_have_expected_products() {
+        let mut s = ModelState::new();
+        s.n = identity_species_map();
+        s.ntot = NDEN;
+        s.ntotx = NDEN;
+        s.liod = true;
+        s.dm[0] = 1.0;
+        s.r[234] = 2.0; // 2 IO -> OIO + I
+        s.r[245] = 3.0; // I2O2 + hv -> I + OIO
+
+        chempl(&mut s);
+
+        assert_eq!(s.rl[idx(s.n[31])], 4.0, "IO loss");
+        assert_eq!(s.rl[idx(s.n[37])], 3.0, "I2O2 loss");
+        assert_eq!(s.rp[idx(s.n[30])], 5.0, "I production");
+        assert_eq!(s.rp[idx(s.n[35])], 5.0, "OIO production");
+    }
+
+    #[test]
+    fn saiz_lopez_pressure_dependent_rates_match_reference_points() {
+        for (temperature, pressure, io_oio, oio_oio, i2o2_oio_i, i2o2_io_io, i2o4) in [
+            (
+                205.0,
+                133.352,
+                1.7346881807621689e-10,
+                1.2435688939556238e-10,
+                2.131_097_678_391_282e-7,
+                4.819241287108894e-12,
+                2.4207839463778117e-10,
+            ),
+            (
+                270.0,
+                421.697,
+                1.4062140745115322e-10,
+                8.672754560430454e-11,
+                2.052018383858116e-2,
+                1.6423398832925163e-5,
+                5.116092341350627e-4,
+            ),
+        ] {
+            assert_relative(saiz_io_oio_rate(temperature, pressure), io_oio, 1.0e-12);
+            assert_relative(saiz_oio_oio_rate(temperature, pressure), oio_oio, 1.0e-12);
+            assert_relative(
+                saiz_i2o2_to_oio_i_rate(temperature, pressure),
+                i2o2_oio_i,
+                1.0e-12,
+            );
+            assert_relative(
+                saiz_i2o2_to_io_io_rate(temperature, pressure),
+                i2o2_io_io,
+                1.0e-12,
+            );
+            assert_relative(
+                saiz_i2o4_to_oio_oio_rate(temperature, pressure),
+                i2o4,
+                1.0e-12,
+            );
+        }
+
+        assert_eq!(saiz_io_oio_rate(220.0, 10.0), 3.0e-11);
+        assert_eq!(saiz_i2o4_to_oio_oio_rate(220.0, 7.99), 0.0);
+    }
+
+    #[test]
+    fn iodine_heterogeneous_rates_use_sea_salt_not_sulfate_area() {
+        let mut s = ModelState::new();
+        s.liod = true;
+        s.ialt = 0;
+        s.ibox = 0;
+        s.t[0] = 220.0;
+        s.pstd[0] = 100.0;
+        s.dm[0] = 1.0e18;
+        s.boxaa[0] = 0.1;
+        s.boxss[0] = 0.0;
+        setupr(&mut s);
+        assert_eq!(s.ratek[91], 0.0);
+        assert_eq!(s.ratek[92], 0.0);
+
+        s.boxss[0] = 0.1;
+        setupr(&mut s);
+        let collision_frequency = 675.0 * 220.0_f64.sqrt() * 0.1 * 1.0e-8;
+        assert_relative(s.ratek[91], 0.06 * collision_frequency, 1.0e-12);
+        assert_relative(s.ratek[92], 0.01 * collision_frequency, 1.0e-12);
+    }
+
+    fn iono2_photolysis_state(iono2: f64, previous_iono2: f64) -> Box<ModelState> {
+        let mut s = ModelState::new();
+        s.n = identity_species_map();
+        s.ntot = NDEN;
+        s.ntotx = NDEN;
+        s.liod = true;
+        s.dm[0] = 1.0;
+        s.deltt = 1.0;
+        s.xr.fill(1.0);
+        s.xr[idx(s.n[33])] = iono2;
+        s.xnold = s.xr;
+        s.xnold[idx(s.n[33])] = previous_iono2;
+        let photolysis_frequency = 0.25;
+        s.r[232] = photolysis_frequency * iono2;
+        chempl(&mut s);
+        s
+    }
+
+    #[test]
+    fn iono2_analytic_jacobian_matches_finite_difference_rhs() {
+        let x0 = 2.0;
+        let eps = 1.0e-6;
+        let mut base = iono2_photolysis_state(x0, x0);
+        let base_rhs = rhslhs_rhs(&mut base);
+        rhslhs_jacobian(&mut base);
+
+        let mut perturbed = iono2_photolysis_state(x0 + eps, x0);
+        let perturbed_rhs = rhslhs_rhs(&mut perturbed);
+        let column = idx(base.n[33]);
+        for row in 0..NDEN {
+            let negative_finite_difference = -(perturbed_rhs[row] - base_rhs[row]) / eps;
+            let analytic = base.a_mat.as_slice().unwrap()[column * NDEN + row];
+            let scale = analytic
+                .abs()
+                .max(negative_finite_difference.abs())
+                .max(1.0);
+            assert!(
+                (analytic - negative_finite_difference).abs() < 1.0e-8 * scale,
+                "row {row}: analytic={analytic} finite_difference={negative_finite_difference}"
+            );
+        }
+    }
+
+    #[test]
+    fn iodine_ozone_reactions_enter_the_o3_loss_budget() {
+        let mut s = ModelState::new();
+        s.n = identity_species_map();
+        s.ntot = NDEN;
+        s.ntotx = NDEN;
+        s.liod = true;
+        s.dm[0] = 1.0;
+        s.r[221] = 2.0;
+        s.r[250] = 3.0;
+        chempl(&mut s);
+        assert!((s.rl[idx(s.n[10])] - 5.0).abs() < 1.0e-12);
+        assert!(s.rlf[0] >= 5.0);
     }
 }

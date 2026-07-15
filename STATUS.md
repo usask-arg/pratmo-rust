@@ -1,6 +1,10 @@
 # PRATMO Rust Port — Status
 
-Faithful 1-to-1 Rust port of PRATMO v6.0 (Prather stratospheric photochemical box model, Fortran 77).
+Experimental, AI-assisted Rust rewrite of PRATMO v6.0 (Prather stratospheric
+photochemical box model, Fortran 77), with additional experimental iodine
+chemistry. The rewrite and iodine extension have not been scientifically
+validated. The comparisons below measure implementation agreement with selected
+Fortran fixtures; they do not establish scientific validity.
 
 ## Where we are
 
@@ -15,7 +19,7 @@ command and measurements.
 
 ---
 
-## Validation summary (original Fortran, 60°N day 75, 25 boxes, 40 days)
+## Fortran comparison summary (60°N day 75, 25 boxes, 40 days)
 
 | Quantity | Status | Notes |
 |---|---|---|
@@ -42,7 +46,7 @@ This compiles gfortran in a temporary normalized input tree, compares CTM
 `boxout.dat`, DIURN/TPATH `fort07`–`fort09`, and checks exact `RADCOUNT`. The
 default and parity Rust test matrices are also green. The remaining open gaps
 below are unsupported or broader-than-fixture Fortran entry paths, not failures
-of the validated CTM/DIURN parity gate.
+of the CTM/DIURN implementation-comparison gate.
 
 ---
 
@@ -101,29 +105,31 @@ of the validated CTM/DIURN parity gate.
 
 ## Test coverage
 
-73 tests pass in the default configuration; 5 policy-specific short-lived
-assertions are ignored in the normal build. The `fortran-parity` feature has a
-separate green policy/input configuration with 53 active tests (44 unit tests
-plus 9 feature-policy tests).
+90 Rust tests pass in the default configuration; 5 policy-specific short-lived
+assertions are ignored in the normal build. The `fortran-parity` all-features
+configuration has 64 active Rust tests (55 unit tests plus 9 feature-policy
+tests). The Python binding suite adds 36 passing integration tests.
 
 | Suite | Count | What it covers |
 |---|---|---|
 | `tests/ctm_integration.rs` | 11 | 6 active CTM regressions + 5 policy-specific ignored comparisons |
 | `tests/custom_diurn.rs` | 4 | Public custom-atmosphere DIURN API |
 | `tests/fortran_parity_feature.rs` | 8 normal / 9 parity | Original 40-species input, ODF parsing, policy switches, public DIURN smoke, representative latitude/season matrix, and end-to-end parity CTM smoke coverage |
-| `tests/iodine_chemistry.rs` | 9 | Iodine chemistry and heterogeneous recycling |
-| `reader::tests` | 21 | `parse_e_field`, `parse_fixed_i32s`, `parse_fixed_f64s_fw`, `hystat` (logp + geometric), `setday` (ntim, weights, time-grid mirror, polar night, nday modes) |
+| `tests/iodine_chemistry.rs` | 13 | Iodine chemistry, photolysis, convergence, and heterogeneous recycling |
+| `chemistry::iodine_tests` | 7 | Reaction stoichiometry, atom conservation, analytic Jacobian, and evaluated rate points |
+| `reader::tests` | 23 | `parse_e_field`, `parse_fixed_i32s`, `parse_fixed_f64s_fw`, `hystat` (logp + geometric), `setday` (ntim, weights, time-grid mirror, polar night, nday modes) |
 | `ctm::tests` | 8 | `interp2` (corners, midpoint, linear, uniform), strict boxin integer counts, `read_f8_4`, `read_f7_1` |
 | `output::tests` | 9 | `hunt` (interior, boundary, below/above range, hint, JDDO array), `fmt_e10p3` |
-| `solver::tests` | 2 | machine-precision convergence floor and cancellation guard |
+| `solver::tests` | 4 | machine-precision convergence floor, cancellation guard, and iodine-family scaling |
 | `tracers::tests` | 2 | Cly/CH3Cl fit boundaries and out-of-range sentinels |
-| `api::tests` | 2 | Explicit rejection of DERIVS and PZSTD modes |
+| `api::tests` | 6 | Configuration validation, cyclic HHMM lookup, J-value mapping, and rejection of DERIVS/PZSTD |
+| `tests/test_pratmo.py` | 36 | Python configuration/output objects, discoverable names, NumPy profiles/grids, and CTM/DIURN runs |
 
 ---
 
 ## Open gaps
 
-### 1. DIURN mode validation (nd216 = 0) — validated in parity mode
+### 1. DIURN mode comparison (nd216 = 0) — matched in parity mode
 
 DIURN mode has been compared against the compiled Fortran reference (equatorial
 30°N May, 25 boxes at levels 1–30). The parity build now matches the complete
@@ -142,7 +148,7 @@ The setup and output repairs include:
   fixed fixed-width E-field blank handling in `fort02.x`, and emitted the
   `LEND` final mixing-ratio snapshot.
 
-**Validation results** (equatorial May, 25 boxes levels 1–30, parity feature):
+**Comparison results** (equatorial May, 25 boxes levels 1–30, parity feature):
 - **fort07.x**: DIURN time series and metadata match to printed precision,
   with one last-digit twilight roundoff.
 - **fort08.x / fort09.x**: all segment/day/box species and rate rows match.

@@ -9,6 +9,9 @@ import numpy as np
 import pytest
 
 from pratmo import (
+    IMPLICIT_SPECIES_NAMES,
+    JVALUE_NAMES,
+    LONG_LIVED_NAMES,
     BoxSnapshot,
     CtmBoxSpec,
     CtmConfig,
@@ -68,10 +71,22 @@ def test_ctm_box_index(ctm_out_1box):
 
 def test_ctm_multi_box(ctm_out_4box):
     out = ctm_out_4box
+    assert len(out) == 4
     assert len(out.boxes) == 4
     # Altitude should increase with box index (lower level → lower altitude)
     alts = [b.altitude_km for b in out.boxes]
     assert all(a > 0 for a in alts)
+
+
+def test_ctm_coordinate_arrays(ctm_out_4box):
+    assert ctm_out_4box.altitude_km.shape == (4,)
+    assert ctm_out_4box.pressure_mb.shape == (4,)
+    assert ctm_out_4box.temperature_k.shape == (4,)
+    assert ctm_out_4box.air_density_cm3.shape == (4,)
+    assert np.allclose(
+        ctm_out_4box.altitude_km,
+        [box.altitude_km for box in ctm_out_4box.boxes],
+    )
 
 
 # ── Species profile (1-D numpy arrays from CTM) ────────────────────────────────
@@ -90,18 +105,26 @@ def test_species_profile_oh(ctm_out_4box):
     assert len(oh) == 4
 
 
+def test_field_names_are_case_insensitive(ctm_out_4box):
+    assert np.array_equal(
+        ctm_out_4box.species_profile(" O3 "),
+        ctm_out_4box.species_profile("o3"),
+    )
+    assert np.array_equal(
+        ctm_out_4box.jvalue_profile("NO2"),
+        ctm_out_4box.jvalue_profile("no2"),
+    )
+
+
 def test_species_profile_all_names(ctm_out_4box):
     """Verify every valid implicit species name can be queried."""
-    valid = [
-        "no", "no2", "no3", "n2o5", "hno3", "h", "oh", "ho2", "h2o2",
-        "o", "o3", "bro", "br", "hbr", "hno2", "hcl", "cl", "cl2", "clo",
-        "clono2", "hno4", "hocl", "brono2", "hobr", "h2co", "ch3o2",
-        "ch3o2h", "oclo", "cl2o2", "brcl",
-    ]
-    assert len(valid) == 30
-    for name in valid:
+    assert len(IMPLICIT_SPECIES_NAMES) == 40
+    for name in IMPLICIT_SPECIES_NAMES:
         arr = ctm_out_4box.species_profile(name)
         assert isinstance(arr, np.ndarray), f"species '{name}' did not return ndarray"
+        assert arr[0] == pytest.approx(
+            getattr(ctm_out_4box.boxes[0].implicit, name)
+        ), f"species '{name}' returned the wrong field"
 
 
 def test_species_profile_invalid(ctm_out_1box):
@@ -119,23 +142,33 @@ def test_jvalue_profile_shape(ctm_out_4box):
 
 def test_jvalue_profile_all_names(ctm_out_4box):
     """Verify every valid J-value name can be queried."""
-    valid = [
-        "no", "o2", "o3", "o3_o1d", "h2co_a", "h2co_b", "h2o2", "rooh",
-        "no2", "no3_x", "no3_l", "n2o5", "hno2", "hno3", "hno4", "clono2",
-        "cl2", "hocl", "oclo", "cl2o2", "clo", "bro", "brono2", "hobr",
-        "n2o", "cfc11", "cfc12", "cfc113", "cfc114", "cfc115", "ccl4",
-        "ch3cl", "ch3ccl3", "ch3br", "h1211", "h1301", "h2402", "hcfc22",
-        "hcfc123", "hcfc141b", "chbr3", "ch3i", "cf3i", "ocs",
-    ]
-    assert len(valid) == 44
-    for name in valid:
+    assert len(JVALUE_NAMES) == 52
+    for name in JVALUE_NAMES:
         arr = ctm_out_4box.jvalue_profile(name)
         assert isinstance(arr, np.ndarray), f"J-value '{name}' did not return ndarray"
+        assert arr[0] == pytest.approx(
+            getattr(ctm_out_4box.boxes[0].jvalues, name)
+        ), f"J-value '{name}' returned the wrong field"
 
 
 def test_jvalue_profile_invalid(ctm_out_1box):
     with pytest.raises(ValueError, match="Unknown"):
         ctm_out_1box.jvalue_profile("not_a_jvalue")
+
+
+def test_long_lived_profile_all_names(ctm_out_4box):
+    assert len(LONG_LIVED_NAMES) == 19
+    for name in LONG_LIVED_NAMES:
+        profile = ctm_out_4box.long_lived_profile(name)
+        assert profile.shape == (4,)
+        assert profile[0] == pytest.approx(
+            getattr(ctm_out_4box.boxes[0].long_lived, name)
+        )
+
+
+def test_long_lived_profile_invalid(ctm_out_1box):
+    with pytest.raises(ValueError, match="Unknown long-lived species"):
+        ctm_out_1box.long_lived_profile("not_a_family")
 
 
 # ── BoxSnapshot fields ─────────────────────────────────────────────────────────
@@ -161,25 +194,24 @@ def test_box_snapshot_jvalues(ctm_out_1box):
 # ── to_dict methods ────────────────────────────────────────────────────────────
 
 def test_implicit_species_to_dict(ctm_out_1box):
-    d = ctm_out_1box.boxes[0].implicit.to_dict()
-    assert len(d) == 30
-    assert "o3" in d
-    assert "oh" in d
-    assert all(isinstance(v, float) for v in d.values())
+    implicit = ctm_out_1box.boxes[0].implicit
+    d = implicit.to_dict()
+    assert set(d) == set(IMPLICIT_SPECIES_NAMES)
+    for name in IMPLICIT_SPECIES_NAMES:
+        assert d[name] == getattr(implicit, name), f"wrong to_dict value for {name}"
 
 
 def test_jvalues_to_dict(ctm_out_1box):
-    d = ctm_out_1box.boxes[0].jvalues.to_dict()
-    assert len(d) == 44
-    assert "no2" in d
-    assert "o3_o1d" in d
+    jvalues = ctm_out_1box.boxes[0].jvalues
+    d = jvalues.to_dict()
+    assert set(d) == set(JVALUE_NAMES)
+    for name in JVALUE_NAMES:
+        assert d[name] == getattr(jvalues, name), f"wrong to_dict value for {name}"
 
 
 def test_long_lived_to_dict(ctm_out_1box):
     d = ctm_out_1box.boxes[0].long_lived.to_dict()
-    assert len(d) == 18
-    assert "o3" in d
-    assert "ch4" in d
+    assert set(d) == set(LONG_LIVED_NAMES)
 
 
 # ── LongLivedMixingRatios constructor and setters ─────────────────────────────
@@ -209,16 +241,23 @@ def test_long_lived_setters():
 # ── DiurnBoxSpec / CtmBoxSpec constructors ────────────────────────────────────
 
 def test_diurn_box_spec():
-    b = DiurnBoxSpec(altitude_level=25, albedo=0.1, temp_offset_k=5.0)
+    b = DiurnBoxSpec(
+        altitude_level=25,
+        aerosol_surface_area_um2_cm3=0.1,
+        sea_salt_surface_area_um2_cm3=0.02,
+        temp_offset_k=5.0,
+    )
     assert b.altitude_level == 25
-    assert b.albedo == pytest.approx(0.1)
+    assert b.aerosol_surface_area_um2_cm3 == pytest.approx(0.1)
+    assert b.sea_salt_surface_area_um2_cm3 == pytest.approx(0.02)
     assert b.temp_offset_k == pytest.approx(5.0)
 
 
 def test_ctm_box_spec_defaults():
     b = CtmBoxSpec(altitude_level=10)
     assert b.altitude_level == 10
-    assert b.albedo == 0.0
+    assert b.aerosol_surface_area_um2_cm3 == 0.0
+    assert b.sea_salt_surface_area_um2_cm3 == 0.0
     assert b.temp_offset_k == 0.0
 
 
@@ -255,6 +294,12 @@ def test_diagnostics(ctm_out_1box):
     diag = ctm_out_1box.diagnostics
     assert isinstance(diag.raxloop, float)
     assert isinstance(diag.radcount, float)
+    assert isinstance(diag.newraf_nonconvergence_count, int)
+    assert isinstance(diag.rafday_nonconvergence_count, int)
+    assert isinstance(diag.rafday_max_final_relative_correction, float)
+    assert isinstance(diag.rafday_max_correction_iterations, int)
+    assert diag.rafday_max_final_relative_correction >= 0.0
+    assert diag.rafday_max_correction_iterations >= 0
 
 
 # ── DIURN runs ───────────────────────────────────────────────────────────────
@@ -285,8 +330,24 @@ def test_diurn_time_series(model):
     )
     out = model.run_diurn(cfg)
     ts = out.time_series[0]
+    assert len(out) == 1
+    assert len(ts) == 34
     assert len(ts.steps) == 34   # standard 24-hour DIURN grid
     assert all(isinstance(step.time_hhmm, int) for step in ts.steps)
+    elapsed = [step.elapsed_seconds for step in ts.steps]
+    assert elapsed[0] == 0.0
+    assert elapsed[-1] == pytest.approx(24.0 * 3600.0)
+    assert all(a < b for a, b in zip(elapsed, elapsed[1:]))
+    assert ts.steps[0].time_hhmm == ts.steps[-1].time_hhmm == 1200
+    assert np.array_equal(out.elapsed_seconds, elapsed)
+    assert np.array_equal(out.time_hhmm, [step.time_hhmm for step in ts.steps])
+    assert out.altitude_km.shape == (1,)
+    assert out.pressure_mb.shape == (1,)
+    assert out.temperature_k.shape == (1,)
+    assert out.air_density_cm3.shape == (1,)
+    assert out.species_profile("o3").shape == (1,)
+    assert out.long_lived_profile("noy").shape == (1,)
+    assert out.jvalue_profile("no2").shape == (1,)
 
 
 def test_diurn_species_grid(model):
@@ -307,3 +368,23 @@ def test_diurn_species_grid(model):
 
 def test_pratmo_model_repr(model):
     assert repr(model) == "PratmoModel()"
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        (CtmConfig(), "at least one box"),
+        (
+            CtmConfig(boxes=[CtmBoxSpec(altitude_level=42)]),
+            "altitude_level",
+        ),
+        (
+            DiurnConfig(boxes=[DiurnBoxSpec(altitude_level=20)], julian_day=0),
+            "julian_day",
+        ),
+    ],
+)
+def test_invalid_configs_raise_value_error(model, config, message):
+    run = model.run_ctm if isinstance(config, CtmConfig) else model.run_diurn
+    with pytest.raises(ValueError, match=message):
+        run(config)

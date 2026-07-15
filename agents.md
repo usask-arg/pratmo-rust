@@ -4,7 +4,7 @@
 
 Rewrite PRATMO v6.0 (Prather stratospheric photochemical box model) from Fortran 77 to Rust as a faithful 1-to-1 port. Preserve subroutine boundaries, original fixed-format input file formats, and numerical results. The Rust binary must produce output files (`boxout.dat`, `fort07.x`, etc.) that match the Fortran reference to ≥4 significant figures on long-lived species and ~1% on J-values.
 
-The model computes stratospheric photochemistry for a set of altitude boxes over N days, tracking 30 implicit species (NO, OH, O3, etc.) and 18 long-lived families (NOy, N2O, CH4, …) under a full diurnal cycle of UV photolysis.
+The model computes stratospheric photochemistry for a set of altitude boxes over N days, tracking 40 implicit species (NO, OH, O3, iodine oxides, etc.) and 19 long-lived families (NOy, N2O, CH4, Iy, …) under a full diurnal cycle of UV photolysis.
 
 ---
 
@@ -27,7 +27,7 @@ pratmo-core/src/   — Rust library (all physics)
   constants.rs     — NB, NL, NQ, NJVAL, etc.
 pratmo-cli/src/main.rs — CLI entry point
 fortran/           — original Fortran 77 source (reference)
-STATUS.md          — detailed module map, validation results, known gaps
+STATUS.md          — detailed module map, comparison results, known gaps
 ```
 
 ---
@@ -147,9 +147,12 @@ The binary reads from the current directory. Outputs go to `boxout.dat` (path fr
 
 ---
 
-## Validation state (2026-05-20)
+## Fortran comparison state (2026-05-20)
 
-### CTM mode — fully validated (60°N, March 16, 25 boxes, 40 days)
+These are implementation parity measurements, not scientific validation of the
+experimental Rust rewrite or its iodine extension.
+
+### CTM mode — matched comparison fixture (60°N, March 16, 25 boxes, 40 days)
 
 | Quantity | Agreement | Notes |
 |---|---|---|
@@ -160,7 +163,7 @@ The binary reads from the current directory. Outputs go to `boxout.dat` (path fr
 | HNO3 | 4 sig figs | resolved by jcomp fix |
 | N2O5 | 4 sig figs | resolved by jcomp fix |
 
-### DIURN mode — validated in parity mode (equatorial May, 25 boxes levels 1–30)
+### DIURN mode — matched in parity mode (equatorial May, 25 boxes levels 1–30)
 
 | Output | Agreement | Notes |
 |---|---|---|

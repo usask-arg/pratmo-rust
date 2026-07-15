@@ -10,7 +10,6 @@ use crate::{
         ch4_vs_n2o_michelsen_ml_2003, cly_vs_n2o_solve,
     },
 };
-use anyhow::Result;
 
 /// Initialise species mixing ratios for box `ib` based on N2O, O3, and family
 /// mixing ratio empirical relationships.
@@ -129,7 +128,7 @@ pub fn ctinit(s: &mut ModelState, ib: usize, densbx: f64, lat: i32, _mon: i32) {
         s.diono2[ib] = 0.100 * xxxiody; // IONO2
         s.dhi[ib] = 0.050 * xxxiody; // HI
         s.doio[ib] = seed;
-        s.di2[ib] = (s.fi2[ib] * densbx).max(seed);
+        s.di2[ib] = seed;
         s.di2o2[ib] = seed;
         s.di2o3[ib] = seed;
         s.di2o4[ib] = seed;

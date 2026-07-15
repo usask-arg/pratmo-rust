@@ -127,7 +127,8 @@ fn public_diurn_smoke_respects_photolysis_policy() {
         integration_days: 1,
         boxes: vec![DiurnBoxSpec {
             altitude_level: 12,
-            albedo: 0.0,
+            aerosol_surface_area_um2_cm3: 0.0,
+            sea_salt_surface_area_um2_cm3: 0.0,
             temp_offset_k: 0.0,
         }],
         iodine: false,
@@ -138,6 +139,14 @@ fn public_diurn_smoke_respects_photolysis_policy() {
         .expect("public DIURN smoke run failed");
     assert_eq!(output.boxes.len(), 1);
     assert!(!output.time_series[0].steps.is_empty());
+    let steps = &output.time_series[0].steps;
+    assert_eq!(steps.first().unwrap().elapsed_seconds, 0.0);
+    assert!((steps.last().unwrap().elapsed_seconds - 86_400.0).abs() < 1.0);
+    assert!(steps
+        .windows(2)
+        .all(|pair| pair[0].elapsed_seconds < pair[1].elapsed_seconds));
+    assert_eq!(steps.first().unwrap().time_hhmm, 1200);
+    assert_eq!(steps.last().unwrap().time_hhmm, 1200);
 
     #[cfg(feature = "fortran-parity")]
     assert_eq!(output.boxes[0].jvalues.o3_o1d, 0.0);
@@ -167,7 +176,8 @@ fn representative_latitude_season_matrix_stays_finite() {
             integration_days: 1,
             boxes: vec![DiurnBoxSpec {
                 altitude_level: 20,
-                albedo: 0.0,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,
             }],
             iodine: false,

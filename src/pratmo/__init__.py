@@ -18,6 +18,9 @@ Typical usage::
 """
 
 from pratmo._pratmo import (
+    IMPLICIT_SPECIES_NAMES,
+    JVALUE_NAMES,
+    LONG_LIVED_NAMES,
     BoxSnapshot,
     CtmBoxSpec,
     CtmConfig,
@@ -38,6 +41,9 @@ from pratmo._pratmo import (
 )
 
 __all__ = [
+    "IMPLICIT_SPECIES_NAMES",
+    "LONG_LIVED_NAMES",
+    "JVALUE_NAMES",
     "PratmoModel",
     "DiurnConfig",
     "CtmConfig",

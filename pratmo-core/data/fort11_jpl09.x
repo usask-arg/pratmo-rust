@@ -1,5 +1,5 @@
 (unit=11): JPL00   RATES         (rxns ver 6.0b)   (mjp 3/00)
-RATES-----  200  242 RATE COEFFs
+RATES-----  200  264 RATE COEFFs
 RATE/    1        0.               jO2+*=O+O
 RATE/    2        0.               jO3+*=O(1D)+O2
 RATE/    3        0.               jO3+*=O(ALL)+O2
@@ -251,20 +251,40 @@ RATE/2 226  7.70E-31       5.0     IO+NO2+M=IONO2     --JPL19--(k0)
        226  1.60E-11       0.0     IONO2              (kinf)
        226    -.5108        0.     IONO2 EXP=LN(0.6)
 RATE/  227  1.50E-11     1090.     I+HO2=HI+O2        --JPL19--
-RATE/  228  3.00E-11     1120.     HI+OH=I+H2O        --JPL19--
-RATE/  229  5.10E-12     -280.     IO+CLO=CL+I+O2     --JPL19--
-RATE/  230  1.50E-11        0.     IO+BRO=BR+I+O2     --JPL19--
+RATE/  228  1.60E-11     -440.     HI+OH=I+H2O        --SaizL14--
+RATE/  229  2.59E-12     -280.     IO+CLO=I+OCLO       --SaizL14--
+RATE/  230  3.00E-12     -510.     IO+BRO=BR+I+O2      --SaizL14--
 RATE/  231        0.        0.     jIO+*=I+O
 RATE/  232        0.        0.     jHOI+*=I+OH
-RATE/  233        0.        0.     jIONO2+*=I+NO2
+RATE/  233        0.        0.     jIONO2+*=I+NO3
 RATE/  234        0.        0.     CH3I source disabled
-RATE/  235  1.89E-11     -180.     IO+IO=OIO+I          --IUPAC08,alpha=0.35--
-RATE/  236  1.89E-11     -180.     IO+IO=I2+O2          --IUPAC08,alpha=0.35--
-RATE/2 237  1.62E-31       5.0     IO+IO+M=I2O2         --IUPAC08,alpha=0.30--(k0)
-       237  1.00E-10       0.0     I2O2                 (kinf, approximate)
-       237    -.5108        0.     I2O2 EXP=LN(0.6)
+RATE/  235        0.        0.     IO+IO=OIO+I          --SaizL14,p-dependent--
+RATE/  236        0.        0.     obsolete IO+IO=I2 branch
+RATE/  237        0.        0.     IO+IO=I2O2           --SaizL14,p-dependent--
 RATE/  238  6.70E-12        0.     OIO+NO=IO+NO2        --GomezM09--
-RATE/  239  1.00E-10        0.     OIO+OH=HOI+O2        --estimate--
-RATE/  240  5.00E-11        0.     IO+OIO=I2O3          --SaizL14--
-RATE/  241  2.00E-11        0.     OIO+OIO=I2O4         --SaizL14--
+RATE/  239        0.        0.     OIO+OH estimate removed
+RATE/  240        0.        0.     IO+OIO=I2O3          --SaizL14,p-dependent--
+RATE/  241        0.        0.     OIO+OIO=I2O4         --SaizL14,p-dependent--
 RATE/  242  2.10E-10        0.     I2+OH=HOI+I          --IUPAC13--
+RATE/  243        0.        0.     I2O2 particulate sink disabled
+RATE/  244        0.        0.     jOIO=I+O2
+RATE/  245        0.        0.     jI2=2I
+RATE/  246        0.        0.     jI2O2=I+OIO
+RATE/  247        0.        0.     jI2O3=IO+OIO
+RATE/  248        0.        0.     jI2O4=2OIO
+RATE/  249        0.        0.     I2O3 particulate sink disabled
+RATE/  250        0.        0.     I2O4 particulate sink disabled
+RATE/  251  3.60E-16        0.     IO+O3=OIO+O2         --SaizL14--
+RATE/  252  1.00E-10        0.     IO+OH=I+HO2          --SaizL14--
+RATE/  253  1.25E-10        0.     I2+O=IO+I            --SaizL14--
+RATE/  254  1.00E-10        0.     I+NO3=IO+NO2         --SaizL14--
+RATE/  255  9.00E-12        0.     IO+NO3=OIO+NO2       --SaizL14--
+RATE/  256  1.50E-12        0.     I2+NO3=I+IONO2       --SaizL14--
+RATE/  257  9.10E-11      146.     I+IONO2=I2+NO3       --SaizL14--
+RATE/  258  2.00E-13        0.     HOI+OH=IO+H2O        --SaizL14--
+RATE/  259  1.30E-12     1830.     HI+NO3=I+HNO3        --SaizL14--
+RATE/  260        0.        0.     I2O2=OIO+I           --SaizL14,p-dependent--
+RATE/  261        0.        0.     I2O2=2IO             --SaizL14,p-dependent--
+RATE/  262        0.        0.     I2O4=2OIO            --SaizL14,p-dependent--
+RATE/  263  2.12E-12     -280.     IO+CLO=I+CL/IClproxy --SaizL14--
+RATE/  264  1.20E-11     -510.     IO+BRO=BR+OIO        --SaizL14--

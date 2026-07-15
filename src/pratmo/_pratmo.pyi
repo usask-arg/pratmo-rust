@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Final, Optional
 
 import numpy as np
 
+IMPLICIT_SPECIES_NAMES: Final[tuple[str, ...]]
+"""Names accepted by implicit-species profile and grid methods."""
+
+LONG_LIVED_NAMES: Final[tuple[str, ...]]
+"""Names accepted by long-lived mixing-ratio profile methods."""
+
+JVALUE_NAMES: Final[tuple[str, ...]]
+"""Names accepted by J-value profile and grid methods."""
+
 class ImplicitSpecies:
-    """Number densities (cm⁻³) for the 35 implicit Newton-Raphson species."""
+    """Number densities (cm⁻³) for the 40 implicit Newton-Raphson species."""
 
     @property
     def no(self) -> float: ...
@@ -77,12 +86,22 @@ class ImplicitSpecies:
     def iono2(self) -> float: ...
     @property
     def hi(self) -> float: ...
+    @property
+    def oio(self) -> float: ...
+    @property
+    def i2(self) -> float: ...
+    @property
+    def i2o2(self) -> float: ...
+    @property
+    def i2o3(self) -> float: ...
+    @property
+    def i2o4(self) -> float: ...
     def to_dict(self) -> dict[str, float]:
-        """Return all 35 species as a ``{name: value}`` dict (cm⁻³)."""
+        """Return all 40 species as a ``{name: value}`` dict (cm⁻³)."""
         ...
 
 class LongLivedMixingRatios:
-    """Dimensionless mixing ratios for the 18 long-lived species."""
+    """Dimensionless mixing ratios for the 19 long-lived species/families."""
 
     def __init__(
         self,
@@ -131,7 +150,7 @@ class LongLivedMixingRatios:
         ...
 
 class JValues:
-    """Photolysis rates (s⁻¹) for all 47 J-value channels."""
+    """Photolysis rates (s⁻¹) for all 52 J-value channels."""
 
     @property
     def no(self) -> float: ...
@@ -227,8 +246,18 @@ class JValues:
     def hoi(self) -> float: ...
     @property
     def iono2(self) -> float: ...
+    @property
+    def oio(self) -> float: ...
+    @property
+    def i2(self) -> float: ...
+    @property
+    def i2o2(self) -> float: ...
+    @property
+    def i2o3(self) -> float: ...
+    @property
+    def i2o4(self) -> float: ...
     def to_dict(self) -> dict[str, float]:
-        """Return all 47 J-values as a ``{name: value}`` dict (s⁻¹)."""
+        """Return all 52 J-values as a ``{name: value}`` dict (s⁻¹)."""
         ...
 
 class Diagnostics:
@@ -238,6 +267,14 @@ class Diagnostics:
     def raxloop(self) -> float: ...
     @property
     def radcount(self) -> float: ...
+    @property
+    def newraf_nonconvergence_count(self) -> int: ...
+    @property
+    def rafday_nonconvergence_count(self) -> int: ...
+    @property
+    def rafday_max_final_relative_correction(self) -> float: ...
+    @property
+    def rafday_max_correction_iterations(self) -> int: ...
 
 class BoxSnapshot:
     """Snapshot of a single box's state (daily mean or final converged value)."""
@@ -263,8 +300,12 @@ class DiurnTimeStep:
     """One time-step in a diurnal time series."""
 
     @property
+    def elapsed_seconds(self) -> float:
+        """Monotonic seconds since the noon start of the 24-hour orbit."""
+        ...
+    @property
     def time_hhmm(self) -> int:
-        """Time in HHMM integer format (e.g. 1430 = 14:30 UTC)."""
+        """Local clock label; both orbit endpoints are noon (1200)."""
         ...
     @property
     def implicit(self) -> ImplicitSpecies: ...
@@ -280,18 +321,21 @@ class DiurnBoxTimeSeries:
     def pressure_mb(self) -> float: ...
     @property
     def steps(self) -> list[DiurnTimeStep]: ...
+    def __len__(self) -> int: ...
 
 class DiurnBoxSpec:
     """Per-box configuration for a DIURN run."""
 
     altitude_level: int
     """1-based standard pressure level index (1 = surface, 41 = top)."""
-    albedo: float
+    aerosol_surface_area_um2_cm3: float
+    sea_salt_surface_area_um2_cm3: float
     temp_offset_k: float
     def __init__(
         self,
         altitude_level: int,
-        albedo: float = 0.0,
+        aerosol_surface_area_um2_cm3: float = 0.0,
+        sea_salt_surface_area_um2_cm3: float = 0.0,
         temp_offset_k: float = 0.0,
     ) -> None: ...
 
@@ -300,12 +344,14 @@ class CtmBoxSpec:
 
     altitude_level: int
     """1-based standard pressure level index (1 = surface, 41 = top)."""
-    albedo: float
+    aerosol_surface_area_um2_cm3: float
+    sea_salt_surface_area_um2_cm3: float
     temp_offset_k: float
     def __init__(
         self,
         altitude_level: int,
-        albedo: float = 0.0,
+        aerosol_surface_area_um2_cm3: float = 0.0,
+        sea_salt_surface_area_um2_cm3: float = 0.0,
         temp_offset_k: float = 0.0,
     ) -> None: ...
 
@@ -362,6 +408,7 @@ class CtmConfig:
     integration_days: int
     boxes: list[CtmBoxSpec]
     bromine: bool
+    iodine: bool
     solar_flux_scale: float
     def __init__(
         self,
@@ -371,6 +418,7 @@ class CtmConfig:
         integration_days: int = 40,
         boxes: list[CtmBoxSpec] = [],
         bromine: bool = False,
+        iodine: bool = True,
         solar_flux_scale: float = 1.0,
     ) -> None: ...
 
@@ -387,15 +435,46 @@ class DiurnOutput:
         ...
     @property
     def diagnostics(self) -> Diagnostics: ...
+    @property
+    def altitude_km(self) -> np.ndarray:
+        """Box altitudes in km, with shape ``(n_boxes,)``."""
+        ...
+    @property
+    def pressure_mb(self) -> np.ndarray:
+        """Box pressures in mb, with shape ``(n_boxes,)``."""
+        ...
+    @property
+    def temperature_k(self) -> np.ndarray:
+        """Box temperatures in K, with shape ``(n_boxes,)``."""
+        ...
+    @property
+    def air_density_cm3(self) -> np.ndarray:
+        """Box air number densities in cm⁻³, with shape ``(n_boxes,)``."""
+        ...
+    @property
+    def elapsed_seconds(self) -> np.ndarray:
+        """Shared monotonic DIURN coordinate, with shape ``(n_timesteps,)``."""
+        ...
+    @property
+    def time_hhmm(self) -> np.ndarray:
+        """Shared cyclic local-time labels, with shape ``(n_timesteps,)``."""
+        ...
+    def species_profile(self, species_name: str) -> np.ndarray:
+        """Return a daily-mean implicit-species profile with shape ``(n_boxes,)``."""
+        ...
+    def long_lived_profile(self, species_name: str) -> np.ndarray:
+        """Return a daily-mean mixing-ratio profile with shape ``(n_boxes,)``."""
+        ...
+    def jvalue_profile(self, jvalue_name: str) -> np.ndarray:
+        """Return a daily-mean J-value profile with shape ``(n_boxes,)``."""
+        ...
     def species_grid(self, species_name: str) -> np.ndarray:
         """Return an implicit species as a 2-D array of shape ``(n_boxes, n_timesteps)``.
 
         Parameters
         ----------
         species_name:
-            One of: no, no2, no3, n2o5, hno3, h, oh, ho2, h2o2, o, o3, bro,
-            br, hbr, hno2, hcl, cl, cl2, clo, clono2, hno4, hocl, brono2,
-            hobr, h2co, ch3o2, ch3o2h, oclo, cl2o2, brcl
+            A name from :data:`pratmo.IMPLICIT_SPECIES_NAMES` (case-insensitive).
         """
         ...
     def jvalue_grid(self, jvalue_name: str) -> np.ndarray:
@@ -404,13 +483,11 @@ class DiurnOutput:
         Parameters
         ----------
         jvalue_name:
-            One of: no, o2, o3, o3_o1d, h2co_a, h2co_b, h2o2, rooh, no2,
-            no3_x, no3_l, n2o5, hno2, hno3, hno4, clono2, cl2, hocl, oclo,
-            cl2o2, clo, bro, brono2, hobr, n2o, cfc11, cfc12, cfc113, cfc114,
-            cfc115, ccl4, ch3cl, ch3ccl3, ch3br, h1211, h1301, h2402, hcfc22,
-            hcfc123, hcfc141b, chbr3, ch3i, cf3i, ocs
+            A name from :data:`pratmo.JVALUE_NAMES` (case-insensitive). Values
+            are daily means repeated across the time dimension.
         """
         ...
+    def __len__(self) -> int: ...
 
 class CtmOutput:
     """Output from a CTM climatological run."""
@@ -421,12 +498,42 @@ class CtmOutput:
         ...
     @property
     def diagnostics(self) -> Diagnostics: ...
+    @property
+    def altitude_km(self) -> np.ndarray:
+        """Box altitudes in km, with shape ``(n_boxes,)``."""
+        ...
+    @property
+    def pressure_mb(self) -> np.ndarray:
+        """Box pressures in mb, with shape ``(n_boxes,)``."""
+        ...
+    @property
+    def temperature_k(self) -> np.ndarray:
+        """Box temperatures in K, with shape ``(n_boxes,)``."""
+        ...
+    @property
+    def air_density_cm3(self) -> np.ndarray:
+        """Box air number densities in cm⁻³, with shape ``(n_boxes,)``."""
+        ...
     def species_profile(self, species_name: str) -> np.ndarray:
-        """Return an implicit species as a 1-D array of shape ``(n_boxes,)``."""
+        """Return an implicit species as a 1-D array of shape ``(n_boxes,)``.
+
+        Names are case-insensitive and listed in
+        :data:`pratmo.IMPLICIT_SPECIES_NAMES`.
+        """
+        ...
+    def long_lived_profile(self, species_name: str) -> np.ndarray:
+        """Return a mixing ratio as a 1-D array of shape ``(n_boxes,)``.
+
+        Names are case-insensitive and listed in :data:`pratmo.LONG_LIVED_NAMES`.
+        """
         ...
     def jvalue_profile(self, jvalue_name: str) -> np.ndarray:
-        """Return a J-value as a 1-D array of shape ``(n_boxes,)``."""
+        """Return a J-value as a 1-D array of shape ``(n_boxes,)``.
+
+        Names are case-insensitive and listed in :data:`pratmo.JVALUE_NAMES`.
+        """
         ...
+    def __len__(self) -> int: ...
 
 class No2ConstrainedDiurnConfig:
     """Iterative NOy scaling configuration for matching observed NO2."""

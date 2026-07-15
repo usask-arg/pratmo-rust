@@ -65,11 +65,13 @@ fn main() -> Result<()> {
     // Mode dispatch: mirrors batmo.f logic on ND216
     // Fortran: IF(LPRTJV) GOTO 1 → if LPRTJV true, skip to end (J-value print only mode)
     if !state.lprtjv {
-        if state.nd216 > 0 {
-            ctmlfq(&mut state)?;
-        } else if state.nd216 == 0 {
-            diurn(&mut state)?;
-            tpath(&mut state)?;
+        match state.nd216.cmp(&0) {
+            std::cmp::Ordering::Greater => ctmlfq(&mut state)?,
+            std::cmp::Ordering::Equal => {
+                diurn(&mut state)?;
+                tpath(&mut state)?;
+            }
+            std::cmp::Ordering::Less => unreachable!("DERIVS mode was rejected above"),
         }
     }
 

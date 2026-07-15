@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use crate::{
     chemistry::chems,
-    constants::{NDEN, NJH2O},
+    constants::{NDEN, NJH2O, NPPMEAN, PPMEAN_FAMILY_OFFSET, PPMEAN_RATE_OFFSET},
     jvalue::sol,
     output,
     reader::{hystat, setday},
@@ -153,7 +153,7 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
         let _iday = iday_idx;
         // Clear daily averages
         let nndxpq = s.ndxpp.len(); // NNDXPQ
-        for k in 0..50 + nndxpq {
+        for k in 0..NPPMEAN.min(NDEN + 20 + nndxpq) {
             s.ppmean[[k, ib]] = 0.0;
         }
         for i in 0..490usize {
@@ -246,7 +246,7 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
             // O3 production/loss tracking
             s.xpo3 += weight * s.r[135]; // R(136) 0-based → r[135]
             s.xlo3 += weight * s.rlf[0];
-            for j in 0..30usize {
+            for j in 0..NDEN {
                 s.pmean[460 + j] += weight * (s.rp[j] - s.rl[j]);
             }
 
@@ -266,16 +266,16 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
         splace(s, &xn_final, ib);
 
         // Store PPMEAN for this box
-        for k in 0..30usize {
+        for k in 0..NDEN {
             s.ppmean[[k, ib]] = s.pmean[460 + k];
         }
         for k in 0..20usize {
-            s.ppmean[[30 + k, ib]] = s.pmean[430 + k];
+            s.ppmean[[PPMEAN_FAMILY_OFFSET + k, ib]] = s.pmean[430 + k];
         }
         for k in 0..nndxpq {
             let ndx = s.ndxpp[k];
             if ndx > 0 {
-                s.ppmean[[50 + k, ib]] = s.pmean[30 + ndx - 1];
+                s.ppmean[[PPMEAN_RATE_OFFSET + k, ib]] = s.pmean[30 + ndx - 1];
             }
         }
 
@@ -300,7 +300,7 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
             if s.nflo[j] <= 0 {
                 continue;
             }
-            let xadd = s.ppmean[[30 + j, ib]] * s.daysec / densty;
+            let xadd = s.ppmean[[PPMEAN_FAMILY_OFFSET + j, ib]] * s.daysec / densty;
             // FFFFFF(IB,J) += XADD → update long-lived mixing ratio j for box ib
             let old_val = s.fff_get(ib, j + 1);
             s.fff_set(ib, j + 1, old_val + xadd);
@@ -326,7 +326,7 @@ pub fn dstep(s: &mut ModelState, ipath: i32, ib: usize) -> Result<()> {
 
             // Helper: get xn_tmp by 1-based slot index
             let xn = |ni: usize| -> f64 {
-                if ni >= 1 && ni <= 30 {
+                if (1..=30).contains(&ni) {
                     xn_tmp[ni - 1]
                 } else {
                     0.0
@@ -518,6 +518,7 @@ fn newatm_from_record_inner(s: &mut ModelState, record: &str) -> Result<bool> {
     if xarea > 0.0 {
         for ib in 0..s.nbox {
             s.boxaa[ib] *= xarea;
+            s.boxss[ib] *= xarea;
         }
     }
     if xrain > 0.0 {
@@ -540,7 +541,7 @@ fn parse_e10(line: &str, off: usize) -> f64 {
     line.get(off..off + 10)
         .unwrap_or("          ")
         .trim()
-        .replace(|c: char| c == 'd' || c == 'D', "e")
+        .replace(['d', 'D'], "e")
         .parse::<f64>()
         .unwrap_or(0.0)
 }
@@ -549,7 +550,7 @@ fn parse_e10(line: &str, off: usize) -> f64 {
 fn load_atmosphere(s: &mut ModelState, label: &str, lines: &[String]) -> Result<()> {
     let nc = s.nc;
     let values_per_record = 46usize;
-    let data_lines = (values_per_record + 7) / 8;
+    let data_lines = values_per_record.div_ceil(8);
     let mut i = 1; // file title
     while i + data_lines < lines.len() {
         let hdr = &lines[i];
@@ -586,7 +587,7 @@ fn load_ozone_profile(s: &mut ModelState, label: &str, lines: &[String]) -> Resu
         .last()
         .and_then(|field| field.parse::<usize>().ok())
         .unwrap_or(32);
-    let data_lines = (ndddz + 7) / 8;
+    let data_lines = ndddz.div_ceil(8);
     let mut i = 2; // file title and PTS/PROFIL record
     while i + data_lines < lines.len() {
         let hdr = &lines[i];
@@ -626,7 +627,7 @@ fn fixed_e10_values(lines: &[String], start: usize, count: usize) -> Result<Vec<
             if !field.is_empty() {
                 values.push(
                     field
-                        .replace(|c: char| c == 'd' || c == 'D', "e")
+                        .replace(['d', 'D'], "e")
                         .parse::<f64>()
                         .map_err(|e| anyhow::anyhow!("invalid E10.3 value '{field}': {e}"))?,
                 );

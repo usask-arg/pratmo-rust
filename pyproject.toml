@@ -5,14 +5,18 @@ build-backend = "maturin"
 [project]
 name = "pratmo"
 version = "0.1.0"
-description = "Python bindings for the PRATMO stratospheric photochemical box model"
+description = "Experimental AI-assisted Rust rewrite of the PRATMO photochemical box model"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
-    "maturin>=1.13.3",
-    "netCDF4>=1.7",
     "numpy>=1.24",
-    "xarray>=2024.10",
 ]
+
+[project.urls]
+Documentation = "https://github.com/usask-arg/pratmo-rust/tree/main/docs"
+Repository = "https://github.com/usask-arg/pratmo-rust"
 
 [project.optional-dependencies]
 docs = [
@@ -20,6 +24,13 @@ docs = [
     "sphinx-autodoc-typehints>=2.0",
     "furo>=2024.1",
     "numpydoc>=1.7",
+]
+io = [
+    "netCDF4>=1.7",
+    "xarray>=2024.10",
+]
+plot = [
+    "matplotlib>=3.9",
 ]
 dev = [
     "netCDF4>=1.7",
@@ -38,6 +49,7 @@ features = ["pratmo-py/extension-module"]
 dev = [
     "furo>=2025.12.19",
     "ipykernel>=7.2.0",
+    "maturin>=1.8,<2.0",
     "myst-nb>=1.4.0",
     "netCDF4>=1.7",
     "numpydoc>=1.10.0",

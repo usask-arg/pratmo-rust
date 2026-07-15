@@ -7,6 +7,16 @@
    :members:
 ```
 
+## Discoverable field names
+
+```{eval-rst}
+.. autodata:: pratmo.IMPLICIT_SPECIES_NAMES
+
+.. autodata:: pratmo.LONG_LIVED_NAMES
+
+.. autodata:: pratmo.JVALUE_NAMES
+```
+
 ## Configuration
 
 ```{eval-rst}
@@ -22,7 +32,13 @@
 .. autoclass:: pratmo.CtmBoxSpec
    :members:
 
+.. autoclass:: pratmo.CustomAtmosphereProfile
+   :members:
+
 .. autoclass:: pratmo.LongLivedMixingRatios
+   :members:
+
+.. autoclass:: pratmo.No2ConstrainedDiurnConfig
    :members:
 ```
 
@@ -42,6 +58,9 @@
    :members:
 
 .. autoclass:: pratmo.DiurnTimeStep
+   :members:
+
+.. autoclass:: pratmo.No2ConstrainedDiurnOutput
    :members:
 ```
 

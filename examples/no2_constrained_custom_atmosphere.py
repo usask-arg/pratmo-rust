@@ -65,7 +65,7 @@ def main() -> None:
     result = model.run_diurn_no2_constrained(constrained)
 
     out = result.output
-    times_hhmm = np.array([step.time_hhmm for step in out.time_series[0].steps])
+    times_hhmm = out.time_hhmm
     no2 = out.species_grid("no2")
     bro = out.species_grid("bro")
     o3 = out.species_grid("o3")

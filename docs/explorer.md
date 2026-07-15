@@ -12,24 +12,20 @@ kernelspec:
 
 Select an altitude, activate a chemical-family preset, then click individual
 species in the legend to add or remove them. Grey bands mark nighttime (J = 0).
+The horizontal axis follows DIURN's continuous noon-to-noon integration; the
+clock labels therefore begin and end at 12:00.
 
 ```{code-cell} ipython3
 :tags: [hide-input]
 :execution_timeout: 600
 
-from pratmo import PratmoModel, DiurnConfig, DiurnBoxSpec
+from pratmo import IMPLICIT_SPECIES_NAMES, PratmoModel, DiurnConfig, DiurnBoxSpec
 import json
 from IPython.display import HTML
 
 # ── Species metadata ──────────────────────────────────────────────────────────
 
-ALL_SPECIES = [
-    "no", "no2", "no3", "n2o5", "hno3", "h", "oh", "ho2", "h2o2", "o",
-    "o3", "bro", "br", "hbr", "hno2", "hcl", "cl", "cl2", "clo", "clono2",
-    "hno4", "hocl", "brono2", "hobr", "h2co", "ch3o2", "ch3o2h", "oclo",
-    "cl2o2", "brcl",
-    "i", "io", "hoi", "iono2", "hi",
-]
+ALL_SPECIES = list(IMPLICIT_SPECIES_NAMES)
 
 LABELS = {
     "no": "NO", "no2": "NO₂", "no3": "NO₃", "n2o5": "N₂O₅",
@@ -43,6 +39,8 @@ LABELS = {
     "oclo": "OClO", "cl2o2": "Cl₂O₂", "brcl": "BrCl",
     # Iodine
     "i": "I", "io": "IO", "hoi": "HOI", "iono2": "IONO₂", "hi": "HI",
+    "oio": "OIO", "i2": "I₂", "i2o2": "I₂O₂", "i2o3": "I₂O₃",
+    "i2o4": "I₂O₄",
 }
 
 COLORS = {
@@ -64,6 +62,8 @@ COLORS = {
     # IOx — teals
     "i":     "#0077b6", "io":    "#00b4d8", "hoi":  "#48cae4",
     "iono2": "#023e8a", "hi":    "#90e0ef",
+    "oio":   "#0096c7", "i2":    "#006d77", "i2o2": "#83c5be",
+    "i2o3":  "#2a9d8f", "i2o4": "#264653",
 }
 
 PRESETS = {
@@ -71,7 +71,7 @@ PRESETS = {
     "HOx":      ["oh", "ho2", "h2o2", "h"],
     "ClOx":     ["cl", "clo", "cl2", "cl2o2", "hocl", "hcl", "clono2", "oclo"],
     "BrOx":     ["bro", "br", "hbr", "hobr", "brono2", "brcl"],
-    "IOx":      ["i", "io", "hoi", "iono2", "hi"],
+    "IOx":      ["i", "io", "hoi", "iono2", "hi", "oio", "i2", "i2o2", "i2o3", "i2o4"],
     "Ozone":    ["o", "o3"],
     "Organics": ["h2co", "ch3o2", "ch3o2h"],
 }
@@ -84,10 +84,7 @@ model = PratmoModel.with_defaults()
 ALT_LEVELS = [8, 12, 18, 22]   # ~14, ~22, ~34, ~42 km
 O3_SCALE_FACTOR = 1.0 # multiply initial box O3; lower this to test less ozone
 NOY_SCALE_FACTOR = 1.0 # multiply initial total NOy; lower this to reduce NO2/IONO2
-AEROSOL_AREA_SCALE_FACTOR = 1.0 # scales BOXAA aerosol area for heterogeneous chemistry
-
-# DiurnBoxSpec's "albedo" argument is currently wired to legacy PRATMO BOXAA,
-# the aerosol surface-area factor used by heterogeneous chemistry.
+AEROSOL_AREA_SCALE_FACTOR = 1.0 # scales generic aerosol area for heterogeneous chemistry
 AEROSOL_AREA_BY_LEVEL = {
     8: 1.0,
     12: 0.05,
@@ -101,7 +98,10 @@ for level in ALT_LEVELS:
     aerosol_area = AEROSOL_AREA_BY_LEVEL.get(level, 0.0) * AEROSOL_AREA_SCALE_FACTOR
     cfg = DiurnConfig(
         latitude_deg=0.0, julian_day=120, integration_days=20,
-        boxes=[DiurnBoxSpec(altitude_level=level, albedo=aerosol_area)],
+        boxes=[DiurnBoxSpec(
+            altitude_level=level,
+            aerosol_surface_area_um2_cm3=aerosol_area,
+        )],
         bromine=True
     )
     out = model.run_diurn(cfg)
@@ -112,7 +112,10 @@ for level in ALT_LEVELS:
         init.noy *= NOY_SCALE_FACTOR
         cfg = DiurnConfig(
             latitude_deg=0.0, julian_day=120, integration_days=20,
-            boxes=[DiurnBoxSpec(altitude_level=level, albedo=aerosol_area)],
+            boxes=[DiurnBoxSpec(
+                altitude_level=level,
+                aerosol_surface_area_um2_cm3=aerosol_area,
+            )],
             bromine=True,
             initial_mixing_ratios=[init],
         )
@@ -121,18 +124,19 @@ for level in ALT_LEVELS:
     ts  = out.time_series[0]
     snap = out.boxes[0]
 
-    # Skip steps[0] (noon boundary condition — previous day's 11:02 state
-    # relabelled as noon).  Sort remaining 33 integrated steps chronologically
-    # and use decimal hours as x so the ~2 h noon gap is proportionally wide.
-    steps_sorted = sorted(ts.steps[1:], key=lambda s: s.time_hhmm)
-    hhmm  = [s.time_hhmm for s in steps_sorted]
-    hours = [h // 100 + (h % 100) / 60.0 for h in hhmm]
-    sp_data = {sp: [getattr(step.implicit, sp) for step in steps_sorted]
+    # DIURN is integrated continuously from noon to the following noon. Keep
+    # that model order: sorting the cyclic HHMM labels splices the two distinct
+    # noon boundary states together and creates an artificial discontinuity.
+    steps_ordered = ts.steps
+    hours = [step.elapsed_seconds / 3600.0 for step in steps_ordered]
+    assert hours[0] == 0.0 and abs(hours[-1] - 24.0) < 1e-12
+    assert all(a < b for a, b in zip(hours, hours[1:]))
+    sp_data = {sp: [getattr(step.implicit, sp) for step in steps_ordered]
                for sp in ALL_SPECIES}
 
-    # Fixed ticks every 2 h over the full 0–24 h window
+    # Fixed ticks every 2 h; labels show clock time for the noon-to-noon orbit.
     tick_vals = list(range(0, 25, 2))
-    tick_text = [f"{h:02d}:00" for h in tick_vals]
+    tick_text = [f"{(12 + h) % 24:02d}:00" for h in tick_vals]
 
     # Nighttime spans in decimal hours: contiguous runs where OH < 0.1 % of daily max
     oh = sp_data["oh"]
@@ -310,7 +314,7 @@ widget = f"""
     return {{
       margin: {{ t: 10, r: 200, b: 75, l: 90 }},
       xaxis: {{
-        title: {{ text: "Local time (UTC)", standoff: 10 }},
+        title: {{ text: "Local solar time (noon-to-noon)", standoff: 10 }},
         tickmode: "array",
         tickvals: d.tick_idx,
         ticktext: d.tick_text,

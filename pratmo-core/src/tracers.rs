@@ -35,7 +35,7 @@ fn linear(tpt: f64, xa: &[f64], ta: &[f64]) -> f64 {
 // ── CFC-11 from N2O (Wamsley eq. 16, mid-latitude) ───────────────────────────
 
 fn cfc11_from_n2o_midlat(xn2otmp: f64) -> f64 {
-    if xn2otmp >= 130.0 && xn2otmp <= 310.0 {
+    if (130.0..=310.0).contains(&xn2otmp) {
         252.92 - 4.5591 * xn2otmp + 0.025644 * xn2otmp * xn2otmp
             - 3.4639e-5 * xn2otmp * xn2otmp * xn2otmp
     } else if xn2otmp > 310.0 {
@@ -109,7 +109,7 @@ pub fn bry_vs_n2o_wamsley_org_tropics03(fn2o_ppb: f64) -> f64 {
 pub fn ch4_vs_n2o_michelsen_ml_2003(fn2o_ppb: f64) -> f64 {
     let x = fn2o_ppb;
     let x2 = x * x;
-    let ch4 = if x >= 0.0 && x < 45.0 {
+    let ch4 = if (0.0..45.0).contains(&x) {
         0.233_70 + 0.028_568 * x - 6.435_8e-4 * x2 + 6.018_6e-6 * x2 * x
     } else if x < 100.0 {
         0.504_99 + 6.969_0e-3 * x - 3.011_4e-5 * x2 + 7.232_1e-8 * x2 * x
@@ -133,7 +133,7 @@ pub fn ch4_vs_n2o_michelsen_ml_2003(fn2o_ppb: f64) -> f64 {
 /// Total inorganic chlorine (ppb) from N2O (ppb). McLinden/Solve fit.
 /// Fortran: cly_vs_n2o_solve
 pub fn cly_vs_n2o_solve(fn2o_ppb: f64) -> f64 {
-    if fn2o_ppb > 320.0 || fn2o_ppb < 0.0 {
+    if !(0.0..=320.0).contains(&fn2o_ppb) {
         return 0.0;
     }
     let x = fn2o_ppb;
@@ -146,7 +146,7 @@ pub fn cly_vs_n2o_solve(fn2o_ppb: f64) -> f64 {
 /// CH3Cl (ppb) from N2O (ppb). Schauffler et al. 2003 fit.
 /// Fortran: ch3cl_vs_n2o_solve
 pub fn ch3cl_vs_n2o_solve(fn2o_ppb: f64) -> f64 {
-    if fn2o_ppb > 320.0 || fn2o_ppb < 0.0 {
+    if !(0.0..=320.0).contains(&fn2o_ppb) {
         return 0.0;
     }
     let x = fn2o_ppb;

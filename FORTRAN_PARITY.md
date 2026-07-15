@@ -62,7 +62,7 @@ the quick navigation point and the normal-mode counterpart:
 | `jvalue.rs` | pass `PIRAY`/`PIAER` in the legacy atmospheric-level order | pass them in optical-depth order |
 | `ctm.rs` | reload seasonal aerosol optical depths from `fort04.x` | retain the corrected/current aerosol profile |
 | `chemistry.rs` | zero DIURN rates 170–177 and omit R177 from HNO3 production | keep heterogeneous rates and the complete R177 balance |
-| `diurnal.rs` | zero uninitialized `SSF`; emit PUNCH metadata before the box loop | keep `SSF=1`; emit metadata after selecting the first box |
+| `diurnal.rs` | zero uninitialized `SSF`; emit PUNCH metadata before the box loop; repeat the legacy RAFDAY relaxation after every slow-species correction | keep `SSF=1`; emit metadata after selecting the first box; relax once so HNO3/BrONO2 RAFDAY corrections are retained |
 | `path.rs` | solve NEWRAF with stale-zero `XJDO`; emit the final LEND dump | include H2O photolysis in the solve; omit the legacy dump |
 
 The fixed `HYSTAT(1)` and embedded-blank input handling are unconditional

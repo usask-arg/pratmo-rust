@@ -5,6 +5,7 @@ use ndarray::Array2;
 use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyTuple;
 
 use pratmo_core::api::{
     BoxSnapshot, CtmBoxSpec, CtmConfig, CtmOutput, CustomAtmosphereProfile, Diagnostics,
@@ -14,6 +15,30 @@ use pratmo_core::api::{
 };
 
 // ── String-dispatch helpers ────────────────────────────────────────────────────
+
+const IMPLICIT_SPECIES_NAMES: &[&str] = &[
+    "no", "no2", "no3", "n2o5", "hno3", "h", "oh", "ho2", "h2o2", "o", "o3", "bro", "br", "hbr",
+    "hno2", "hcl", "cl", "cl2", "clo", "clono2", "hno4", "hocl", "brono2", "hobr", "h2co", "ch3o2",
+    "ch3o2h", "oclo", "cl2o2", "brcl", "i", "io", "hoi", "iono2", "hi", "oio", "i2", "i2o2",
+    "i2o3", "i2o4",
+];
+
+const LONG_LIVED_NAMES: &[&str] = &[
+    "o3", "n2o", "noy", "ch4", "co", "clx", "cf2cl2", "cfcl3", "ccl4", "ch3cl", "ch3ccl3", "h2",
+    "h2o", "nh3", "c5h8", "brx", "ch3br", "ocs", "iodx",
+];
+
+const JVALUE_NAMES: &[&str] = &[
+    "no", "o2", "o3", "o3_o1d", "h2co_a", "h2co_b", "h2o2", "rooh", "no2", "no3_x", "no3_l",
+    "n2o5", "hno2", "hno3", "hno4", "clono2", "cl2", "hocl", "oclo", "cl2o2", "clo", "bro",
+    "brono2", "hobr", "n2o", "cfc11", "cfc12", "cfc113", "cfc114", "cfc115", "ccl4", "ch3cl",
+    "ch3ccl3", "ch3br", "h1211", "h1301", "h2402", "hcfc22", "hcfc123", "hcfc141b", "chbr3",
+    "ch3i", "cf3i", "ocs", "io", "hoi", "iono2", "oio", "i2", "i2o2", "i2o3", "i2o4",
+];
+
+fn normalize_field_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
 
 fn implicit_field_by_name(s: &ImplicitSpecies, name: &str) -> Option<f64> {
     match name {
@@ -52,6 +77,11 @@ fn implicit_field_by_name(s: &ImplicitSpecies, name: &str) -> Option<f64> {
         "hoi" => Some(s.hoi),
         "iono2" => Some(s.iono2),
         "hi" => Some(s.hi),
+        "oio" => Some(s.oio),
+        "i2" => Some(s.i2),
+        "i2o2" => Some(s.i2o2),
+        "i2o3" => Some(s.i2o3),
+        "i2o4" => Some(s.i2o4),
         _ => None,
     }
 }
@@ -105,22 +135,45 @@ fn jvalue_field_by_name(j: &JValues, name: &str) -> Option<f64> {
         "io" => Some(j.io),
         "hoi" => Some(j.hoi),
         "iono2" => Some(j.iono2),
+        "oio" => Some(j.oio),
+        "i2" => Some(j.i2),
+        "i2o2" => Some(j.i2o2),
+        "i2o3" => Some(j.i2o3),
+        "i2o4" => Some(j.i2o4),
         _ => None,
     }
 }
 
-fn implicit_valid_names() -> &'static str {
-    "no, no2, no3, n2o5, hno3, h, oh, ho2, h2o2, o, o3, bro, br, hbr, hno2, \
-     hcl, cl, cl2, clo, clono2, hno4, hocl, brono2, hobr, h2co, ch3o2, ch3o2h, \
-    oclo, cl2o2, brcl, i, io, hoi, iono2, hi"
+fn long_lived_field_by_name(ratios: &LongLivedMixingRatios, name: &str) -> Option<f64> {
+    match name {
+        "o3" => Some(ratios.o3),
+        "n2o" => Some(ratios.n2o),
+        "noy" => Some(ratios.noy),
+        "ch4" => Some(ratios.ch4),
+        "co" => Some(ratios.co),
+        "clx" => Some(ratios.clx),
+        "cf2cl2" => Some(ratios.cf2cl2),
+        "cfcl3" => Some(ratios.cfcl3),
+        "ccl4" => Some(ratios.ccl4),
+        "ch3cl" => Some(ratios.ch3cl),
+        "ch3ccl3" => Some(ratios.ch3ccl3),
+        "h2" => Some(ratios.h2),
+        "h2o" => Some(ratios.h2o),
+        "nh3" => Some(ratios.nh3),
+        "c5h8" => Some(ratios.c5h8),
+        "brx" => Some(ratios.brx),
+        "ch3br" => Some(ratios.ch3br),
+        "ocs" => Some(ratios.ocs),
+        "iodx" => Some(ratios.iodx),
+        _ => None,
+    }
 }
 
-fn jvalue_valid_names() -> &'static str {
-    "no, o2, o3, o3_o1d, h2co_a, h2co_b, h2o2, rooh, no2, no3_x, no3_l, n2o5, \
-     hno2, hno3, hno4, clono2, cl2, hocl, oclo, cl2o2, clo, bro, brono2, hobr, \
-     n2o, cfc11, cfc12, cfc113, cfc114, cfc115, ccl4, ch3cl, ch3ccl3, ch3br, \
-     h1211, h1301, h2402, hcfc22, hcfc123, hcfc141b, chbr3, ch3i, cf3i, ocs, \
-     io, hoi, iono2"
+fn unknown_field_error(kind: &str, requested: &str, valid_names: &[&str]) -> PyErr {
+    PyValueError::new_err(format!(
+        "Unknown {kind}: '{requested}'. Valid names: {}",
+        valid_names.join(", ")
+    ))
 }
 
 // ── ImplicitSpecies ────────────────────────────────────────────────────────────
@@ -273,8 +326,28 @@ impl PyImplicitSpecies {
     fn hi(&self) -> f64 {
         self.inner.hi
     }
+    #[getter]
+    fn oio(&self) -> f64 {
+        self.inner.oio
+    }
+    #[getter]
+    fn i2(&self) -> f64 {
+        self.inner.i2
+    }
+    #[getter]
+    fn i2o2(&self) -> f64 {
+        self.inner.i2o2
+    }
+    #[getter]
+    fn i2o3(&self) -> f64 {
+        self.inner.i2o3
+    }
+    #[getter]
+    fn i2o4(&self) -> f64 {
+        self.inner.i2o4
+    }
 
-    /// Return all 35 species as a ``{name: value}`` dict (cm⁻³).
+    /// Return all 40 species as a ``{name: value}`` dict (cm⁻³).
     fn to_dict(&self) -> HashMap<&'static str, f64> {
         [
             ("no", self.inner.no),
@@ -312,6 +385,11 @@ impl PyImplicitSpecies {
             ("hoi", self.inner.hoi),
             ("iono2", self.inner.iono2),
             ("hi", self.inner.hi),
+            ("oio", self.inner.oio),
+            ("i2", self.inner.i2),
+            ("i2o2", self.inner.i2o2),
+            ("i2o3", self.inner.i2o3),
+            ("i2o4", self.inner.i2o4),
         ]
         .into_iter()
         .collect()
@@ -794,8 +872,28 @@ impl PyJValues {
     fn iono2(&self) -> f64 {
         self.inner.iono2
     }
+    #[getter]
+    fn oio(&self) -> f64 {
+        self.inner.oio
+    }
+    #[getter]
+    fn i2(&self) -> f64 {
+        self.inner.i2
+    }
+    #[getter]
+    fn i2o2(&self) -> f64 {
+        self.inner.i2o2
+    }
+    #[getter]
+    fn i2o3(&self) -> f64 {
+        self.inner.i2o3
+    }
+    #[getter]
+    fn i2o4(&self) -> f64 {
+        self.inner.i2o4
+    }
 
-    /// Return all 47 J-values as a ``{name: value}`` dict (s⁻¹).
+    /// Return all 52 J-values as a ``{name: value}`` dict (s⁻¹).
     fn to_dict(&self) -> HashMap<&'static str, f64> {
         [
             ("no", self.inner.no),
@@ -845,6 +943,11 @@ impl PyJValues {
             ("io", self.inner.io),
             ("hoi", self.inner.hoi),
             ("iono2", self.inner.iono2),
+            ("oio", self.inner.oio),
+            ("i2", self.inner.i2),
+            ("i2o2", self.inner.i2o2),
+            ("i2o3", self.inner.i2o3),
+            ("i2o4", self.inner.i2o4),
         ]
         .into_iter()
         .collect()
@@ -876,11 +979,34 @@ impl PyDiagnostics {
     fn radcount(&self) -> f64 {
         self.inner.radcount
     }
+    #[getter]
+    fn newraf_nonconvergence_count(&self) -> usize {
+        self.inner.newraf_nonconvergence_count
+    }
+    #[getter]
+    fn rafday_nonconvergence_count(&self) -> usize {
+        self.inner.rafday_nonconvergence_count
+    }
+
+    #[getter]
+    fn rafday_max_final_relative_correction(&self) -> f64 {
+        self.inner.rafday_max_final_relative_correction
+    }
+
+    #[getter]
+    fn rafday_max_correction_iterations(&self) -> usize {
+        self.inner.rafday_max_correction_iterations
+    }
 
     fn __repr__(&self) -> String {
         format!(
-            "Diagnostics(raxloop={}, radcount={})",
-            self.inner.raxloop, self.inner.radcount
+            "Diagnostics(raxloop={}, radcount={}, newraf_nonconvergence_count={}, rafday_nonconvergence_count={}, rafday_max_final_relative_correction={}, rafday_max_correction_iterations={})",
+            self.inner.raxloop,
+            self.inner.radcount,
+            self.inner.newraf_nonconvergence_count,
+            self.inner.rafday_nonconvergence_count,
+            self.inner.rafday_max_final_relative_correction,
+            self.inner.rafday_max_correction_iterations
         )
     }
 }
@@ -956,7 +1082,13 @@ struct PyDiurnTimeStep {
 
 #[pymethods]
 impl PyDiurnTimeStep {
-    /// Time in HHMM integer format (e.g. 1430 = 14:30 UTC).
+    /// Monotonic seconds since the noon start of the 24-hour orbit.
+    #[getter]
+    fn elapsed_seconds(&self) -> f64 {
+        self.inner.elapsed_seconds
+    }
+
+    /// Local clock label. Both orbit endpoints are noon (1200).
     #[getter]
     fn time_hhmm(&self) -> i32 {
         self.inner.time_hhmm
@@ -970,7 +1102,10 @@ impl PyDiurnTimeStep {
     }
 
     fn __repr__(&self) -> String {
-        format!("DiurnTimeStep(time_hhmm={:04})", self.inner.time_hhmm)
+        format!(
+            "DiurnTimeStep(elapsed_seconds={}, time_hhmm={:04})",
+            self.inner.elapsed_seconds, self.inner.time_hhmm
+        )
     }
 }
 
@@ -984,6 +1119,10 @@ struct PyDiurnBoxTimeSeries {
 
 #[pymethods]
 impl PyDiurnBoxTimeSeries {
+    fn __len__(&self) -> usize {
+        self.inner.steps.len()
+    }
+
     #[getter]
     fn box_index(&self) -> usize {
         self.inner.box_index
@@ -1025,7 +1164,9 @@ struct PyDiurnBoxSpec {
     #[pyo3(get, set)]
     altitude_level: u8,
     #[pyo3(get, set)]
-    albedo: f64,
+    aerosol_surface_area_um2_cm3: f64,
+    #[pyo3(get, set)]
+    sea_salt_surface_area_um2_cm3: f64,
     #[pyo3(get, set)]
     temp_offset_k: f64,
 }
@@ -1033,19 +1174,28 @@ struct PyDiurnBoxSpec {
 #[pymethods]
 impl PyDiurnBoxSpec {
     #[new]
-    #[pyo3(signature = (altitude_level, albedo=0.0, temp_offset_k=0.0))]
-    fn new(altitude_level: u8, albedo: f64, temp_offset_k: f64) -> Self {
+    #[pyo3(signature = (altitude_level, aerosol_surface_area_um2_cm3=0.0, sea_salt_surface_area_um2_cm3=0.0, temp_offset_k=0.0))]
+    fn new(
+        altitude_level: u8,
+        aerosol_surface_area_um2_cm3: f64,
+        sea_salt_surface_area_um2_cm3: f64,
+        temp_offset_k: f64,
+    ) -> Self {
         Self {
             altitude_level,
-            albedo,
+            aerosol_surface_area_um2_cm3,
+            sea_salt_surface_area_um2_cm3,
             temp_offset_k,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "DiurnBoxSpec(altitude_level={}, albedo={}, temp_offset_k={})",
-            self.altitude_level, self.albedo, self.temp_offset_k
+            "DiurnBoxSpec(altitude_level={}, aerosol_surface_area_um2_cm3={}, sea_salt_surface_area_um2_cm3={}, temp_offset_k={})",
+            self.altitude_level,
+            self.aerosol_surface_area_um2_cm3,
+            self.sea_salt_surface_area_um2_cm3,
+            self.temp_offset_k
         )
     }
 }
@@ -1057,7 +1207,9 @@ struct PyCtmBoxSpec {
     #[pyo3(get, set)]
     altitude_level: u8,
     #[pyo3(get, set)]
-    albedo: f64,
+    aerosol_surface_area_um2_cm3: f64,
+    #[pyo3(get, set)]
+    sea_salt_surface_area_um2_cm3: f64,
     #[pyo3(get, set)]
     temp_offset_k: f64,
 }
@@ -1065,19 +1217,28 @@ struct PyCtmBoxSpec {
 #[pymethods]
 impl PyCtmBoxSpec {
     #[new]
-    #[pyo3(signature = (altitude_level, albedo=0.0, temp_offset_k=0.0))]
-    fn new(altitude_level: u8, albedo: f64, temp_offset_k: f64) -> Self {
+    #[pyo3(signature = (altitude_level, aerosol_surface_area_um2_cm3=0.0, sea_salt_surface_area_um2_cm3=0.0, temp_offset_k=0.0))]
+    fn new(
+        altitude_level: u8,
+        aerosol_surface_area_um2_cm3: f64,
+        sea_salt_surface_area_um2_cm3: f64,
+        temp_offset_k: f64,
+    ) -> Self {
         Self {
             altitude_level,
-            albedo,
+            aerosol_surface_area_um2_cm3,
+            sea_salt_surface_area_um2_cm3,
             temp_offset_k,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "CtmBoxSpec(altitude_level={}, albedo={}, temp_offset_k={})",
-            self.altitude_level, self.albedo, self.temp_offset_k
+            "CtmBoxSpec(altitude_level={}, aerosol_surface_area_um2_cm3={}, sea_salt_surface_area_um2_cm3={}, temp_offset_k={})",
+            self.altitude_level,
+            self.aerosol_surface_area_um2_cm3,
+            self.sea_salt_surface_area_um2_cm3,
+            self.temp_offset_k
         )
     }
 }
@@ -1190,6 +1351,7 @@ impl PyDiurnConfig {
         atmosphere=None,
         initial_mixing_ratios=None
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         latitude_deg: f64,
         julian_day: u16,
@@ -1215,6 +1377,19 @@ impl PyDiurnConfig {
             initial_mixing_ratios,
         }
     }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DiurnConfig(latitude_deg={}, julian_day={}, integration_days={}, boxes={}, bromine={}, iodine={}, parallel_boxes={})",
+            self.latitude_deg,
+            self.julian_day,
+            self.integration_days,
+            self.boxes.len(),
+            self.bromine,
+            self.iodine,
+            self.parallel_boxes
+        )
+    }
 }
 
 impl PyDiurnConfig {
@@ -1228,7 +1403,8 @@ impl PyDiurnConfig {
                 .iter()
                 .map(|b| DiurnBoxSpec {
                     altitude_level: b.altitude_level,
-                    albedo: b.albedo,
+                    aerosol_surface_area_um2_cm3: b.aerosol_surface_area_um2_cm3,
+                    sea_salt_surface_area_um2_cm3: b.sea_salt_surface_area_um2_cm3,
                     temp_offset_k: b.temp_offset_k,
                 })
                 .collect(),
@@ -1261,6 +1437,8 @@ struct PyCtmConfig {
     #[pyo3(get, set)]
     bromine: bool,
     #[pyo3(get, set)]
+    iodine: bool,
+    #[pyo3(get, set)]
     solar_flux_scale: f64,
 }
 
@@ -1273,6 +1451,7 @@ impl PyCtmConfig {
         integration_days=40,
         boxes=vec![],
         bromine=false,
+        iodine=true,
         solar_flux_scale=1.0
     ))]
     fn new(
@@ -1281,6 +1460,7 @@ impl PyCtmConfig {
         integration_days: u32,
         boxes: Vec<PyCtmBoxSpec>,
         bromine: bool,
+        iodine: bool,
         solar_flux_scale: f64,
     ) -> Self {
         Self {
@@ -1289,8 +1469,21 @@ impl PyCtmConfig {
             integration_days,
             boxes,
             bromine,
+            iodine,
             solar_flux_scale,
         }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "CtmConfig(latitude_deg={}, julian_day={}, integration_days={}, boxes={}, bromine={}, iodine={})",
+            self.latitude_deg,
+            self.julian_day,
+            self.integration_days,
+            self.boxes.len(),
+            self.bromine,
+            self.iodine
+        )
     }
 }
 
@@ -1305,11 +1498,13 @@ impl PyCtmConfig {
                 .iter()
                 .map(|b| CtmBoxSpec {
                     altitude_level: b.altitude_level,
-                    albedo: b.albedo,
+                    aerosol_surface_area_um2_cm3: b.aerosol_surface_area_um2_cm3,
+                    sea_salt_surface_area_um2_cm3: b.sea_salt_surface_area_um2_cm3,
                     temp_offset_k: b.temp_offset_k,
                 })
                 .collect(),
             bromine: self.bromine,
+            iodine: self.iodine,
             solar_flux_scale: self.solar_flux_scale,
         }
     }
@@ -1324,6 +1519,10 @@ struct PyDiurnOutput {
 
 #[pymethods]
 impl PyDiurnOutput {
+    fn __len__(&self) -> usize {
+        self.inner.boxes.len()
+    }
+
     /// Daily-mean snapshot for each box.
     #[getter]
     fn boxes(&self) -> Vec<PyBoxSnapshot> {
@@ -1351,55 +1550,169 @@ impl PyDiurnOutput {
         }
     }
 
+    /// Box altitudes in km, with shape ``(n_boxes,)``.
+    #[getter]
+    fn altitude_km<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(py, self.inner.boxes.iter().map(|b| b.altitude_km).collect())
+    }
+
+    /// Box pressures in mb, with shape ``(n_boxes,)``.
+    #[getter]
+    fn pressure_mb<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(py, self.inner.boxes.iter().map(|b| b.pressure_mb).collect())
+    }
+
+    /// Box temperatures in K, with shape ``(n_boxes,)``.
+    #[getter]
+    fn temperature_k<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(
+            py,
+            self.inner.boxes.iter().map(|b| b.temperature_k).collect(),
+        )
+    }
+
+    /// Box air number densities in cm⁻³, with shape ``(n_boxes,)``.
+    #[getter]
+    fn air_density_cm3<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(
+            py,
+            self.inner.boxes.iter().map(|b| b.air_density_cm3).collect(),
+        )
+    }
+
+    /// Shared DIURN coordinate in seconds since the noon start, shape ``(n_timesteps,)``.
+    #[getter]
+    fn elapsed_seconds<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        let values = self
+            .inner
+            .time_series
+            .first()
+            .map(|ts| ts.steps.iter().map(|step| step.elapsed_seconds).collect())
+            .unwrap_or_default();
+        PyArray1::from_vec(py, values)
+    }
+
+    /// Shared cyclic local-time labels in HHMM form, shape ``(n_timesteps,)``.
+    #[getter]
+    fn time_hhmm<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<i32>> {
+        let values = self
+            .inner
+            .time_series
+            .first()
+            .map(|ts| ts.steps.iter().map(|step| step.time_hhmm).collect())
+            .unwrap_or_default();
+        PyArray1::from_vec(py, values)
+    }
+
+    /// Return a daily-mean implicit species profile with shape ``(n_boxes,)``.
+    fn species_profile<'py>(
+        &self,
+        py: Python<'py>,
+        species_name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let name = normalize_field_name(species_name);
+        if implicit_field_by_name(&ImplicitSpecies::default(), &name).is_none() {
+            return Err(unknown_field_error(
+                "implicit species",
+                species_name,
+                IMPLICIT_SPECIES_NAMES,
+            ));
+        }
+        let values = self
+            .inner
+            .boxes
+            .iter()
+            .map(|box_| implicit_field_by_name(&box_.implicit, &name).unwrap())
+            .collect();
+        Ok(PyArray1::from_vec(py, values))
+    }
+
+    /// Return a daily-mean long-lived mixing-ratio profile with shape ``(n_boxes,)``.
+    fn long_lived_profile<'py>(
+        &self,
+        py: Python<'py>,
+        species_name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let name = normalize_field_name(species_name);
+        if long_lived_field_by_name(&LongLivedMixingRatios::default(), &name).is_none() {
+            return Err(unknown_field_error(
+                "long-lived species",
+                species_name,
+                LONG_LIVED_NAMES,
+            ));
+        }
+        let values = self
+            .inner
+            .boxes
+            .iter()
+            .map(|box_| long_lived_field_by_name(&box_.long_lived, &name).unwrap())
+            .collect();
+        Ok(PyArray1::from_vec(py, values))
+    }
+
+    /// Return a daily-mean J-value profile with shape ``(n_boxes,)``.
+    fn jvalue_profile<'py>(
+        &self,
+        py: Python<'py>,
+        jvalue_name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let name = normalize_field_name(jvalue_name);
+        if jvalue_field_by_name(&JValues::default(), &name).is_none() {
+            return Err(unknown_field_error("J-value", jvalue_name, JVALUE_NAMES));
+        }
+        let values = self
+            .inner
+            .boxes
+            .iter()
+            .map(|box_| jvalue_field_by_name(&box_.jvalues, &name).unwrap())
+            .collect();
+        Ok(PyArray1::from_vec(py, values))
+    }
+
     /// Return an implicit species as a 2-D numpy array of shape ``(n_boxes, n_timesteps)``.
     ///
     /// Parameters
     /// ----------
     /// species_name:
-    ///     One of: no, no2, no3, n2o5, hno3, h, oh, ho2, h2o2, o, o3, bro, br,
-    ///     hbr, hno2, hcl, cl, cl2, clo, clono2, hno4, hocl, brono2, hobr,
-    ///     h2co, ch3o2, ch3o2h, oclo, cl2o2, brcl, i, io, hoi, iono2, hi
+    ///     A name from ``pratmo.IMPLICIT_SPECIES_NAMES`` (case-insensitive).
     fn species_grid<'py>(
         &self,
         py: Python<'py>,
         species_name: &str,
     ) -> PyResult<Bound<'py, PyArray2<f64>>> {
-        if implicit_field_by_name(&ImplicitSpecies::default(), species_name).is_none() {
-            return Err(PyValueError::new_err(format!(
-                "Unknown implicit species: '{species_name}'. Valid names: {}",
-                implicit_valid_names()
-            )));
+        let name = normalize_field_name(species_name);
+        if implicit_field_by_name(&ImplicitSpecies::default(), &name).is_none() {
+            return Err(unknown_field_error(
+                "implicit species",
+                species_name,
+                IMPLICIT_SPECIES_NAMES,
+            ));
         }
         let arr: Array2<f64> = self
             .inner
-            .species_grid(|s| implicit_field_by_name(s, species_name).unwrap());
+            .species_grid(|s| implicit_field_by_name(s, &name).unwrap());
         Ok(arr.into_pyarray(py))
     }
 
-    /// Return a J-value as a 2-D numpy array of shape ``(n_boxes, n_timesteps)``.
+    /// Return daily-mean J-values repeated into a 2-D array of shape
+    /// ``(n_boxes, n_timesteps)``.
     ///
     /// Parameters
     /// ----------
     /// jvalue_name:
-    ///     One of: no, o2, o3, o3_o1d, h2co_a, h2co_b, h2o2, rooh, no2, no3_x,
-    ///     no3_l, n2o5, hno2, hno3, hno4, clono2, cl2, hocl, oclo, cl2o2, clo,
-    ///     bro, brono2, hobr, n2o, cfc11, cfc12, cfc113, cfc114, cfc115, ccl4,
-    ///     ch3cl, ch3ccl3, ch3br, h1211, h1301, h2402, hcfc22, hcfc123, hcfc141b,
-    ///     chbr3, ch3i, cf3i, ocs
+    ///     A name from ``pratmo.JVALUE_NAMES`` (case-insensitive).
     fn jvalue_grid<'py>(
         &self,
         py: Python<'py>,
         jvalue_name: &str,
     ) -> PyResult<Bound<'py, PyArray2<f64>>> {
-        if jvalue_field_by_name(&JValues::default(), jvalue_name).is_none() {
-            return Err(PyValueError::new_err(format!(
-                "Unknown J-value: '{jvalue_name}'. Valid names: {}",
-                jvalue_valid_names()
-            )));
+        let name = normalize_field_name(jvalue_name);
+        if jvalue_field_by_name(&JValues::default(), &name).is_none() {
+            return Err(unknown_field_error("J-value", jvalue_name, JVALUE_NAMES));
         }
         let arr: Array2<f64> = self
             .inner
-            .jvalue_grid(|j| jvalue_field_by_name(j, jvalue_name).unwrap());
+            .jvalue_grid(|j| jvalue_field_by_name(j, &name).unwrap());
         Ok(arr.into_pyarray(py))
     }
 
@@ -1441,6 +1754,15 @@ impl PyNo2ConstrainedDiurnConfig {
             iterations,
         }
     }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "No2ConstrainedDiurnConfig(boxes={}, target_hhmm={:04}, iterations={})",
+            self.observed_no2_cm3.len(),
+            self.target_hhmm,
+            self.iterations
+        )
+    }
 }
 
 impl PyNo2ConstrainedDiurnConfig {
@@ -1477,6 +1799,13 @@ impl PyNo2ConstrainedDiurnOutput {
     fn modeled_no2_cm3(&self) -> Vec<f64> {
         self.inner.modeled_no2_cm3.clone()
     }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "No2ConstrainedDiurnOutput({} boxes)",
+            self.inner.noy_scale.len()
+        )
+    }
 }
 
 // ── CtmOutput ──────────────────────────────────────────────────────────────────
@@ -1488,6 +1817,10 @@ struct PyCtmOutput {
 
 #[pymethods]
 impl PyCtmOutput {
+    fn __len__(&self) -> usize {
+        self.inner.boxes.len()
+    }
+
     /// Final converged snapshot for each box.
     #[getter]
     fn boxes(&self) -> Vec<PyBoxSnapshot> {
@@ -1505,6 +1838,36 @@ impl PyCtmOutput {
         }
     }
 
+    /// Box altitudes in km, with shape ``(n_boxes,)``.
+    #[getter]
+    fn altitude_km<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(py, self.inner.boxes.iter().map(|b| b.altitude_km).collect())
+    }
+
+    /// Box pressures in mb, with shape ``(n_boxes,)``.
+    #[getter]
+    fn pressure_mb<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(py, self.inner.boxes.iter().map(|b| b.pressure_mb).collect())
+    }
+
+    /// Box temperatures in K, with shape ``(n_boxes,)``.
+    #[getter]
+    fn temperature_k<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(
+            py,
+            self.inner.boxes.iter().map(|b| b.temperature_k).collect(),
+        )
+    }
+
+    /// Box air number densities in cm⁻³, with shape ``(n_boxes,)``.
+    #[getter]
+    fn air_density_cm3<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        PyArray1::from_vec(
+            py,
+            self.inner.boxes.iter().map(|b| b.air_density_cm3).collect(),
+        )
+    }
+
     /// Return an implicit species as a 1-D numpy array of shape ``(n_boxes,)``.
     ///
     /// Parameters
@@ -1516,16 +1879,41 @@ impl PyCtmOutput {
         py: Python<'py>,
         species_name: &str,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        if implicit_field_by_name(&ImplicitSpecies::default(), species_name).is_none() {
-            return Err(PyValueError::new_err(format!(
-                "Unknown implicit species: '{species_name}'. Valid names: {}",
-                implicit_valid_names()
-            )));
+        let name = normalize_field_name(species_name);
+        if implicit_field_by_name(&ImplicitSpecies::default(), &name).is_none() {
+            return Err(unknown_field_error(
+                "implicit species",
+                species_name,
+                IMPLICIT_SPECIES_NAMES,
+            ));
         }
         let v: Vec<f64> = self
             .inner
-            .species_profile(|s| implicit_field_by_name(s, species_name).unwrap());
+            .species_profile(|s| implicit_field_by_name(s, &name).unwrap());
         Ok(PyArray1::from_vec(py, v))
+    }
+
+    /// Return a long-lived mixing ratio as a 1-D array of shape ``(n_boxes,)``.
+    fn long_lived_profile<'py>(
+        &self,
+        py: Python<'py>,
+        species_name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let name = normalize_field_name(species_name);
+        if long_lived_field_by_name(&LongLivedMixingRatios::default(), &name).is_none() {
+            return Err(unknown_field_error(
+                "long-lived species",
+                species_name,
+                LONG_LIVED_NAMES,
+            ));
+        }
+        let values = self
+            .inner
+            .boxes
+            .iter()
+            .map(|box_| long_lived_field_by_name(&box_.long_lived, &name).unwrap())
+            .collect();
+        Ok(PyArray1::from_vec(py, values))
     }
 
     /// Return a J-value as a 1-D numpy array of shape ``(n_boxes,)``.
@@ -1539,15 +1927,13 @@ impl PyCtmOutput {
         py: Python<'py>,
         jvalue_name: &str,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        if jvalue_field_by_name(&JValues::default(), jvalue_name).is_none() {
-            return Err(PyValueError::new_err(format!(
-                "Unknown J-value: '{jvalue_name}'. Valid names: {}",
-                jvalue_valid_names()
-            )));
+        let name = normalize_field_name(jvalue_name);
+        if jvalue_field_by_name(&JValues::default(), &name).is_none() {
+            return Err(unknown_field_error("J-value", jvalue_name, JVALUE_NAMES));
         }
         let v: Vec<f64> = self
             .inner
-            .jvalue_profile(|j| jvalue_field_by_name(j, jvalue_name).unwrap());
+            .jvalue_profile(|j| jvalue_field_by_name(j, &name).unwrap());
         Ok(PyArray1::from_vec(py, v))
     }
 
@@ -1631,6 +2017,19 @@ impl PyPratmoModel {
 
 #[pymodule]
 fn _pratmo(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let py = m.py();
+    m.add(
+        "IMPLICIT_SPECIES_NAMES",
+        PyTuple::new(py, IMPLICIT_SPECIES_NAMES.iter().copied())?,
+    )?;
+    m.add(
+        "LONG_LIVED_NAMES",
+        PyTuple::new(py, LONG_LIVED_NAMES.iter().copied())?,
+    )?;
+    m.add(
+        "JVALUE_NAMES",
+        PyTuple::new(py, JVALUE_NAMES.iter().copied())?,
+    )?;
     m.add_class::<PyPratmoModel>()?;
     m.add_class::<PyDiurnConfig>()?;
     m.add_class::<PyCtmConfig>()?;

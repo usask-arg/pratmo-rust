@@ -69,7 +69,7 @@ pub struct ModelState {
     pub ntt: usize,       // number of tau levels
 
     // ── COMMON/CCWORK/ ──────────────────────────────────────────────────────
-    /// Previous time step species densities for 30 implicit species
+    /// Previous time step species densities for up to 40 implicit species
     pub xnold: [f64; NDEN],
     pub deltt: f64,  // current time step (s)
     pub gmu: f64,    // cos(SZA) at current time step
@@ -142,7 +142,6 @@ pub struct ModelState {
     pub fch3br: [f64; NB],
     pub focs: [f64; NB],
     pub fiodx: [f64; NB], // total inorganic iodine mixing ratio
-    pub fi2: [f64; NB],   // I2 source mixing ratio
     pub fxxx: [f64; NB],
     /// Species name labels (CHARACTER*8)
     pub titler: [String; 5],
@@ -244,9 +243,9 @@ pub struct ModelState {
     pub njval: usize,      // number of J-values computed
 
     // ── COMMON/CCNNN/ ───────────────────────────────────────────────────────
-    // Species index mapping: N1..N35 are the 1-based indices for each of the
-    // NDEN implicit species in the Newton-Raphson solve (NTOT = N35).
-    pub n: [usize; NDEN], // N1..N35 mapped to n[0]..n[34]
+    // Species index mapping: N1..N40 are the 1-based indices for each of the
+    // NDEN implicit species in the Newton-Raphson solve (NTOT = N40).
+    pub n: [usize; NDEN], // N1..N40 mapped to n[0]..n[39]
     pub ntot: usize,
     pub ntotx: usize,
     pub nnrt: [usize; NSLOWM],
@@ -274,7 +273,7 @@ pub struct ModelState {
     /// Species densities at each time step; XNOFT(30, 44)
     pub xnoft: Array2<f64>, // shape [NDEN, NXNOFT]
     /// Per-box mean diagnostics; PPMEAN(50+NNDXPQ, NB)
-    pub ppmean: Array2<f64>, // shape [50+NNDXPQ, NB]
+    pub ppmean: Array2<f64>, // shape [NDEN+20+NNDXPQ, NB]
     /// Per-box species at each time step; XXNOFT(30, 44, NB)
     pub xxnoft: Array3<f64>, // shape [NDEN, NXNOFT, NB]
     /// Stored J-values; STORJV(NXS+4, 16, NB)
@@ -318,7 +317,7 @@ pub struct ModelState {
     pub dtime: [f64; NXNOFT],
     /// Time weights; WTIME(44)
     pub wtime: [f64; NXNOFT],
-    /// UTC time array; UTIME(44)
+    /// Solar-geometry time array; UTIME(44)
     pub utime: [f64; NXNOFT],
     /// Zenith angle time array; ZTIME(44)
     pub ztime: [f64; NXNOFT],
@@ -344,7 +343,8 @@ pub struct ModelState {
 
     // ── COMMON/CCPARM/ ──────────────────────────────────────────────────────
     pub boxrn: [f64; NB],  // box run number / identifier
-    pub boxaa: [f64; NB],  // box surface albedo
+    pub boxaa: [f64; NB],  // generic aerosol surface area density (um2/cm3)
+    pub boxss: [f64; NB],  // sea-salt surface area density (um2/cm3)
     pub boxtt: [f64; NB],  // box temperature offset (K)
     pub nboxpr: [i32; NB], // print flags per box
     pub nboxdo: [i32; NB], // altitude level for each box (1-based; negative = use DAILY)
@@ -448,6 +448,12 @@ pub struct ModelState {
     // ── COMMON/NICKLLOYD/ ───────────────────────────────────────────────────
     pub raxloop: f64,  // diagnostic loop counter
     pub radcount: f64, // diagnostic iteration counter
+    pub newraf_nonconvergence_count: usize,
+    pub rafday_nonconvergence_count: usize,
+    /// Largest final RAFDAY relative-correction convergence metric observed.
+    pub rafday_max_final_relative_correction: f64,
+    /// Largest number of RAFDAY Newton corrections applied to any box.
+    pub rafday_max_correction_iterations: usize,
 
     // ── Scratch / cross-read communication ──────────────────────────────────
     /// Aerosol profile shape parameters read from fort01: AERSOL(1..6).
@@ -587,7 +593,6 @@ impl Clone for ModelState {
             fch3br: self.fch3br.clone(),
             focs: self.focs.clone(),
             fiodx: self.fiodx.clone(),
-            fi2: self.fi2.clone(),
             fxxx: self.fxxx.clone(),
             titler: self.titler.clone(),
             titles: self.titles.clone(),
@@ -731,6 +736,7 @@ impl Clone for ModelState {
             maxrlx: self.maxrlx.clone(),
             boxrn: self.boxrn.clone(),
             boxaa: self.boxaa.clone(),
+            boxss: self.boxss.clone(),
             boxtt: self.boxtt.clone(),
             nboxpr: self.nboxpr.clone(),
             nboxdo: self.nboxdo.clone(),
@@ -809,6 +815,10 @@ impl Clone for ModelState {
             cinpdir: self.cinpdir.clone(),
             raxloop: self.raxloop.clone(),
             radcount: self.radcount.clone(),
+            newraf_nonconvergence_count: self.newraf_nonconvergence_count,
+            rafday_nonconvergence_count: self.rafday_nonconvergence_count,
+            rafday_max_final_relative_correction: self.rafday_max_final_relative_correction,
+            rafday_max_correction_iterations: self.rafday_max_correction_iterations,
             aersol: self.aersol.clone(),
             zo3col: self.zo3col.clone(),
             out_unit7: None,
@@ -943,7 +953,6 @@ impl ModelState {
             fch3br: [0.0; NB],
             focs: [0.0; NB],
             fiodx: [0.0; NB],
-            fi2: [0.0; NB],
             fxxx: [0.0; NB],
             titler: [
                 String::new(),
@@ -1053,7 +1062,7 @@ impl ModelState {
 
             pmean: [0.0; NPMEAN],
             xnoft: Array2::zeros((NDEN, NXNOFT)),
-            ppmean: Array2::zeros((50 + NNDXPQ, NB)),
+            ppmean: Array2::zeros((crate::constants::NPPMEAN, NB)),
             xxnoft: Array3::zeros((NDEN, NXNOFT, NB)),
             storjv: Array3::zeros((NJVAL, 16, NB)),
             ndxpp: [0; NNDXPQ],
@@ -1104,6 +1113,7 @@ impl ModelState {
 
             boxrn: [0.0; NB],
             boxaa: [0.0; NB],
+            boxss: [0.0; NB],
             boxtt: [0.0; NB],
             nboxpr: [0; NB],
             nboxdo: [0i32; NB],
@@ -1189,6 +1199,10 @@ impl ModelState {
 
             raxloop: 0.0,
             radcount: 0.0,
+            newraf_nonconvergence_count: 0,
+            rafday_nonconvergence_count: 0,
+            rafday_max_final_relative_correction: 0.0,
+            rafday_max_correction_iterations: 0,
             aersol: [0.0; 6],
             zo3col: 0.0,
 

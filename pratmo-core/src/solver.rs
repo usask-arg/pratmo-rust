@@ -17,7 +17,7 @@ pub fn rplace(s: &ModelState, xn: &mut [f64; NDEN], j: usize) {
     xn.iter_mut().for_each(|v| *v = 1.0e-36);
 
     let put = |xn: &mut [f64; NDEN], ni: usize, val: f64| {
-        if ni >= 1 && ni <= NDEN {
+        if (1..=NDEN).contains(&ni) {
             xn[ni - 1] = val;
         }
     };
@@ -71,7 +71,7 @@ pub fn rplace(s: &ModelState, xn: &mut [f64; NDEN], j: usize) {
 pub fn splace(s: &mut ModelState, xn: &[f64; NDEN], j: usize) {
     let n = s.n;
     let get = |xn: &[f64; NDEN], ni: usize| -> f64 {
-        if ni >= 1 && ni <= NDEN {
+        if (1..=NDEN).contains(&ni) {
             xn[ni - 1]
         } else {
             0.0
@@ -124,7 +124,48 @@ pub fn splace(s: &mut ModelState, xn: &[f64; NDEN], j: usize) {
 
 // ── FIXRAT — family conservation cubic solve ──────────────────────────────────
 
-/// Rescale species X[0..30] so NOy, Cly, Bry families match target totals.
+fn fix_iodine_family(x: &mut [f64; NDEN], s: &ModelState, target: f64) {
+    if !s.liod {
+        return;
+    }
+    let weighted_species = [
+        (30usize, 1.0),
+        (31, 1.0),
+        (32, 1.0),
+        (33, 1.0),
+        (34, 1.0),
+        (35, 1.0),
+        (36, 2.0),
+        (37, 2.0),
+        (38, 2.0),
+        (39, 2.0),
+    ];
+    let mut total = 0.0;
+    for &(species, weight) in &weighted_species {
+        let slot = s.n[species];
+        if slot > 0 && slot <= s.ntot {
+            total += weight * x[slot - 1];
+        }
+    }
+    if target <= 0.0 {
+        for &(species, _) in &weighted_species {
+            let slot = s.n[species];
+            if slot > 0 && slot <= s.ntot {
+                x[slot - 1] = 0.0;
+            }
+        }
+    } else if total > 1.0e-30 {
+        let scale = target / total;
+        for &(species, _) in &weighted_species {
+            let slot = s.n[species];
+            if slot > 0 && slot <= s.ntot {
+                x[slot - 1] *= scale;
+            }
+        }
+    }
+}
+
+/// Rescale species so NOy, Cly, Bry, and gas-phase Iy families match targets.
 /// Solves a cubic equation (regula falsi + Newton-Raphson) for the NOy scale factor.
 /// Fortran: SUBROUTINE FIXRAT(X, I) — I is the box index (1-based in Fortran)
 pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
@@ -135,6 +176,10 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
     let totclx = s.fclx[ib] * dm;
     let totbrx = s.fbrx[ib] * dm;
     let totiyx = s.fiodx[ib] * dm;
+
+    // Apply the prescribed gas-phase Iy constraint independently of the legacy
+    // NOy/Cly/Bry cubic. The legacy NOy definition does not include trace IONO2.
+    fix_iodine_family(x, s, totiyx);
 
     // BrCl cap
     let n30 = n[29];
@@ -282,27 +327,6 @@ pub fn fixrat(x: &mut [f64; NDEN], s: &ModelState, ib: usize) {
         x[ni - 1] *= rbrx;
     }
     x[n[22] - 1] *= rbrx * rnoy; // BrONO2
-
-    // Iodine family closure (Iy linked to NOy via IONO2, analogous to BrONO2/ClONO2).
-    if s.liod && n[30] > 0 && n[31] > 0 && n[32] > 0 && n[33] > 0 && n[34] > 0 {
-        let xxi = x[n[30] - 1]
-            + x[n[31] - 1]
-            + x[n[32] - 1]
-            + x[n[34] - 1]
-            + x[n[35] - 1]
-            + 2.0 * (x[n[36] - 1] + x[n[37] - 1] + x[n[38] - 1] + x[n[39] - 1]);
-        let xxin = x[n[33] - 1];
-        let denom = xxi + rnoy * xxin;
-        if denom > 1.0e-30 {
-            let riyx = totiyx / denom;
-            for ni in [
-                n[30], n[31], n[32], n[34], n[35], n[36], n[37], n[38], n[39],
-            ] {
-                x[ni - 1] *= riyx;
-            }
-            x[n[33] - 1] *= riyx * rnoy; // IONO2
-        }
-    }
 }
 
 /// Wrapper: rplace → fixrat → splace → update FO3.
@@ -342,11 +366,12 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         }
         retry_probe_newraf(s, "cut_retry", c, k + 1);
         if k == 29 {
-            eprintln!(" =====FAILED TO CONVERGE AFTER 2**-30 CUT");
             s.lprts = true;
-            // Attempt one more pass; accept result regardless (Fortran: warn and continue).
-            newrax(s, damp1, x, n);
+            let final_code = newrax(s, damp1, x, n);
             s.deltt = deltt0;
+            if final_code != 0 {
+                s.newraf_nonconvergence_count += 1;
+            }
             return Ok(());
         }
     }
@@ -358,9 +383,11 @@ pub fn newraf(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         if c != 0 {
             retry_probe_newraf(s, "rebuild_fail", c, kut);
             s.lprts = true;
-            // Attempt one more pass; accept result regardless (Fortran: warn and continue).
-            newrax(s, damp1, x, n);
+            let final_code = newrax(s, damp1, x, n);
             s.deltt = deltt0;
+            if final_code != 0 {
+                s.newraf_nonconvergence_count += 1;
+            }
             return Ok(());
         }
     }
@@ -528,7 +555,7 @@ fn retry_probe_species(s: &ModelState, j: usize) -> &str {
 
 fn retry_probe_slot_value(s: &ModelState, species: usize) -> f64 {
     let slot = s.n[species];
-    if slot >= 1 && slot <= NDEN {
+    if (1..=NDEN).contains(&slot) {
         s.xr[slot - 1]
     } else {
         f64::NAN
@@ -606,7 +633,16 @@ fn retry_probe_newrax_nonconverged(
 
 #[cfg(all(test, not(feature = "fortran-parity")))]
 mod tests {
-    use super::achievable_errpl;
+    use super::{achievable_errpl, fix_iodine_family};
+    use crate::{constants::NDEN, state::ModelState};
+
+    fn identity_species_map() -> [usize; NDEN] {
+        let mut n = [0usize; NDEN];
+        for (index, slot) in n.iter_mut().enumerate() {
+            *slot = index + 1;
+        }
+        n
+    }
 
     #[test]
     fn precision_floor_catches_cancellation_limited_residual() {
@@ -621,6 +657,51 @@ mod tests {
     #[test]
     fn precision_floor_is_zero_without_positive_reaction_scale() {
         assert_eq!(achievable_errpl(1.0, 0.0, 1.0, -1.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn iodine_family_scaling_uses_atom_weights_for_every_species() {
+        let mut state = ModelState::new();
+        state.n = identity_species_map();
+        state.ntot = NDEN;
+        state.liod = true;
+
+        for (species, iodine_atoms) in [
+            (30usize, 1.0),
+            (31, 1.0),
+            (32, 1.0),
+            (33, 1.0),
+            (34, 1.0),
+            (35, 1.0),
+            (36, 2.0),
+            (37, 2.0),
+            (38, 2.0),
+            (39, 2.0),
+        ] {
+            let mut x = [0.0; NDEN];
+            x[state.n[species] - 1] = 1.0;
+            fix_iodine_family(&mut x, &state, 10.0);
+            assert_eq!(
+                x[state.n[species] - 1],
+                10.0 / iodine_atoms,
+                "wrong iodine-atom weight for species index {species}"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_iodine_target_clears_every_iodine_species() {
+        let mut state = ModelState::new();
+        state.n = identity_species_map();
+        state.ntot = NDEN;
+        state.liod = true;
+        let mut x = [1.0; NDEN];
+
+        fix_iodine_family(&mut x, &state, 0.0);
+
+        for species in 30..=39 {
+            assert_eq!(x[state.n[species] - 1], 0.0, "species index {species}");
+        }
     }
 }
 

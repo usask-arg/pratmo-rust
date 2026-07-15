@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 
 use crate::{
     chemistry::chems,
-    constants::{NDEN, NNDXPQ, NPMEAN, NSLOWM},
+    constants::{NDEN, NNDXPQ, NPMEAN, NSLOWM, PPMEAN_FAMILY_OFFSET, PPMEAN_RATE_OFFSET},
     jvalue::sol,
     output,
     solver::{fixmix, fixrat, linslv, rplace, splace},
@@ -120,19 +120,19 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
             }
         }
 
-        // PPMEAN(K, IB) = PMEAN(460+K),  K=1..30   (P-L for implicit species)
-        for k in 0..30usize {
+        // P-L for all implicit species.
+        for k in 0..NDEN {
             s.ppmean[[k, ib]] = s.pmean[460 + k];
         }
-        // PPMEAN(K+30, IB) = PMEAN(430+K), K=1..20  (P-L for families)
+        // P-L for explicit families.
         for k in 0..20usize {
-            s.ppmean[[30 + k, ib]] = s.pmean[430 + k];
+            s.ppmean[[PPMEAN_FAMILY_OFFSET + k, ib]] = s.pmean[430 + k];
         }
-        // PPMEAN(K+50, IB) from NDXPP-indexed rates
+        // NDXPP-indexed diagnostic rates.
         for k in 0..NNDXPQ {
             let ndx = s.ndxpp[k];
             if ndx > 0 {
-                s.ppmean[[50 + k, ib]] = s.pmean[30 + ndx - 1];
+                s.ppmean[[PPMEAN_RATE_OFFSET + k, ib]] = s.pmean[30 + ndx - 1];
             }
         }
 
@@ -229,6 +229,10 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
 
     s.raxloop = 0.0;
     s.radcount = 0.0;
+    s.newraf_nonconvergence_count = 0;
+    s.rafday_nonconvergence_count = 0;
+    s.rafday_max_final_relative_correction = 0.0;
+    s.rafday_max_correction_iterations = 0;
     for result in results {
         let ib = result.ib;
         let worker = result.state;
@@ -250,21 +254,29 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
                 s.xxnoft[[kn, kt, ib]] = worker.xnoft[[kn, kt]];
             }
         }
-        for k in 0..30usize {
+        for k in 0..NDEN {
             s.ppmean[[k, ib]] = worker.pmean[460 + k];
         }
         for k in 0..20usize {
-            s.ppmean[[30 + k, ib]] = worker.pmean[430 + k];
+            s.ppmean[[PPMEAN_FAMILY_OFFSET + k, ib]] = worker.pmean[430 + k];
         }
         for k in 0..NNDXPQ {
             let ndx = s.ndxpp[k];
             if ndx > 0 {
-                s.ppmean[[50 + k, ib]] = worker.pmean[30 + ndx - 1];
+                s.ppmean[[PPMEAN_RATE_OFFSET + k, ib]] = worker.pmean[30 + ndx - 1];
             }
         }
 
         s.raxloop += worker.raxloop;
         s.radcount += worker.radcount;
+        s.newraf_nonconvergence_count += worker.newraf_nonconvergence_count;
+        s.rafday_nonconvergence_count += worker.rafday_nonconvergence_count;
+        s.rafday_max_final_relative_correction = s
+            .rafday_max_final_relative_correction
+            .max(worker.rafday_max_final_relative_correction);
+        s.rafday_max_correction_iterations = s
+            .rafday_max_correction_iterations
+            .max(worker.rafday_max_correction_iterations);
     }
 
     s.lsvjac = false;
@@ -352,8 +364,6 @@ pub fn daily(s: &mut ModelState, id: i32) -> Result<()> {
     // ── Time-step loop ────────────────────────────────────────────────────
     let ntimdo = s.ntimdo;
     let njval = s.njval;
-    let nbox = s.nbox;
-
     for it in 0..ntimdo {
         s.ittt = it as i32 + 1; // 1-based like Fortran ITTT
         s.gmu = s.utime[it];
@@ -451,13 +461,22 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
     let maxrlx = s.maxrlx;
     let reuse_jacobian = rafday_reuse_jacobian_enabled();
     let mut have_jacobian = false;
+    let mut final_relative_correction = 0.0f64;
+    let mut correction_iterations = 0usize;
 
     'outer: for itrraf in 0..=maxraf {
         s.lsvjac = false;
         s.lprtx = nnr < 1 && s.lprtx;
 
         // Relaxation phase
-        if maxrlx >= 1 {
+        // Seed RAFDAY with a relaxed diurnal orbit once. Repeating this block
+        // after every Newton step integrates the slow species for MAXRLX more
+        // days and erases the HNO3 correction that FIXRAT couples into BrONO2.
+        // The standard DAILY(3) call below already refreshes the orbit after
+        // each correction. Strict parity mode retains the legacy repetition
+        // because the original Fortran contains the same known defect.
+        let relax_this_iteration = maxrlx >= 1 && (itrraf == 0 || cfg!(feature = "fortran-parity"));
+        if relax_this_iteration {
             let mut xnold = s.xnold;
             rplace(s, &mut xnold, s.ibox);
             s.xnold = xnold;
@@ -582,6 +601,8 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
         }
 
         lcnvrg = relerr < s.dayerr;
+        final_relative_correction = relerr;
+        correction_iterations += 1;
 
         if lneg {
             bail!("RAFDAY: negative density after correction");
@@ -596,12 +617,15 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
 
     s.lprtx = lpsave;
 
+    s.rafday_max_final_relative_correction = s
+        .rafday_max_final_relative_correction
+        .max(final_relative_correction);
+    s.rafday_max_correction_iterations = s
+        .rafday_max_correction_iterations
+        .max(correction_iterations);
+
     if nnr > 0 && !lcnvrg {
-        eprintln!(
-            " ***RAFDAY NON-CONV AT BOX/ALT={}/{}",
-            s.ibox + 1,
-            s.ialt + 1
-        );
+        s.rafday_nonconvergence_count += 1;
     }
 
     Ok(())

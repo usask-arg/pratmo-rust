@@ -17,7 +17,7 @@ science data — no external files needed.
 ## Basic run
 
 ```{code-cell} ipython3
-from pratmo import PratmoModel, CtmConfig, CtmBoxSpec
+from pratmo import IMPLICIT_SPECIES_NAMES, PratmoModel, CtmConfig, CtmBoxSpec
 
 model = PratmoModel.with_defaults()
 
@@ -44,7 +44,7 @@ import numpy as np
 o3  = out.species_profile("o3")
 oh  = out.species_profile("oh")
 no2 = out.species_profile("no2")
-alts = np.array([b.altitude_km for b in out.boxes])
+alts = out.altitude_km
 
 print("altitude (km) | O3 (cm⁻³)   | OH (cm⁻³)   | NO2 (cm⁻³)")
 print("-" * 60)
@@ -68,7 +68,9 @@ for z, jn, jo in zip(alts, j_no2, j_o3d):
 
 ## Accessing long-lived species and box metadata
 
-Each `BoxSnapshot` carries atmospheric state alongside the chemistry.
+Each `BoxSnapshot` carries atmospheric state alongside the chemistry. For
+array workflows, `long_lived_profile` extracts any name in
+`pratmo.LONG_LIVED_NAMES` without a Python loop.
 
 ```{code-cell} ipython3
 snap = out.boxes[-1]   # highest box
@@ -77,6 +79,24 @@ print(f"  Air density : {snap.air_density_cm3:.3e} cm⁻³")
 print(f"  O₃ (long-lived MR): {snap.long_lived.o3:.3e}")
 print(f"  CH₄          :      {snap.long_lived.ch4:.3e}")
 print(f"  H₂O          :      {snap.long_lived.h2o:.3e}")
+
+noy = out.long_lived_profile("noy")
+ch4 = out.long_lived_profile("ch4")
+print(f"Profile shapes: NOy={noy.shape}, CH4={ch4.shape}")
+```
+
+## Discovering available fields
+
+The three exported name tuples are the source of truth for string-based array
+extraction. Names passed to profile and grid methods are case-insensitive.
+
+```{code-cell} ipython3
+from pratmo import JVALUE_NAMES, LONG_LIVED_NAMES
+
+print(f"Implicit species ({len(IMPLICIT_SPECIES_NAMES)}):", IMPLICIT_SPECIES_NAMES)
+print(f"Long-lived fields ({len(LONG_LIVED_NAMES)}):", LONG_LIVED_NAMES)
+print(f"J-values ({len(JVALUE_NAMES)}):", JVALUE_NAMES)
+assert np.array_equal(out.species_profile("O3"), out.species_profile("o3"))
 ```
 
 ## Sweeping latitude

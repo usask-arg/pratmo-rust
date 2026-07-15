@@ -1,4 +1,8 @@
-# Iodine chemistry upgrade: Saiz-Lopez et al. (2014)
+# Iodine chemistry upgrade: Saiz-Lopez et al. (2014) — historical plan
+
+> The implemented mechanism and its remaining limitations are documented in
+> [IODINE_CHEMISTRY.md](IODINE_CHEMISTRY.md). This file is retained as planning
+> history and contains superseded placeholders and proposed values.
 
 **Reference:** Saiz-Lopez, A. et al., "Iodine chemistry in the troposphere and its effect on ozone,"
 *Atmos. Chem. Phys.*, 14, 13119–13143, 2014. https://doi.org/10.5194/acp-14-13119-2014
@@ -99,11 +103,8 @@ pub vi2o3:  [f64; NL],   // J(I₂O₃)
 pub vi2o4:  [f64; NL],   // J(I₂O₄)
 ```
 
-Also add a source mixing-ratio field for I₂ (analogous to `fiodx` for inorganic Iy):
-
-```rust
-pub fi2: [f64; NB],   // I₂ source mixing ratio (mol/mol); 0 means no I₂ source
-```
+The proposed standalone `fi2` source field was not retained. I2 is part of the
+gas-phase `fiodx` family and is initialized/repartitioned by chemistry.
 
 ### `init.rs` changes
 

@@ -5,3 +5,9 @@ members = [
     "pratmo-py",
 ]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/usask-arg/pratmo-rust"
+license = "MIT"

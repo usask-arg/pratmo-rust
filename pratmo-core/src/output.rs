@@ -4,6 +4,7 @@
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
 
+use crate::constants::PPMEAN_RATE_OFFSET;
 use crate::state::ModelState;
 
 // ── Fortran-style float formatters ────────────────────────────────────────────
@@ -25,40 +26,6 @@ pub fn fmt_e10p3(v: f64) -> String {
     let sign = if neg { '-' } else { ' ' };
     let es = if exp >= 0 { '+' } else { '-' };
     // mant is e.g. "1.234" (5 chars); total = 1+5+1+1+2 = 10 chars
-    format!("{}{}E{}{:02}", sign, mant, es, exp.unsigned_abs())
-}
-
-/// Fortran 1PE9.2: field width 9, 2 decimal places.
-fn fmt_e9p2(v: f64) -> String {
-    if !v.is_finite() {
-        return "*********".to_string();
-    }
-    if v == 0.0 {
-        return " 0.00E+00".to_string();
-    }
-    let neg = v < 0.0;
-    let raw = format!("{:.2E}", v.abs());
-    let (mant, exp_str) = raw.split_once('E').unwrap_or((&raw, "0"));
-    let exp: i32 = exp_str.parse().unwrap_or(0);
-    let sign = if neg { '-' } else { ' ' };
-    let es = if exp >= 0 { '+' } else { '-' };
-    format!("{}{}E{}{:02}", sign, mant, es, exp.unsigned_abs())
-}
-
-/// Fortran 1PE11.4: field width 11, 4 decimal places.
-fn fmt_e11p4(v: f64) -> String {
-    if !v.is_finite() {
-        return "***********".to_string();
-    }
-    if v == 0.0 {
-        return " 0.0000E+00".to_string();
-    }
-    let neg = v < 0.0;
-    let raw = format!("{:.4E}", v.abs());
-    let (mant, exp_str) = raw.split_once('E').unwrap_or((&raw, "0"));
-    let exp: i32 = exp_str.parse().unwrap_or(0);
-    let sign = if neg { '-' } else { ' ' };
-    let es = if exp >= 0 { '+' } else { '-' };
     format!("{}{}E{}{:02}", sign, mant, es, exp.unsigned_abs())
 }
 
@@ -158,21 +125,6 @@ pub fn lend_dump(s: &mut ModelState) {
     }
 }
 
-// ── RCOLUM accessor ──────────────────────────────────────────────────────────
-
-fn rcolum_get(s: &ModelState, j: usize) -> f64 {
-    match j {
-        1..=30 => s.xr[j - 1],
-        31..=280 => s.r[j - 31],
-        281..=310 => s.rp[j - 281],
-        311..=340 => s.rl[j - 311],
-        341..=370 => s.rpf[j - 341],
-        371..=400 => s.rlf[j - 371],
-        401..=430 => s.rqf[j - 401],
-        _ => 0.0,
-    }
-}
-
 // ── DDDDDD(ib, j) accessor ───────────────────────────────────────────────────
 
 /// DDDDDD(ib, j) = species value for box ib (0-based), species j (1-based).
@@ -181,7 +133,7 @@ fn dddddd(s: &ModelState, ib: usize, j: usize) -> f64 {
     let ndval = s.ndval as usize;
     if j >= 1 && j <= ndval {
         s.den_get(ib, j - 1)
-    } else if j >= ndval + 1 && j <= ndval + s.nfval as usize {
+    } else if j > ndval && j <= ndval + s.nfval as usize {
         s.fff_get(ib, j - ndval)
     } else {
         0.0
@@ -307,7 +259,7 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
     };
 
     if modex > 0 && modex != 11 {
-        let nrows = (nxdd + 12) / 13;
+        let nrows = nxdd.div_ceil(13);
         for i in 0..nrows {
             let i1 = 13 * i;
             let i13 = (i1 + 13).min(nxdd);
@@ -344,7 +296,7 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
 
     if modex == 11 {
         // Family species
-        let nrows = (nxdo + 12) / 13;
+        let nrows = nxdo.div_ceil(13);
         for i in 0..nrows {
             let i1 = 13 * i + 1;
             let i13 = (i1 + 12).min(nxdo);
@@ -383,7 +335,7 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
     let nrates = s.nrates;
     let nrate1 = s.nrate1;
     if moder == -1 || moder == 1 {
-        let nrows = (nrates + 9) / 10;
+        let nrows = nrates.div_ceil(10);
         for i in 0..nrows {
             let i1 = 10 * i + 1;
             let i10 = (i1 + 9).min(nrates);
@@ -413,7 +365,7 @@ pub fn prtall(s: &ModelState, modex: i32, moder: i32, nxdo: usize) {
         }
     } else if moder == 2 {
         // Detailed rates
-        let nrows = (nrates + 3) / 4;
+        let nrows = nrates.div_ceil(4);
         for i in 0..nrows {
             let i1 = 4 * i + 1;
             let i4 = (i1 + 3).min(nrates);
@@ -500,7 +452,7 @@ pub fn prtrat(s: &mut ModelState, nnn: i32) {
     let nbox = s.nbox;
     for ib in 0..nbox {
         let row: String = (0..ndxp)
-            .map(|k| fmt_e10p3(s.ppmean[[50 + k, ib]]))
+            .map(|k| fmt_e10p3(s.ppmean[[PPMEAN_RATE_OFFSET + k, ib]]))
             .collect();
         let line = format!("{:3}{}", ib + 1, row);
         if to_unit8 {
@@ -762,7 +714,7 @@ pub fn prtpth(s: &mut ModelState, iseg: i32, iday: i32, ibx: usize) {
         // WRITE(9,105) IDAY, (PPMEAN(K+50,IBX), K=1,NDXP)
         let _ = write!(w9, " {:3} ", iday);
         for k in 0..ndxp {
-            let _ = write!(w9, "{}", fmt_e10p3(s.ppmean[[50 + k, ib0]]));
+            let _ = write!(w9, "{}", fmt_e10p3(s.ppmean[[PPMEAN_RATE_OFFSET + k, ib0]]));
         }
         let _ = writeln!(w9);
     }

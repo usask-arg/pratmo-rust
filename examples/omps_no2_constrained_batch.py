@@ -27,6 +27,7 @@ import numpy as np
 import xarray as xr
 
 from pratmo import (
+    IMPLICIT_SPECIES_NAMES,
     CustomAtmosphereProfile,
     DiurnBoxSpec,
     DiurnConfig,
@@ -322,7 +323,10 @@ def process_scan(
         chunk_original = box_original_indices[start : start + args.max_boxes_per_run]
         relative_levels = [rel_lookup[int(idx)] + 1 for idx in chunk_original]
         boxes = [
-            DiurnBoxSpec(altitude_level=int(level), albedo=args.albedo)
+            DiurnBoxSpec(
+                altitude_level=int(level),
+                aerosol_surface_area_um2_cm3=args.aerosol_surface_area,
+            )
             for level in relative_levels
         ]
 
@@ -426,6 +430,9 @@ def process_file(input_path: Path, output_path: Path, args: argparse.Namespace) 
             args.max_atmosphere_levels,
         )
         species = parse_csv(args.species)
+        unknown_species = sorted(set(species) - set(IMPLICIT_SPECIES_NAMES))
+        if unknown_species:
+            raise ValueError(f"Unknown implicit species: {', '.join(unknown_species)}")
         long_lived = parse_csv(args.long_lived)
         unknown_long_lived = sorted(set(long_lived) - set(LONG_LIVED_OUTPUTS))
         if unknown_long_lived:
@@ -527,7 +534,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iterations", type=int, default=4)
     parser.add_argument("--integration-days", type=int, default=3)
     parser.add_argument("--julian-day", type=int, default=None)
-    parser.add_argument("--albedo", type=float, default=0.0)
+    parser.add_argument("--aerosol-surface-area", type=float, default=0.0)
     parser.add_argument("--disable-iodine", action="store_true")
     parser.add_argument(
         "--verbose-pratmo",

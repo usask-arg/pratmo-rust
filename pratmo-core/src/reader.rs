@@ -7,7 +7,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
-use crate::constants::NDEN;
+use crate::constants::{NDEN, NJVAL};
 use crate::solver::fixmix;
 use crate::state::ModelState;
 
@@ -31,6 +31,12 @@ pub trait ModelReader {
         self.read_spectral_data(s)?;
         self.read_rate_constants(s)?;
         self.read_control_params(s)?;
+        if s.liod && s.njval != NJVAL {
+            bail!(
+                "iodine species are active but the spectral file provides {} of {NJVAL} J-value slots",
+                s.njval
+            );
+        }
         self.read_atmosphere(s)?;
         self.read_ozone_profile(s)?;
         self.read_jh2o(s)?;
@@ -199,7 +205,6 @@ impl ModelReader for FortranReader {
 
         // Line 1: TITLE0
         s.title0 = next_line(&mut r)?;
-        eprintln!("{}", s.title0);
 
         // Line 2: `10X,14I5` — NQQQ NWWW NW1 NW2 NWSRB NSR NODF
         // Format: 10 chars skipped, then 14 five-char integers.
@@ -218,7 +223,7 @@ impl ModelReader for FortranReader {
         // Line 3: `8E10.3` → QMI1M, QMIWVL
         let line3 = next_line(&mut r)?;
         let fv = parse_f64s(&line3);
-        s.qmi1m = *fv.get(0).unwrap_or(&0.0);
+        s.qmi1m = *fv.first().unwrap_or(&0.0);
         s.qmiwvl = *fv.get(1).unwrap_or(&0.0);
 
         // Line 4: title/blank
@@ -272,13 +277,13 @@ impl ModelReader for FortranReader {
 
         // TITLEJ(1,1) — A20
         let title_no = next_line(&mut r)?;
-        if s.titlej.len() > 0 {
+        if !s.titlej.is_empty() {
             s.titlej[0][0] = title_no.get(..20).unwrap_or(&title_no).trim().to_owned();
         }
 
         // blank line; set TITLEJ(2,1) and (3,1) to ' '
         skip_line(&mut r)?;
-        if s.titlej.len() > 0 {
+        if !s.titlej.is_empty() {
             s.titlej[0][1] = String::new();
             s.titlej[0][2] = String::new();
         }
@@ -460,6 +465,14 @@ impl ModelReader for FortranReader {
             }
         }
 
+        if iod_found == 0 {
+            s.njval = ntab + 4;
+        } else if iod_found != n_iodine {
+            bail!(
+                "incomplete iodine spectral extension: found {iod_found} of {n_iodine} required tables"
+            );
+        }
+
         s.nlbatm = 1;
         Ok(())
     }
@@ -471,8 +484,7 @@ impl ModelReader for FortranReader {
         let mut r = self.open("fort11_jpl09.x")?;
 
         // Line 1: title
-        let title = next_line(&mut r)?;
-        eprintln!("{}", title);
+        let _title = next_line(&mut r)?;
 
         // Line 2: `A10,14I5` → TLBL, NRATE1, NRATES
         let line2 = next_line(&mut r)?;
@@ -508,8 +520,7 @@ impl ModelReader for FortranReader {
         let mut r = self.open("fort13.x")?;
 
         // Line 1: title
-        let title = next_line(&mut r)?;
-        eprintln!("{}", title);
+        let _title = next_line(&mut r)?;
 
         // TITATM label was stored in s.titlev by read_control_params.
         let titatm = s.titlev.clone();
@@ -524,7 +535,7 @@ impl ModelReader for FortranReader {
             let tita = hdr.get(2..10).unwrap_or("").trim();
             let rest = hdr.get(10..).unwrap_or("");
             let fv = parse_f64s(rest);
-            let press0 = *fv.get(0).unwrap_or(&0.0);
+            let press0 = *fv.first().unwrap_or(&0.0);
             let grav = *fv.get(1).unwrap_or(&0.0);
             let rad = *fv.get(2).unwrap_or(&0.0);
 
@@ -581,8 +592,7 @@ impl ModelReader for FortranReader {
     fn read_ozone_profile(&mut self, s: &mut ModelState) -> Result<()> {
         let mut r = self.open("fort14.x")?;
 
-        let title = next_line(&mut r)?;
-        eprintln!("{}", title);
+        let _title = next_line(&mut r)?;
 
         // `A10,14I5` → TLBL, NDDDZ
         let line2 = next_line(&mut r)?;
@@ -600,7 +610,7 @@ impl ModelReader for FortranReader {
             // COLATZ (column O3) is in the remaining floats
             let rest = hdr.get(10..).unwrap_or("");
             let fv = parse_f64s(rest);
-            let colatz = *fv.get(0).unwrap_or(&0.0);
+            let colatz = *fv.first().unwrap_or(&0.0);
 
             let do3 = read_f64_array(&mut r, ndddz)?;
             if titz == tito3 {
@@ -717,7 +727,7 @@ impl ModelReader for FortranReader {
         // `A10,7E10.3` → TLBL, XLATD, XDECD, FLSCAL, ZO3COL, DAYSEC, GMU0
         let line = next_line(&mut r)?;
         let fv = parse_f64s(&line[10..]);
-        s.xlatd = *fv.get(0).unwrap_or(&0.0);
+        s.xlatd = *fv.first().unwrap_or(&0.0);
         s.xdecd = *fv.get(1).unwrap_or(&0.0);
         s.flscal = *fv.get(2).unwrap_or(&1.0);
         s.zo3col = *fv.get(3).unwrap_or(&0.0);
@@ -742,7 +752,7 @@ impl ModelReader for FortranReader {
         // `A10,7E10.3` → TLBL, PN2, PO2, PCO2, ZZHT
         let line = next_line(&mut r)?;
         let fv = parse_f64s(&line[10..]);
-        s.pn2 = *fv.get(0).unwrap_or(&0.0);
+        s.pn2 = *fv.first().unwrap_or(&0.0);
         s.po2 = *fv.get(1).unwrap_or(&0.0);
         s.pco2 = *fv.get(2).unwrap_or(&0.0);
         s.zzht = *fv.get(3).unwrap_or(&6.3e5);
@@ -764,7 +774,7 @@ impl ModelReader for FortranReader {
         // `A10,14F5.2` → TLBL, CLOUDS
         let line = next_line(&mut r)?;
         let fv = parse_f64s(&line[10..]);
-        s.clouds = *fv.get(0).unwrap_or(&0.0);
+        s.clouds = *fv.first().unwrap_or(&0.0);
 
         // `A10,7E10.3` → TLBL, AERSOL(1..6)
         // AERSOL(5) = TURBD0, AERSOL(6) = TURBDX
@@ -780,7 +790,7 @@ impl ModelReader for FortranReader {
         // `A10,7E10.3` → TLBL, RAFMIN..DAYERR
         let line = next_line(&mut r)?;
         let fv = parse_f64s(&line[10..]);
-        s.rafmin = *fv.get(0).unwrap_or(&0.1);
+        s.rafmin = *fv.first().unwrap_or(&0.1);
         s.rafmax = *fv.get(1).unwrap_or(&1e4);
         s.rafpml = *fv.get(2).unwrap_or(&1e-10);
         s.rafeps = *fv.get(3).unwrap_or(&1e-4);
@@ -891,7 +901,7 @@ impl ModelReader for FortranReader {
         // `A10,7E10.3` → TLBL, DIFFC, XDMAX, ZSHEAR, DIFFAC
         let line = next_line(&mut r)?;
         let fv = parse_f64s(&line[10..]);
-        let diffc = *fv.get(0).unwrap_or(&0.0);
+        let diffc = *fv.first().unwrap_or(&0.0);
         s.xdmax = *fv.get(1).unwrap_or(&0.0);
         s.zshear = *fv.get(2).unwrap_or(&0.0);
         s.diffac = *fv.get(3).unwrap_or(&1.0);
@@ -1187,7 +1197,7 @@ impl ModelReader for FortranReader {
         for i in 0..crate::constants::NJH2O {
             let line = next_line(&mut r)?;
             let fv = parse_f64s(&line);
-            s.zjh2o[i] = *fv.get(0).unwrap_or(&0.0);
+            s.zjh2o[i] = *fv.first().unwrap_or(&0.0);
             s.xjh2o[i] = *fv.get(1).unwrap_or(&0.0);
         }
         Ok(())
@@ -1344,7 +1354,7 @@ pub fn setday(s: &mut ModelState) {
     let gmua = s.xlat.sin() * s.xdec.sin();
     let gmub = s.xlat.cos() * s.xdec.cos();
 
-    let arg = ((s.gmu0 - gmua) / gmub).max(-1.0).min(1.0);
+    let arg = ((s.gmu0 - gmua) / gmub).clamp(-1.0, 1.0);
     s.sunset = arg.acos() * cpihr;
 
     let sset = 3600.0 * s.sunset;
@@ -1414,7 +1424,7 @@ pub fn setday(s: &mut ModelState) {
         s.wtime[j] = (dj - s.dtime[j - 1]) / s.daysec;
     }
 
-    let midnit = (ntim + 1) / 2;
+    let midnit = ntim.div_ceil(2);
     s.nmu = 1;
 
     for jj in 0..=morn {
@@ -1519,7 +1529,7 @@ pub fn hystat(s: &mut ModelState, logp: i32) {
         s.dm[0] = s.pstd[0] / (cboltz * s.t[0]);
         s.theta[0] = s.t[0];
         let dlogp = 10.0_f64.powf(-2.0 / 16.0);
-        let clogp = 421.25462799776471_f64;
+        let clogp = 421.254_627_997_764_7_f64;
         for ii in 1..nc {
             s.pstd[ii] = s.pstd[ii - 1] * dlogp;
             s.z[ii] = s.z[ii - 1] + (s.t[ii - 1] + s.t[ii]) * clogp;

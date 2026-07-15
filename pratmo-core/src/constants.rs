@@ -12,7 +12,10 @@ pub const NJH2O: usize = 89; // H2O photolysis table points
 // Derived sizes
 pub const NJVAL: usize = NXS + 4; // total J-values (52)
 pub const NDEN: usize = 40; // implicit species count (30 base + 10 iodine)
-pub const NR: usize = 250; // reaction rate array size
-pub const NRCOLUM: usize = 430; // P-L column storage (XR + RP + RL + RPF + RLF + RQF)
+pub const NR: usize = 264; // reaction rate array size (250 legacy + 14 iodine extensions)
+pub const NRCOLUM: usize = 430; // legacy Fortran diagnostic column layout
 pub const NPMEAN: usize = 460 + NDEN; // daily mean storage (P-L block starts at 460)
+pub const PPMEAN_FAMILY_OFFSET: usize = NDEN;
+pub const PPMEAN_RATE_OFFSET: usize = NDEN + 20;
+pub const NPPMEAN: usize = PPMEAN_RATE_OFFSET + NNDXPQ;
 pub const NXNOFT: usize = 44; // time steps per day (max)

@@ -78,7 +78,8 @@ fn custom_atmosphere_respects_box_altitude_level() {
         integration_days: 1,
         boxes: vec![DiurnBoxSpec {
             altitude_level: 3,
-            albedo: 0.0,
+            aerosol_surface_area_um2_cm3: 0.0,
+            sea_salt_surface_area_um2_cm3: 0.0,
             temp_offset_k: 0.0,
         }],
         bromine: true,
@@ -138,7 +139,8 @@ fn custom_atmosphere_level_is_independent_of_box_slot() {
         integration_days: 1,
         boxes: vec![DiurnBoxSpec {
             altitude_level: 3,
-            albedo: 0.0,
+            aerosol_surface_area_um2_cm3: 0.0,
+            sea_salt_surface_area_um2_cm3: 0.0,
             temp_offset_k: 0.0,
         }],
         bromine: true,
@@ -151,17 +153,20 @@ fn custom_atmosphere_level_is_independent_of_box_slot() {
         boxes: vec![
             DiurnBoxSpec {
                 altitude_level: 1,
-                albedo: 0.0,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,
             },
             DiurnBoxSpec {
                 altitude_level: 2,
-                albedo: 0.0,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,
             },
             DiurnBoxSpec {
                 altitude_level: 3,
-                albedo: 0.0,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,
             },
         ],

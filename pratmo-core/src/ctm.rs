@@ -6,6 +6,7 @@ use std::io::Write;
 use anyhow::Result;
 
 use crate::{
+    constants::PPMEAN_RATE_OFFSET,
     init::ctinit,
     output::hunt,
     path::dstep,
@@ -24,6 +25,16 @@ use crate::{
 /// The I/O requires fort03_LLM.x, fort04.x, fort05.x, fort51.x in cinpdir.
 /// Fortran: SUBROUTINE CTMLFQ
 pub fn ctmlfq(s: &mut ModelState) -> Result<()> {
+    ctmlfq_impl(s, true)
+}
+
+/// Run CTM calculations without creating `boxout.dat` or printing legacy
+/// climatology diagnostics. Used by structured programmatic APIs.
+pub(crate) fn ctmlfq_in_memory(s: &mut ModelState) -> Result<()> {
+    ctmlfq_impl(s, false)
+}
+
+fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
     use std::path::Path;
@@ -106,7 +117,7 @@ pub fn ctmlfq(s: &mut ModelState) -> Result<()> {
         let raw_path = line.trim();
         // Handle both Windows (\) and Unix (/) separators
         let fname = raw_path
-            .rsplit(|c| c == '\\' || c == '/')
+            .rsplit(['\\', '/'])
             .next()
             .filter(|s| !s.is_empty())
             .unwrap_or("boxout.dat");
@@ -284,13 +295,13 @@ pub fn ctmlfq(s: &mut ModelState) -> Result<()> {
     }
 
     // Initialization call: CTOUTP(0, 0, 0) — sets NDXPP and prints rate list
-    ctoutp(s, 0, 0)?;
+    ctoutp_impl(s, 0, 0, emit_legacy_output)?;
 
     // ── Main climatology loop ─────────────────────────────────────────────
 
     let nd216 = s.nd216;
     let nd216s = s.nd216s;
-    let mut outfile = if nd216 >= nd216s {
+    let mut outfile = if emit_legacy_output && nd216 >= nd216s {
         match std::fs::File::create(&bmoutfile) {
             Ok(f) => Some(std::io::BufWriter::new(f)),
             Err(e) => {
@@ -500,7 +511,7 @@ pub fn ctmlfq(s: &mut ModelState) -> Result<()> {
             }
         }
 
-        ctoutp(s, (ilat2 - 1) as usize, (imon - 1) as usize)?;
+        ctoutp_impl(s, ilat2 - 1, imon - 1, emit_legacy_output)?;
     }
 
     Ok(())
@@ -513,6 +524,15 @@ pub fn ctmlfq(s: &mut ModelState) -> Result<()> {
 /// ilat>0, imon>0: per-atmosphere output (prints loss frequencies).
 /// Fortran: SUBROUTINE CTOUTP(LAT, MON, IPATH)
 pub fn ctoutp(s: &mut ModelState, ilat: usize, imon: usize) -> Result<()> {
+    ctoutp_impl(s, ilat, imon, true)
+}
+
+fn ctoutp_impl(
+    s: &mut ModelState,
+    ilat: usize,
+    imon: usize,
+    emit_legacy_output: bool,
+) -> Result<()> {
     use crate::constants::NNDXPQ;
 
     if ilat == 0 && imon == 0 {
@@ -537,22 +557,26 @@ pub fn ctoutp(s: &mut ModelState, ilat: usize, imon: usize) -> Result<()> {
             }
         }
 
-        println!("  StratLoss OUTPUT rates:");
-        for k in 0..NNDXPQ {
-            let kr = s.ndxpp[k];
-            if kr > 0 && kr <= s.nrates {
-                println!(
-                    "{:5}{:5}     {:<8}{:<8}",
-                    k + 1,
-                    kr,
-                    &s.rfmt_str[kr - 1][0],
-                    &s.rfmt_str[kr - 1][1]
-                );
+        if emit_legacy_output {
+            println!("  StratLoss OUTPUT rates:");
+            for k in 0..NNDXPQ {
+                let kr = s.ndxpp[k];
+                if kr > 0 && kr <= s.nrates {
+                    println!(
+                        "{:5}{:5}     {:<8}{:<8}",
+                        k + 1,
+                        kr,
+                        &s.rfmt_str[kr - 1][0],
+                        &s.rfmt_str[kr - 1][1]
+                    );
+                }
             }
         }
     } else {
         // Per-atmosphere output: compute and print key loss frequencies
-        println!("{:5}{:5} StratLossFreq: jNOy NOY N2O F11", imon, ilat);
+        if emit_legacy_output {
+            println!("{:5}{:5} StratLossFreq: jNOy NOY N2O F11", imon, ilat);
+        }
 
         for ib in 0..s.nbox {
             let ialt_1 = s.nboxdo[ib].unsigned_abs() as usize;
@@ -571,7 +595,9 @@ pub fn ctoutp(s: &mut ModelState, ilat: usize, imon: usize) -> Result<()> {
 
             // N2O loss freq: (PPMEAN(54)+PPMEAN(55)+PPMEAN(56)) / (M * FN2O)
             // NDXPP(1)=9→ppmean[50+0], NDXPP(2)=10→ppmean[50+1], NDXPP(3)=137→ppmean[50+2]
-            let sln2o_num = s.ppmean[[50, ib]] + s.ppmean[[51, ib]] + s.ppmean[[52, ib]];
+            let sln2o_num = s.ppmean[[PPMEAN_RATE_OFFSET, ib]]
+                + s.ppmean[[PPMEAN_RATE_OFFSET + 1, ib]]
+                + s.ppmean[[PPMEAN_RATE_OFFSET + 2, ib]];
             let sln2o = if fn2o > 0.0 {
                 sln2o_num / (densbx * fn2o)
             } else {
@@ -579,7 +605,8 @@ pub fn ctoutp(s: &mut ModelState, ilat: usize, imon: usize) -> Result<()> {
             };
 
             // NOy loss freq: 2*(PPMEAN(52)+PPMEAN(53)) / (M * FNOY)
-            let slnoy_num = 2.0 * (s.ppmean[[51, ib]] + s.ppmean[[52, ib]]);
+            let slnoy_num = 2.0
+                * (s.ppmean[[PPMEAN_RATE_OFFSET + 1, ib]] + s.ppmean[[PPMEAN_RATE_OFFSET + 2, ib]]);
             let slnoy = if fnoy > 0.0 {
                 slnoy_num / (densbx * fnoy)
             } else {
@@ -587,8 +614,10 @@ pub fn ctoutp(s: &mut ModelState, ilat: usize, imon: usize) -> Result<()> {
             };
 
             // CH4 loss freq
-            let slch4_num =
-                s.ppmean[[57, ib]] + s.ppmean[[58, ib]] + s.ppmean[[59, ib]] + s.ppmean[[60, ib]];
+            let slch4_num = s.ppmean[[PPMEAN_RATE_OFFSET + 7, ib]]
+                + s.ppmean[[PPMEAN_RATE_OFFSET + 8, ib]]
+                + s.ppmean[[PPMEAN_RATE_OFFSET + 9, ib]]
+                + s.ppmean[[PPMEAN_RATE_OFFSET + 10, ib]];
             let slch4 = if fch4 > 0.0 {
                 slch4_num / (densbx * fch4)
             } else {
@@ -597,29 +626,32 @@ pub fn ctoutp(s: &mut ModelState, ilat: usize, imon: usize) -> Result<()> {
 
             // CFC-11 loss freq
             let slf11 = if fcfcl3 > 0.0 {
-                (s.ppmean[[62, ib]] + s.ppmean[[63, ib]]) / (densbx * fcfcl3)
+                (s.ppmean[[PPMEAN_RATE_OFFSET + 12, ib]] + s.ppmean[[PPMEAN_RATE_OFFSET + 13, ib]])
+                    / (densbx * fcfcl3)
             } else {
                 0.0
             };
 
             // O3 loss freq
             let slo3 = if fo3 > 0.0 {
-                s.ppmean[[50, ib]] / (86400.0 * fo3)
+                s.ppmean[[PPMEAN_RATE_OFFSET, ib]] / (86400.0 * fo3)
             } else {
                 0.0
             };
 
-            println!(
-                "{:3} {:4.1} {:9.2e} {:9.2e} {:9.2e} {:9.2e} {:9.2e} {:9.2e}",
-                ib + 1,
-                zkm,
-                fo3,
-                fnoy,
-                fn2o,
-                sln2o,
-                slnoy,
-                slch4
-            );
+            if emit_legacy_output {
+                println!(
+                    "{:3} {:4.1} {:9.2e} {:9.2e} {:9.2e} {:9.2e} {:9.2e} {:9.2e}",
+                    ib + 1,
+                    zkm,
+                    fo3,
+                    fnoy,
+                    fn2o,
+                    sln2o,
+                    slnoy,
+                    slch4
+                );
+            }
             let _ = (slo3, slf11);
         }
     }
@@ -677,7 +709,7 @@ fn write_box_row(
 
     // ── Assemble xout (scalar fields) ────────────────────────────────────────
     // xout(1..5) always: z, T, p, M, O3
-    let mut xout = vec![0.0f64; 13];
+    let mut xout = [0.0f64; 13];
     let mut chead1 = vec![""; 13];
     xout[0] = zkm;
     xout[1] = s.t[ialt];

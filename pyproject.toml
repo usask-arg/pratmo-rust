@@ -9,7 +9,9 @@ description = "Experimental AI-assisted Rust rewrite of the PRATMO photochemical
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+# PyO3 0.24 supports CPython through 3.13. Keep this upper bound in sync with
+# the Rust binding dependencies so maturin does not discover unsupported hosts.
+requires-python = ">=3.10,<3.14"
 dependencies = [
     "numpy>=1.24",
 ]

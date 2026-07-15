@@ -102,10 +102,10 @@ uv run pytest
 uv run sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
 
-GitHub Actions runs these Rust checks on every push and pull request. It also
-builds a Linux wheel, installs that wheel, runs the Python tests, and performs a
-strict documentation build. The separate release workflow builds the complete
-cross-platform wheel set and uploads to PyPI only for tags matching `v*`.
+GitHub Actions runs these Rust checks, the Python tests, a strict documentation
+build, and the complete cross-platform wheel build on every push and pull
+request. Built distributions are retained as workflow artifacts. The publish
+job runs only for release tags matching `v*` and uses PyPI Trusted Publishing.
 
 The clean-room compiled-Fortran differential is available separately:
 

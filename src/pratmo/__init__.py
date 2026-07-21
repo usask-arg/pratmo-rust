@@ -39,6 +39,7 @@ from pratmo._pratmo import (
     No2ConstrainedDiurnOutput,
     PratmoModel,
 )
+from pratmo.climatology import PratmoClimatology, PratmoClimatologyProfile
 
 __all__ = [
     "IMPLICIT_SPECIES_NAMES",
@@ -61,4 +62,6 @@ __all__ = [
     "LongLivedMixingRatios",
     "JValues",
     "Diagnostics",
+    "PratmoClimatology",
+    "PratmoClimatologyProfile",
 ]

@@ -23,6 +23,7 @@ fn custom_atmosphere_diurn_runs() {
             altitude_km: Some(vec![21.5]),
             o3: vec![5.0e-6],
             o3_kind: O3InputKind::MixingRatio,
+            aerosol_surface_area_um2_cm3: None,
         }),
         ..Default::default()
     };
@@ -34,6 +35,73 @@ fn custom_atmosphere_diurn_runs() {
     assert!((out.boxes[0].temperature_k - 220.0).abs() < 1e-12);
     assert!((out.boxes[0].altitude_km - 21.5).abs() < 1e-12);
     assert!(out.boxes[0].implicit.o3 > 0.0);
+}
+
+#[test]
+fn explicit_diurn_time_grid_is_preserved_in_output() {
+    let model = PratmoModel::with_defaults();
+    let elapsed_time_hours: Vec<f64> = (0..=48).map(|index| index as f64 * 0.5).collect();
+    let cfg = DiurnConfig {
+        latitude_deg: 30.0,
+        julian_day: 184,
+        integration_days: 1,
+        iodine: false,
+        elapsed_time_hours: Some(elapsed_time_hours.clone()),
+        atmosphere: Some(CustomAtmosphereProfile {
+            pressure_mb: vec![30.0],
+            temperature_k: vec![220.0],
+            altitude_km: Some(vec![24.0]),
+            o3: vec![5.0e-6],
+            o3_kind: O3InputKind::MixingRatio,
+            aerosol_surface_area_um2_cm3: None,
+        }),
+        ..Default::default()
+    };
+
+    let out = model
+        .run_diurn(&cfg)
+        .expect("explicit-grid DIURN run failed");
+    let actual: Vec<f64> = out.time_series[0]
+        .steps
+        .iter()
+        .map(|step| step.elapsed_seconds / 3600.0)
+        .collect();
+    assert_eq!(actual, elapsed_time_hours);
+}
+
+#[test]
+fn surface_albedo_changes_custom_diurn_photolysis() {
+    let model = PratmoModel::with_defaults();
+    let base = DiurnConfig {
+        latitude_deg: 30.0,
+        julian_day: 184,
+        integration_days: 1,
+        iodine: false,
+        heterogeneous_chemistry: false,
+        atmosphere: Some(CustomAtmosphereProfile {
+            pressure_mb: vec![500.0, 200.0, 80.0],
+            temperature_k: vec![270.0, 240.0, 220.0],
+            altitude_km: Some(vec![5.0, 12.0, 20.0]),
+            o3: vec![5.0e-8, 5.0e-7, 3.0e-6],
+            o3_kind: O3InputKind::MixingRatio,
+            aerosol_surface_area_um2_cm3: None,
+        }),
+        ..Default::default()
+    };
+    let low = model
+        .run_diurn(&DiurnConfig {
+            surface_albedo: 0.0,
+            ..base.clone()
+        })
+        .expect("zero-albedo run failed");
+    let high = model
+        .run_diurn(&DiurnConfig {
+            surface_albedo: 0.8,
+            ..base
+        })
+        .expect("high-albedo run failed");
+
+    assert_ne!(low.boxes[0].jvalues.no2, high.boxes[0].jvalues.no2);
 }
 
 #[test]
@@ -51,6 +119,7 @@ fn no2_constrained_diurn_returns_scale() {
             altitude_km: Some(vec![21.5]),
             o3: vec![5.0e-6],
             o3_kind: O3InputKind::MixingRatio,
+            aerosol_surface_area_um2_cm3: None,
         }),
         ..Default::default()
     };
@@ -78,6 +147,7 @@ fn custom_atmosphere_respects_box_altitude_level() {
         integration_days: 1,
         boxes: vec![DiurnBoxSpec {
             altitude_level: 3,
+            altitude_km: None,
             aerosol_surface_area_um2_cm3: 0.0,
             sea_salt_surface_area_um2_cm3: 0.0,
             temp_offset_k: 0.0,
@@ -90,6 +160,7 @@ fn custom_atmosphere_respects_box_altitude_level() {
             altitude_km: Some(vec![18.0, 21.0, 24.0]),
             o3: vec![3.5e-6, 5.0e-6, 6.0e-6],
             o3_kind: O3InputKind::MixingRatio,
+            aerosol_surface_area_um2_cm3: None,
         }),
         ..Default::default()
     };
@@ -102,6 +173,87 @@ fn custom_atmosphere_respects_box_altitude_level() {
 }
 
 #[test]
+fn custom_atmosphere_supports_off_grid_chemistry_altitude() {
+    let model = PratmoModel::with_defaults();
+    let cfg = DiurnConfig {
+        latitude_deg: 0.0,
+        julian_day: 120,
+        integration_days: 1,
+        boxes: vec![DiurnBoxSpec {
+            altitude_level: 2,
+            altitude_km: Some(22.5),
+            aerosol_surface_area_um2_cm3: 0.2,
+            sea_salt_surface_area_um2_cm3: 0.0,
+            temp_offset_k: 0.0,
+        }],
+        bromine: true,
+        iodine: false,
+        atmosphere: Some(CustomAtmosphereProfile {
+            pressure_mb: vec![80.0, 50.0, 30.0],
+            temperature_k: vec![225.0, 220.0, 215.0],
+            altitude_km: Some(vec![18.0, 21.0, 24.0]),
+            o3: vec![3.5e-6, 5.0e-6, 6.0e-6],
+            o3_kind: O3InputKind::MixingRatio,
+            aerosol_surface_area_um2_cm3: Some(vec![0.1, 0.2, 0.4]),
+        }),
+        ..Default::default()
+    };
+
+    let out = model.run_diurn(&cfg).expect("off-grid DIURN run failed");
+    let snapshot = &out.boxes[0];
+    assert!((snapshot.altitude_km - 22.5).abs() < 1e-12);
+    assert!((snapshot.temperature_k - 217.5).abs() < 1e-12);
+    assert!((snapshot.pressure_mb - (50.0_f64 * 30.0).sqrt()).abs() < 1e-12);
+}
+
+#[test]
+fn radiative_aerosol_switch_changes_custom_photolysis() {
+    let model = PratmoModel::with_defaults();
+    let base = DiurnConfig {
+        latitude_deg: 0.0,
+        julian_day: 120,
+        integration_days: 1,
+        boxes: vec![DiurnBoxSpec {
+            altitude_level: 2,
+            altitude_km: Some(22.5),
+            aerosol_surface_area_um2_cm3: 10.0,
+            sea_salt_surface_area_um2_cm3: 0.0,
+            temp_offset_k: 0.0,
+        }],
+        bromine: true,
+        iodine: false,
+        heterogeneous_chemistry: false,
+        surface_albedo: 0.0,
+        atmosphere: Some(CustomAtmosphereProfile {
+            pressure_mb: vec![80.0, 50.0, 30.0],
+            temperature_k: vec![225.0, 220.0, 215.0],
+            altitude_km: Some(vec![18.0, 21.0, 24.0]),
+            o3: vec![3.5e-6, 5.0e-6, 6.0e-6],
+            o3_kind: O3InputKind::MixingRatio,
+            aerosol_surface_area_um2_cm3: Some(vec![10.0; 3]),
+        }),
+        ..Default::default()
+    };
+
+    let clear = model
+        .run_diurn(&DiurnConfig {
+            radiative_aerosol: false,
+            ..base.clone()
+        })
+        .expect("aerosol-off DIURN run failed");
+    let aerosol = model
+        .run_diurn(&DiurnConfig {
+            radiative_aerosol: true,
+            ..base
+        })
+        .expect("aerosol-on DIURN run failed");
+    let clear_jno2 = clear.boxes[0].jvalues.no2;
+    let aerosol_jno2 = aerosol.boxes[0].jvalues.no2;
+    assert!(clear_jno2.is_finite() && aerosol_jno2.is_finite());
+    assert!((aerosol_jno2 - clear_jno2).abs() > 1.0e-8 * clear_jno2.abs());
+}
+
+#[test]
 fn custom_atmosphere_level_is_independent_of_box_slot() {
     let model = PratmoModel::with_defaults();
     let atmosphere = CustomAtmosphereProfile {
@@ -110,6 +262,7 @@ fn custom_atmosphere_level_is_independent_of_box_slot() {
         altitude_km: Some(vec![18.0, 21.0, 24.0]),
         o3: vec![3.5e-6, 5.0e-6, 6.0e-6],
         o3_kind: O3InputKind::MixingRatio,
+        aerosol_surface_area_um2_cm3: None,
     };
     let initial = LongLivedMixingRatios {
         o3: 6.0e-6,
@@ -139,6 +292,7 @@ fn custom_atmosphere_level_is_independent_of_box_slot() {
         integration_days: 1,
         boxes: vec![DiurnBoxSpec {
             altitude_level: 3,
+            altitude_km: None,
             aerosol_surface_area_um2_cm3: 0.0,
             sea_salt_surface_area_um2_cm3: 0.0,
             temp_offset_k: 0.0,
@@ -153,18 +307,21 @@ fn custom_atmosphere_level_is_independent_of_box_slot() {
         boxes: vec![
             DiurnBoxSpec {
                 altitude_level: 1,
+                altitude_km: None,
                 aerosol_surface_area_um2_cm3: 0.0,
                 sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,
             },
             DiurnBoxSpec {
                 altitude_level: 2,
+                altitude_km: None,
                 aerosol_surface_area_um2_cm3: 0.0,
                 sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,
             },
             DiurnBoxSpec {
                 altitude_level: 3,
+                altitude_km: None,
                 aerosol_surface_area_um2_cm3: 0.0,
                 sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,
@@ -185,7 +342,7 @@ fn custom_atmosphere_level_is_independent_of_box_slot() {
     let rel = (single_no2 - multi_no2).abs() / single_no2.max(1.0);
 
     assert!(
-        rel < 0.10,
+        rel < 0.01,
         "NO2 changed with box slot: single={single_no2:e}, multi={multi_no2:e}, rel={rel:e}"
     );
 }

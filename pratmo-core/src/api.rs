@@ -13,11 +13,11 @@ use anyhow::{bail, Result};
 use ndarray::Array2;
 
 use crate::{
-    constants::{NB, NDEN, NL},
+    constants::{LEGACY_NL, NATM, NB, NDEN, NL, NXNOFT},
     ctm::ctmlfq_in_memory,
     diurnal::{diurn, diurn_parallel_boxes},
     path::tpath,
-    reader::{setday, FortranReader, ModelReader},
+    reader::{setday, setday_cpp, setday_elapsed_hours, FortranReader, ModelReader},
     solver::{fixrat, rplace, splace},
     state::ModelState,
 };
@@ -410,6 +410,11 @@ impl Default for CtmConfig {
 pub struct DiurnBoxSpec {
     /// 1-based standard pressure level index (1 = surface, NL = top).
     pub altitude_level: u8,
+    /// Optional exact chemistry-box altitude in km. When supplied with a
+    /// custom atmosphere, chemistry is evaluated at this altitude while the
+    /// actinic flux is linearly interpolated between the surrounding
+    /// radiative levels.
+    pub altitude_km: Option<f64>,
     /// Generic aerosol surface area density in um2/cm3.
     pub aerosol_surface_area_um2_cm3: f64,
     /// Sea-salt surface area density in um2/cm3 (iodine recycling only).
@@ -435,6 +440,9 @@ pub struct CustomAtmosphereProfile {
     pub altitude_km: Option<Vec<f64>>,
     pub o3: Vec<f64>,
     pub o3_kind: O3InputKind,
+    /// Optional sulfate aerosol surface-area profile (um2/cm3). This is used
+    /// both by heterogeneous chemistry and, when enabled, radiative transfer.
+    pub aerosol_surface_area_um2_cm3: Option<Vec<f64>>,
 }
 
 /// Configuration for a diurnal cycle run.
@@ -450,7 +458,19 @@ pub struct DiurnConfig {
     pub bromine: bool,
     pub iodine: bool,
     pub parallel_boxes: bool,
+    /// Match the later C++ box model's fixed-mu grid and daily endpoint
+    /// convergence algorithm.
+    pub cpp_compatibility: bool,
+    /// Optional explicit integration coordinate in elapsed hours after local
+    /// noon. When present, this overrides the legacy or C++ generated grid.
+    pub elapsed_time_hours: Option<Vec<f64>>,
     pub solar_flux_scale: f64,
+    /// Lambertian lower-boundary reflectivity used by the photolysis solver.
+    pub surface_albedo: f64,
+    /// Enable sulfate-aerosol and sea-salt heterogeneous chemistry.
+    pub heterogeneous_chemistry: bool,
+    /// Include sulfate aerosol extinction and scattering in photolysis.
+    pub radiative_aerosol: bool,
     /// Optional custom pressure/temperature/O3 grid. If provided and `boxes` is
     /// empty, one DIURN box is created for each profile level.
     pub atmosphere: Option<CustomAtmosphereProfile>,
@@ -468,7 +488,12 @@ impl Default for DiurnConfig {
             bromine: false,
             iodine: true,
             parallel_boxes: false,
+            cpp_compatibility: false,
+            elapsed_time_hours: None,
             solar_flux_scale: 1.0,
+            surface_albedo: 0.20,
+            heterogeneous_chemistry: true,
+            radiative_aerosol: false,
             atmosphere: None,
             initial_mixing_ratios: None,
         }
@@ -841,6 +866,7 @@ fn validate_box_spec(
     mode: &str,
     index: usize,
     altitude_level: u8,
+    altitude_km: Option<f64>,
     max_altitude_level: usize,
     aerosol_surface_area_um2_cm3: f64,
     sea_salt_surface_area_um2_cm3: f64,
@@ -850,6 +876,11 @@ fn validate_box_spec(
         bail!(
             "{mode} boxes[{index}].altitude_level must be between 1 and {max_altitude_level}, got {altitude_level}"
         );
+    }
+    if let Some(altitude_km) = altitude_km {
+        if !(altitude_km.is_finite() && altitude_km >= 0.0) {
+            bail!("{mode} boxes[{index}].altitude_km must be finite and non-negative");
+        }
     }
     if !(aerosol_surface_area_um2_cm3.is_finite() && aerosol_surface_area_um2_cm3 >= 0.0) {
         bail!("{mode} boxes[{index}].aerosol_surface_area_um2_cm3 must be finite and non-negative");
@@ -907,13 +938,32 @@ fn validate_diurn_config(cfg: &DiurnConfig) -> Result<()> {
         cfg.integration_days,
         cfg.solar_flux_scale,
     )?;
+    if !(cfg.surface_albedo.is_finite() && (0.0..=1.0).contains(&cfg.surface_albedo)) {
+        bail!("DIURN surface_albedo must be finite and between 0 and 1");
+    }
+    if let Some(hours) = &cfg.elapsed_time_hours {
+        if hours.len() < 2 || hours.len() > NXNOFT {
+            bail!("DIURN elapsed_time_hours must contain between 2 and {NXNOFT} points");
+        }
+        if (hours[0] - 0.0).abs() > 1.0e-10 || (hours[hours.len() - 1] - 24.0).abs() > 1.0e-10 {
+            bail!("DIURN elapsed_time_hours must start at 0 and end at 24");
+        }
+        for (index, &value) in hours.iter().enumerate() {
+            if !value.is_finite() || !(0.0..=24.0).contains(&value) {
+                bail!("DIURN elapsed_time_hours[{index}] must be finite and between 0 and 24");
+            }
+            if index > 0 && value <= hours[index - 1] {
+                bail!("DIURN elapsed_time_hours must be strictly increasing");
+            }
+        }
+    }
     if cfg.boxes.len() > NB {
         bail!("DIURN supports at most {NB} boxes, got {}", cfg.boxes.len());
     }
     let max_altitude_level = cfg
         .atmosphere
         .as_ref()
-        .map_or(NL, |profile| profile.pressure_mb.len());
+        .map_or(LEGACY_NL, |profile| profile.pressure_mb.len());
     if cfg.boxes.is_empty() {
         let profile_levels = cfg
             .atmosphere
@@ -934,11 +984,28 @@ fn validate_diurn_config(cfg: &DiurnConfig) -> Result<()> {
             "DIURN",
             index,
             box_.altitude_level,
+            box_.altitude_km,
             max_altitude_level,
             box_.aerosol_surface_area_um2_cm3,
             box_.sea_salt_surface_area_um2_cm3,
             box_.temp_offset_k,
         )?;
+        if let Some(altitude_km) = box_.altitude_km {
+            let profile = cfg.atmosphere.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("DIURN boxes[{index}].altitude_km requires a custom atmosphere")
+            })?;
+            let profile_altitude = profile.altitude_km.as_ref().ok_or_else(|| {
+                anyhow::anyhow!("DIURN boxes[{index}].altitude_km requires atmosphere.altitude_km")
+            })?;
+            if let (Some(&bottom), Some(&top)) = (profile_altitude.first(), profile_altitude.last())
+            {
+                if altitude_km < bottom || altitude_km > top {
+                    bail!(
+                        "DIURN boxes[{index}].altitude_km must lie within the custom atmosphere ({bottom}..={top} km)"
+                    );
+                }
+            }
+        }
     }
     if let Some(ratios) = &cfg.initial_mixing_ratios {
         let nbox = diurn_config_nbox(cfg);
@@ -972,7 +1039,8 @@ fn validate_ctm_config(cfg: &CtmConfig) -> Result<()> {
             "CTM",
             index,
             box_.altitude_level,
-            NL,
+            None,
+            LEGACY_NL,
             box_.aerosol_surface_area_um2_cm3,
             box_.sea_salt_surface_area_um2_cm3,
             box_.temp_offset_k,
@@ -1046,9 +1114,19 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     ];
     let mon = ((cfg.julian_day as i32 - 1) / 30).min(11) as usize;
     s.flscal = cfg.solar_flux_scale / (EDIST[mon] * EDIST[mon]);
+    s.clouds = cfg.surface_albedo;
+    s.heterogeneous_chemistry = cfg.heterogeneous_chemistry;
+    s.cpp_compatibility = cfg.cpp_compatibility;
+    s.radiative_aerosol = cfg.radiative_aerosol;
 
     // Recompute diurnal time grid with updated lat/dec
-    setday(s);
+    if let Some(hours) = &cfg.elapsed_time_hours {
+        setday_elapsed_hours(s, hours);
+    } else if cfg.cpp_compatibility {
+        setday_cpp(s, 48);
+    } else {
+        setday(s);
+    }
 
     s.nday = 1; // full 24-hour integration
     s.ndaysd = cfg.integration_days as i32;
@@ -1076,26 +1154,32 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
         let ialt_old = (s.nboxdo[ib].unsigned_abs() as usize)
             .saturating_sub(1)
             .min(NL - 1);
-        let ialt_new = if cfg.atmosphere.is_some() {
-            let level = spec.map(|b| b.altitude_level).unwrap_or((ib + 1) as u8) as usize;
-            if level == 0 {
-                bail!("DIURN box altitude_level must be 1-based, got 0 for box {ib}");
-            }
-            let ialt = level - 1;
-            if let Some(profile) = &cfg.atmosphere {
-                if ialt >= profile.pressure_mb.len() {
-                    bail!(
-                        "DIURN box altitude_level {} exceeds custom atmosphere level count {}",
-                        level,
-                        profile.pressure_mb.len()
-                    );
+        let (ialt_new, flux_lower, flux_upper, flux_upper_weight) = if cfg.atmosphere.is_some() {
+            if let Some(altitude_km) = spec.and_then(|b| b.altitude_km) {
+                append_interpolated_chemistry_level(s, altitude_km)?
+            } else {
+                let level = spec.map(|b| b.altitude_level).unwrap_or((ib + 1) as u8) as usize;
+                if level == 0 {
+                    bail!("DIURN box altitude_level must be 1-based, got 0 for box {ib}");
                 }
+                let ialt = level - 1;
+                if let Some(profile) = &cfg.atmosphere {
+                    if ialt >= profile.pressure_mb.len() {
+                        bail!(
+                            "DIURN box altitude_level {} exceeds custom atmosphere level count {}",
+                            level,
+                            profile.pressure_mb.len()
+                        );
+                    }
+                }
+                let ialt = ialt.min(NL - 1);
+                (ialt, ialt, ialt, 0.0)
             }
-            ialt.min(NL - 1)
         } else {
-            (spec.map(|b| b.altitude_level).unwrap_or((ib + 1) as u8) as usize)
+            let ialt = (spec.map(|b| b.altitude_level).unwrap_or((ib + 1) as u8) as usize)
                 .saturating_sub(1)
-                .min(NL - 1)
+                .min(NL - 1);
+            (ialt, ialt, ialt, 0.0)
         };
         if let Some((ialt_ref, densities)) = custom_reference {
             if s.dm[ialt_ref] > 0.0 {
@@ -1112,6 +1196,9 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
             }
         }
         s.nboxdo[ib] = (ialt_new + 1) as i32;
+        s.box_flux_lower[ib] = flux_lower;
+        s.box_flux_upper[ib] = flux_upper;
+        s.box_flux_upper_weight[ib] = flux_upper_weight;
         s.boxaa[ib] = spec.map(|b| b.aerosol_surface_area_um2_cm3).unwrap_or(0.25);
         s.boxss[ib] = spec.map(|b| b.sea_salt_surface_area_um2_cm3).unwrap_or(0.0);
         s.boxtt[ib] = spec.map(|b| b.temp_offset_k).unwrap_or(0.0);
@@ -1119,7 +1206,12 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
         s.nboxwt[ib] = 1;
         s.nboxpr[ib] = 0;
         s.nboxct[ib] = 0;
-        s.boxrn[ib] = (ib + 1) as f64;
+        // BOXRN is the rainout switch/rate multiplier, not a box identifier.
+        // The later C++ box model leaves H2O2RAINOUT at zero by default, so a
+        // structured API run must not synthesize rainout from the box index.
+        // Doing so preferentially removed the NOy reservoirs and made an
+        // otherwise identical atmosphere depend on its position in `boxes`.
+        s.boxrn[ib] = 0.0;
         if cfg.atmosphere.is_some() && s.dm[ialt_new] > 0.0 {
             s.do3[ib] = s.do3ref[ialt_new];
             s.fo3[ib] = s.do3[ib] / s.dm[ialt_new];
@@ -1129,6 +1221,9 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     for ib in nbox..NB {
         s.nboxdo[ib] = 0;
         s.nboxwt[ib] = 0;
+        s.box_flux_lower[ib] = 0;
+        s.box_flux_upper[ib] = 0;
+        s.box_flux_upper_weight[ib] = 0.0;
     }
 
     // Initial mixing ratios override
@@ -1137,7 +1232,7 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
             mr.apply_to_state(s, ib);
             let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
                 .saturating_sub(1)
-                .min(NL - 1);
+                .min(NATM - 1);
             s.do3[ib] = s.fo3[ib] * s.dm[ialt];
         }
     }
@@ -1168,10 +1263,16 @@ fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile
             bail!("custom atmosphere altitude_km length must match pressure length");
         }
     }
+    if let Some(aerosol) = &profile.aerosol_surface_area_um2_cm3 {
+        if aerosol.len() != n {
+            bail!("custom atmosphere aerosol surface-area length must match pressure length");
+        }
+    }
 
     let cboltz = 1.38e-19_f64;
     let po2 = s.po2;
     s.nc = n;
+    s.nlev = n;
 
     for i in 0..n {
         let p = profile.pressure_mb[i];
@@ -1199,6 +1300,21 @@ fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile
             O3InputKind::NumberDensityCm3 => o3,
         };
         s.refo3[i] = s.do3ref[i];
+        let aerosol_area = match &profile.aerosol_surface_area_um2_cm3 {
+            Some(profile) => {
+                let value = profile[i];
+                if !(value.is_finite() && value >= 0.0) {
+                    bail!("custom atmosphere aerosol surface area at index {i} must be finite and non-negative");
+                }
+                value
+            }
+            None => -1.0,
+        };
+        s.asa[i] = aerosol_area;
+        // Original PRATMO conversion: ASA (um2/cm3) × 10^-8 converts
+        // surface area to cm2/cm3, then Qext/4 with Qext=2.7 gives the
+        // 300-nm extinction coefficient.
+        s.aer[i] = aerosol_area.max(0.0) * 0.25 * 2.7e-8;
     }
 
     if let Some(altitude_km) = &profile.altitude_km {
@@ -1230,7 +1346,7 @@ fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile
         s.do2int[j] = s.do2int[j + 1] + 0.5 * dz * (s.dm[j + 1] + s.dm[j]) * po2;
     }
 
-    for i in n..NL {
+    for i in n..NATM {
         s.pstd[i] = 0.0;
         s.t[i] = 0.0;
         s.dm[i] = 0.0;
@@ -1240,15 +1356,74 @@ fn apply_custom_atmosphere(s: &mut ModelState, profile: &CustomAtmosphereProfile
         s.refo3[i] = 0.0;
         s.do3int[i] = 0.0;
         s.do2int[i] = 0.0;
+        s.asa[i] = -1.0;
+        s.aer[i] = 0.0;
     }
 
     Ok(())
 }
 
+/// Add one chemistry-only atmospheric level and return its state index plus
+/// the two radiative shells used to interpolate actinic flux.
+fn append_interpolated_chemistry_level(
+    s: &mut ModelState,
+    altitude_km: f64,
+) -> Result<(usize, usize, usize, f64)> {
+    let target_z = altitude_km * 1.0e5;
+    let exact_tolerance_cm = 1.0e-4;
+    if let Some(level) = (0..s.nc).find(|&i| (s.z[i] - target_z).abs() <= exact_tolerance_cm) {
+        return Ok((level, level, level, 0.0));
+    }
+
+    let upper = (0..s.nc).find(|&i| s.z[i] > target_z).ok_or_else(|| {
+        anyhow::anyhow!("chemistry altitude {altitude_km} km is above the radiative grid")
+    })?;
+    if upper == 0 {
+        bail!("chemistry altitude {altitude_km} km is below the radiative grid");
+    }
+    let lower = upper - 1;
+    let dz = s.z[upper] - s.z[lower];
+    if dz <= 0.0 {
+        bail!("custom atmosphere altitude grid must be strictly increasing");
+    }
+    let weight = ((target_z - s.z[lower]) / dz).clamp(0.0, 1.0);
+
+    if s.nlev >= NATM {
+        bail!("too many off-grid chemistry levels; atmospheric capacity is {NATM}");
+    }
+    let level = s.nlev;
+    s.nlev += 1;
+
+    let interpolate =
+        |lower_value: f64, upper_value: f64| lower_value + weight * (upper_value - lower_value);
+    s.z[level] = target_z;
+    s.pstd[level] = (interpolate(s.pstd[lower].ln(), s.pstd[upper].ln())).exp();
+    s.t[level] = interpolate(s.t[lower], s.t[upper]);
+    s.dm[level] = s.pstd[level] / (1.38e-19 * s.t[level]);
+    s.theta[level] = s.t[level] * (1000.0 / s.pstd[level]).powf(0.2857);
+
+    let lower_o3_mr = s.do3ref[lower] / s.dm[lower].max(1.0);
+    let upper_o3_mr = s.do3ref[upper] / s.dm[upper].max(1.0);
+    s.do3ref[level] = interpolate(lower_o3_mr, upper_o3_mr) * s.dm[level];
+    s.refo3[level] = s.do3ref[level];
+    s.do3int[level] = interpolate(s.do3int[lower], s.do3int[upper]);
+    s.do2int[level] = interpolate(s.do2int[lower], s.do2int[upper]);
+
+    if s.asa[lower] >= 0.0 && s.asa[upper] >= 0.0 {
+        s.asa[level] = interpolate(s.asa[lower], s.asa[upper]);
+        s.aer[level] = s.asa[level] * 0.25 * 2.7e-8;
+    } else {
+        s.asa[level] = -1.0;
+        s.aer[level] = 0.0;
+    }
+
+    Ok((level, lower, upper, weight))
+}
+
 fn reconcile_custom_box_implicit_species(s: &mut ModelState, ib: usize) {
     let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
         .saturating_sub(1)
-        .min(NL - 1);
+        .min(NATM - 1);
     let mut xn = [0.0f64; NDEN];
     rplace(s, &mut xn, ib);
     let old_ialt = s.ialt;
@@ -1269,13 +1444,34 @@ fn reconcile_custom_box_implicit_species(s: &mut ModelState, ib: usize) {
 
 fn disable_iodine(s: &mut ModelState, preserve_structure: bool) {
     if !preserve_structure {
+        let old_o3_slot = s.n[10];
         s.liod = false;
         for j in 30..40 {
             s.n[j] = 0;
             s.ntsav[j] = 0;
         }
-        s.ntotx = s.ntotx.min(30);
-        s.ntot = s.ntot.min(30);
+        // The augmented permutation stores the 29 active base radicals in
+        // slots 1..29, iodine in 30..39, and explicit O3 in slot 40. Move O3
+        // into slot 30 before compacting; truncating without this move makes
+        // the chemistry operate on an uninitialized ozone slot.
+        if old_o3_slot > 0 && old_o3_slot <= NDEN {
+            let old = old_o3_slot - 1;
+            let new = 29usize;
+            for it in 0..s.xnoft.ncols() {
+                s.xnoft[[new, it]] = s.xnoft[[old, it]];
+            }
+            for ib in 0..NB {
+                for it in 0..s.xxnoft.shape()[1] {
+                    s.xxnoft[[new, it, ib]] = s.xxnoft[[old, it, ib]];
+                }
+            }
+        }
+        s.n[10] = 30;
+        s.ntsav[10] = 30;
+        s.ntsav[NDEN] = 29;
+        s.tnamet[29] = s.tname[10].clone();
+        s.ntotx = 30;
+        s.ntot = 29;
         let mut nnr = 0usize;
         for j in 0..s.nnr {
             let species = s.nnrt[j];
@@ -1326,7 +1522,7 @@ fn disable_iodine(s: &mut ModelState, preserve_structure: bool) {
         s.fiodx[ib] = IODINE_OFF_FLOOR;
         let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
             .saturating_sub(1)
-            .min(NL - 1);
+            .min(NATM - 1);
         let one_iodine = IODINE_OFF_FLOOR * s.dm[ialt] / 10.0;
         s.di_[ib] = one_iodine;
         s.dio[ib] = one_iodine;
@@ -1374,6 +1570,10 @@ fn apply_ctm_config(s: &mut ModelState, cfg: &CtmConfig) {
 
     for (ib, spec) in cfg.boxes.iter().take(nbox).enumerate() {
         s.nboxdo[ib] = spec.altitude_level as i32;
+        let level = spec.altitude_level.saturating_sub(1) as usize;
+        s.box_flux_lower[ib] = level;
+        s.box_flux_upper[ib] = level;
+        s.box_flux_upper_weight[ib] = 0.0;
         s.boxaa[ib] = spec.aerosol_surface_area_um2_cm3;
         s.boxss[ib] = spec.sea_salt_surface_area_um2_cm3;
         s.boxtt[ib] = spec.temp_offset_k;
@@ -1381,11 +1581,16 @@ fn apply_ctm_config(s: &mut ModelState, cfg: &CtmConfig) {
         s.nboxwt[ib] = 1;
         s.nboxpr[ib] = 0;
         s.nboxct[ib] = 0;
-        s.boxrn[ib] = (ib + 1) as f64;
+        // Match the C++ default: rainout is disabled unless a future public
+        // configuration field explicitly supplies it.
+        s.boxrn[ib] = 0.0;
     }
     for ib in nbox..NB {
         s.nboxdo[ib] = 0;
         s.nboxwt[ib] = 0;
+        s.box_flux_lower[ib] = 0;
+        s.box_flux_upper[ib] = 0;
+        s.box_flux_upper_weight[ib] = 0.0;
     }
 
     if !cfg.iodine {
@@ -1398,7 +1603,7 @@ fn apply_ctm_config(s: &mut ModelState, cfg: &CtmConfig) {
 fn extract_box_snapshot(s: &ModelState, ib: usize) -> BoxSnapshot {
     let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
         .saturating_sub(1)
-        .min(NL - 1);
+        .min(NATM - 1);
     BoxSnapshot {
         box_index: ib,
         altitude_km: s.z[ialt] * 1e-5,
@@ -1414,7 +1619,7 @@ fn extract_box_snapshot(s: &ModelState, ib: usize) -> BoxSnapshot {
 fn extract_diurn_timeseries(s: &ModelState, ib: usize) -> DiurnBoxTimeSeries {
     let ialt = (s.nboxdo[ib].unsigned_abs() as usize)
         .saturating_sub(1)
-        .min(NL - 1);
+        .min(NATM - 1);
     let ntimdo = s.ntimdo;
 
     let steps = (0..ntimdo)
@@ -1483,7 +1688,8 @@ fn extract_ctm_output(s: &ModelState) -> CtmOutput {
 mod tests {
     use super::{
         time_distance_hhmm, validate_ctm_config, validate_diurn_config, validate_supported_mode,
-        CtmBoxSpec, CtmConfig, DiurnBoxSpec, DiurnConfig, JValues, LongLivedMixingRatios,
+        CtmBoxSpec, CtmConfig, CustomAtmosphereProfile, DiurnBoxSpec, DiurnConfig, JValues,
+        LongLivedMixingRatios, O3InputKind,
     };
     use crate::state::ModelState;
 
@@ -1537,6 +1743,7 @@ mod tests {
         let diurn = DiurnConfig {
             boxes: vec![DiurnBoxSpec {
                 altitude_level: 1,
+                altitude_km: None,
                 aerosol_surface_area_um2_cm3: 0.0,
                 sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,
@@ -1550,6 +1757,73 @@ mod tests {
         let diurn_error =
             validate_diurn_config(&diurn).expect_err("NaN mixing ratios must be rejected");
         assert!(diurn_error.to_string().contains(".o3"));
+
+        let invalid_albedo = DiurnConfig {
+            surface_albedo: 1.01,
+            boxes: vec![DiurnBoxSpec {
+                altitude_level: 1,
+                altitude_km: None,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
+                temp_offset_k: 0.0,
+            }],
+            ..DiurnConfig::default()
+        };
+        let albedo_error = validate_diurn_config(&invalid_albedo)
+            .expect_err("surface albedo above one must be rejected");
+        assert!(albedo_error.to_string().contains("surface_albedo"));
+    }
+
+    #[test]
+    fn custom_diurn_accepts_cpp_81_level_radiative_grid() {
+        let cfg = DiurnConfig {
+            boxes: vec![DiurnBoxSpec {
+                altitude_level: 81,
+                altitude_km: None,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
+                temp_offset_k: 0.0,
+            }],
+            atmosphere: Some(CustomAtmosphereProfile {
+                pressure_mb: (0..81)
+                    .map(|i| 1000.0 * (-0.125 * i as f64).exp())
+                    .collect(),
+                temperature_k: vec![230.0; 81],
+                altitude_km: Some((0..81).map(|i| i as f64).collect()),
+                o3: vec![5.0e-6; 81],
+                o3_kind: O3InputKind::MixingRatio,
+                aerosol_surface_area_um2_cm3: None,
+            }),
+            ..DiurnConfig::default()
+        };
+        validate_diurn_config(&cfg).expect("the C++ 0..80 km shell grid must be supported");
+    }
+
+    #[test]
+    fn explicit_diurn_time_grid_is_validated() {
+        let base = DiurnConfig {
+            boxes: vec![DiurnBoxSpec {
+                altitude_level: 1,
+                altitude_km: None,
+                aerosol_surface_area_um2_cm3: 0.0,
+                sea_salt_surface_area_um2_cm3: 0.0,
+                temp_offset_k: 0.0,
+            }],
+            ..DiurnConfig::default()
+        };
+        let half_hour = DiurnConfig {
+            elapsed_time_hours: Some((0..=48).map(|index| index as f64 * 0.5).collect()),
+            ..base.clone()
+        };
+        validate_diurn_config(&half_hour).expect("the archived 49-point grid must be valid");
+
+        let duplicate = DiurnConfig {
+            elapsed_time_hours: Some(vec![0.0, 12.0, 12.0, 24.0]),
+            ..base
+        };
+        let error = validate_diurn_config(&duplicate)
+            .expect_err("an explicit time grid must be strictly increasing");
+        assert!(error.to_string().contains("strictly increasing"));
     }
 
     #[test]

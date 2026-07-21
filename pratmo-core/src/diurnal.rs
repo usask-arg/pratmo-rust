@@ -84,7 +84,7 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
         s.ibox = ib;
         let ialt_abs = s.nboxdo[ib].unsigned_abs() as usize; // IABS(NBOXDO(IB))
         s.izalt = 0;
-        if ialt_abs == 0 || ialt_abs > s.nc {
+        if ialt_abs == 0 || ialt_abs > s.nlev.max(s.nc) {
             continue;
         }
         s.ialt = ialt_abs - 1; // 0-based
@@ -93,7 +93,11 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
         s.lsvday = false;
 
         if s.nboxdo[ib] > 0 {
-            rafday(s, ib)?;
+            if s.cpp_compatibility {
+                cpp_endpoint_days(s, ib)?;
+            } else {
+                rafday(s, ib)?;
+            }
         } else {
             let mut xnold = s.xnold;
             rplace(s, &mut xnold, ib);
@@ -192,7 +196,7 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
     let jobs: Vec<usize> = (0..s.nbox)
         .filter(|&ib| {
             let ialt_abs = s.nboxdo[ib].unsigned_abs() as usize;
-            ialt_abs != 0 && ialt_abs <= s.nc
+            ialt_abs != 0 && ialt_abs <= s.nlev.max(s.nc)
         })
         .collect();
 
@@ -212,7 +216,11 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
             worker.lsvday = false;
 
             if worker.nboxdo[ib] > 0 {
-                rafday(&mut worker, ib)?;
+                if worker.cpp_compatibility {
+                    cpp_endpoint_days(&mut worker, ib)?;
+                } else {
+                    rafday(&mut worker, ib)?;
+                }
             } else {
                 let mut xnold = worker.xnold;
                 rplace(&worker, &mut xnold, ib);
@@ -405,6 +413,14 @@ pub fn daily(s: &mut ModelState, id: i32) -> Result<()> {
             crate::solver::newraf(s, DAMP1, &mut xn, n)?;
         }
 
+        if s.cpp_compatibility {
+            // The C++ reaction graph conserves coupled NOy/Cly/Bry exactly.
+            // The legacy array solver represents those coupled families with
+            // FIXRAT; apply it at each accepted step to avoid accumulating a
+            // spurious family drift over the C++ multi-day relaxation.
+            fixrat(&mut xn, s, s.ibox);
+        }
+
         // Store AEXTRA and update XR, XNOLD
         for j in 0..n {
             s.aextra[j] = xn[j];
@@ -436,6 +452,49 @@ pub fn daily(s: &mut ModelState, id: i32) -> Result<()> {
     }
 
     s.lsvday = true;
+    Ok(())
+}
+
+/// Later C++ box-model convergence driver.
+///
+/// Unlike Fortran RAFDAY, the C++ implementation simply advances complete
+/// diurnal cycles until every integrated radical changes by less than 0.5%
+/// between the two noon endpoints. ``nboxmx`` supplies the maximum number of
+/// days, matching ``SetNumDaysForConvergence``.
+fn cpp_endpoint_days(s: &mut ModelState, ib: usize) -> Result<()> {
+    const TOLERANCE: f64 = 5.0e-3;
+
+    let mut initial = s.xnold;
+    rplace(s, &mut initial, ib);
+    s.xnold = initial;
+    s.lsvday = false;
+
+    let max_days = s.nboxmx[ib].max(1) as usize;
+    let mut converged = false;
+    for _ in 0..max_days {
+        daily(s, 1)?;
+        let mut max_ratio = 0.0_f64;
+        for slot in 0..s.ntot {
+            let start = s.xnoft[[slot, 0]];
+            let end = s.xnoft[[slot, s.ntimdo - 1]];
+            let ratio = if start.abs() < 1.0e-2 {
+                0.05 * TOLERANCE
+            } else {
+                ((end - start) / start).abs()
+            };
+            max_ratio = max_ratio.max(ratio);
+        }
+        if max_ratio < TOLERANCE {
+            converged = true;
+            break;
+        }
+    }
+
+    let final_density = s.xnold;
+    splace(s, &final_density, ib);
+    if !converged {
+        s.rafday_nonconvergence_count += 1;
+    }
     Ok(())
 }
 

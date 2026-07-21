@@ -1,5 +1,6 @@
 fortran
 target
+PratmoClimatologies/
 .claude
 *.DS_Store*
 

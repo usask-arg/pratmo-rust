@@ -122,6 +122,7 @@ fn public_diurn_smoke_respects_photolysis_policy() {
         integration_days: 1,
         boxes: vec![DiurnBoxSpec {
             altitude_level: 12,
+            altitude_km: None,
             aerosol_surface_area_um2_cm3: 0.0,
             sea_salt_surface_area_um2_cm3: 0.0,
             temp_offset_k: 0.0,
@@ -171,6 +172,7 @@ fn representative_latitude_season_matrix_stays_finite() {
             integration_days: 1,
             boxes: vec![DiurnBoxSpec {
                 altitude_level: 20,
+                altitude_km: None,
                 aerosol_surface_area_um2_cm3: 0.0,
                 sea_salt_surface_area_um2_cm3: 0.0,
                 temp_offset_k: 0.0,

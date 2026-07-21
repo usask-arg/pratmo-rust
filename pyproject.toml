@@ -45,6 +45,9 @@ python-source = "src"
 module-name = "pratmo._pratmo"
 features = ["pratmo-py/extension-module"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [dependency-groups]
 dev = [
     "furo>=2025.12.19",

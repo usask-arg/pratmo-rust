@@ -1,7 +1,10 @@
 // bjval.f → photolysis (J-value) module
 // SOL, JVALUE, OPTAU, SCATTR, MATIN3, SPHERE + helper functions
 
-use crate::state::ModelState;
+use crate::{
+    constants::{NL, NTAU},
+    state::ModelState,
+};
 
 // ── SOL — entry point for J-value update ─────────────────────────────────────
 
@@ -22,11 +25,13 @@ pub fn sol(s: &mut ModelState, gmu: f64) {
         }
     }
 
-    // Zero all J-value profiles
+    // Zero all J-value profiles. In full-profile mode the leading dimension is
+    // altitude; in box mode it is box number.
     let nc = s.nc;
     let njval = s.njval;
+    let nlocations = if s.lprtjv { nc } else { s.nbox };
     for iv in 0..njval {
-        for j in 0..nc {
+        for j in 0..nlocations {
             s.jval_set(j, iv, 0.0);
         }
     }
@@ -78,7 +83,7 @@ pub fn sol(s: &mut ModelState, gmu: f64) {
             for k in nw1..=nw2 {
                 let qo3tot = xseco3(k, tt, s);
                 let qo31d = xsec1d(k, tt, s);
-                let fff_kj = s.fff[[k, j]];
+                let fff_kj = box_actinic_flux(s, jb, k);
                 s.vo3[jb] += fff_kj * qo3tot;
                 s.vo3d[jb] += fff_kj * qo3tot * qo31d;
             }
@@ -88,7 +93,7 @@ pub fn sol(s: &mut ModelState, gmu: f64) {
                 for k in nw1..=nw2 {
                     let jq = iv - 4;
                     let qqqt = s.qqq[[k, 0, jq]] + (s.qqq[[k, 1, jq]] - s.qqq[[k, 0, jq]]) * tfact;
-                    sum += qqqt * s.fff[[k, j]];
+                    sum += qqqt * box_actinic_flux(s, jb, k);
                 }
                 let cur = s.jval_get(jb, iv);
                 s.jval_set(jb, iv, cur + sum);
@@ -107,6 +112,37 @@ fn interp_tfact(tt: f64, tq1: f64, tq2: f64) -> f64 {
     }
 }
 
+/// Resolve the two radiative shells used for one chemistry box. Legacy runs
+/// do not populate the explicit mapping, so their chemistry level remains the
+/// fallback.
+#[inline(always)]
+fn box_flux_indices(s: &ModelState, jb: usize) -> (usize, usize, f64) {
+    let chemistry_level = (s.nboxdo[jb].unsigned_abs() as usize)
+        .saturating_sub(1)
+        .min(s.nc.saturating_sub(1));
+    let lower = s.box_flux_lower[jb];
+    let upper = s.box_flux_upper[jb];
+    let weight = s.box_flux_upper_weight[jb];
+    let mapping_is_configured = lower < s.nc
+        && upper < s.nc
+        && lower <= upper
+        && weight.is_finite()
+        && (0.0..=1.0).contains(&weight)
+        && (lower != 0 || upper != 0 || chemistry_level == 0);
+    if mapping_is_configured {
+        (lower, upper, weight)
+    } else {
+        (chemistry_level, chemistry_level, 0.0)
+    }
+}
+
+#[inline(always)]
+fn box_actinic_flux(s: &ModelState, jb: usize, wavelength: usize) -> f64 {
+    let (lower, upper, upper_weight) = box_flux_indices(s, jb);
+    let lower_flux = s.fff[[wavelength, lower]];
+    lower_flux + upper_weight * (s.fff[[wavelength, upper]] - lower_flux)
+}
+
 // ── JVALUE — wavelength loop + actinic flux ───────────────────────────────────
 
 /// Compute actinic flux FFF and J(O2)/J(NO) by iterating over wavelengths.
@@ -120,6 +156,9 @@ fn jvalue(s: &mut ModelState) {
         for k in 0..=nw2 {
             s.fff[[k, j]] = 0.0;
         }
+    }
+    let nlocations = if s.lprtjv { nc } else { s.nbox };
+    for j in 0..nlocations {
         s.vno[j] = 0.0;
         s.vo2[j] = 0.0;
     }
@@ -148,7 +187,7 @@ fn jvalue(s: &mut ModelState) {
         };
 
         // O3 cross-sections at each altitude level
-        let mut xqo3 = [0.0f64; 41];
+        let mut xqo3 = [0.0f64; NL];
         for j in 0..nc {
             xqo3[j] = xseco3(k, s.t[j], s);
         }
@@ -160,7 +199,7 @@ fn jvalue(s: &mut ModelState) {
         // ── Loop over opacity distribution functions (=1 outside SRB) ────────
         for kodf in 0..n_odf {
             // O2 cross-sections
-            let mut xqo2 = [0.0f64; 41];
+            let mut xqo2 = [0.0f64; NL];
             let ksr_arg = if is_srb { ksr } else { 0 }; // 0-based, but xseco2 needs 1-based originally
             for j in 0..nc {
                 xqo2[j] = xseco2(k, s.t[j], ksr_arg, kodf, is_srb, s);
@@ -194,9 +233,11 @@ fn jvalue(s: &mut ModelState) {
                 let nbox = s.nbox;
                 for jb in 0..nbox {
                     let j = (s.nboxdo[jb].unsigned_abs() as usize).saturating_sub(1); // 0-based
+                    let (lower, upper, upper_weight) = box_flux_indices(s, jb);
+                    let box_trans = trans[lower] + upper_weight * (trans[upper] - trans[lower]);
                     let fl_k = s.fl[k];
                     let fopt = fl_k
-                        * trans[j]
+                        * box_trans
                         * s.flscal
                         * s.ssf[k]
                         * if is_srb { s.odf[[kodf, ksr]] } else { 1.0 };
@@ -218,25 +259,29 @@ fn jvalue(s: &mut ModelState) {
 /// Fortran: SUBROUTINE OPTAU(XQO2, XQO3, XQRAY, XQAER, TRANS)
 fn optau(
     s: &mut ModelState,
-    xqo2: &[f64; 41],
-    xqo3: &[f64; 41],
+    xqo2: &[f64; NL],
+    xqo3: &[f64; NL],
     xqray: f64,
-    _xqaer: f64,
-) -> [f64; 41] {
+    xqaer: f64,
+) -> [f64; NL] {
     let nc = s.nc;
     let j1 = s.nlbatm.saturating_sub(1); // 0-based
 
-    let mut trans = [0.0f64; 41];
-    let mut dtau = [0.0f64; 41];
-    let mut piray = [0.0f64; 42]; // local work arrays, mirror s.piray/piaer
-    let mut piaer = [0.0f64; 42];
+    let mut trans = [0.0f64; NL];
+    let mut dtau = [0.0f64; NL];
+    let mut piray = [0.0f64; NTAU]; // local work arrays, mirror s.piray/piaer
+    let mut piaer = [0.0f64; NTAU];
 
     // Build differential optical depths
     for j in j1..nc {
         let xlo3 = s.do3ref[j] * xqo3[j];
         let xlo2 = s.dm[j] * s.po2 * xqo2[j];
         let xlray = s.dm[j] * xqray;
-        let xlaer = 0.0_f64; // aerosol scattering disabled in Fortran
+        let xlaer = if s.radiative_aerosol {
+            s.aer[j].max(0.0) * xqaer
+        } else {
+            0.0
+        };
         dtau[j] = xlo3 + xlo2 + xlray + xlaer;
         let d = dtau[j].max(1e-300);
         piray[j] = xlray / d;
@@ -261,7 +306,7 @@ fn optau(
 
     // Store for SCATTR and for per-layer access
     s.ntt = ntt;
-    for i in 0..ntt.min(42) {
+    for i in 0..ntt.min(NTAU) {
         s.tau[i] = tau_local[i];
         // The original Fortran passes PIRAY/PIAER in atmospheric-level order
         // to SCATTR (rather than reversing them with TAU's optical-depth
@@ -521,8 +566,8 @@ pub fn sphere(s: &mut ModelState) {
     let u0 = s.u0;
 
     // Radii at each level
-    let mut rz = [0.0f64; 41];
-    let mut rq = [0.0f64; 41]; // (RZ(II-1)/RZ(II))^2
+    let mut rz = [0.0f64; NL];
+    let mut rq = [0.0f64; NL]; // (RZ(II-1)/RZ(II))^2
     for ii in 0..nc {
         rz[ii] = rad + s.z[ii];
     }

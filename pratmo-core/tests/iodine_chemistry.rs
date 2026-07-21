@@ -31,6 +31,7 @@ fn run_20km_with_iodine(iodine: bool) -> pratmo_core::api::DiurnOutput {
         integration_days: 5,
         boxes: vec![DiurnBoxSpec {
             altitude_level: 12,
+            altitude_km: None,
             aerosol_surface_area_um2_cm3: 0.0,
             sea_salt_surface_area_um2_cm3: 0.0,
             temp_offset_k: 0.0,
@@ -49,6 +50,7 @@ fn run_16km_with_aerosol(aerosol_area: f64) -> pratmo_core::api::DiurnOutput {
         integration_days: 2,
         boxes: vec![DiurnBoxSpec {
             altitude_level: 9,
+            altitude_km: None,
             aerosol_surface_area_um2_cm3: 0.0,
             sea_salt_surface_area_um2_cm3: aerosol_area,
             temp_offset_k: 0.0,
@@ -209,6 +211,7 @@ fn test_realistic_lower_stratosphere_bry_rafday_converges() {
     let model = PratmoModel::with_defaults();
     let boxes = vec![DiurnBoxSpec {
         altitude_level: 8,
+        altitude_km: None,
         aerosol_surface_area_um2_cm3: 0.0,
         sea_salt_surface_area_um2_cm3: 0.0,
         temp_offset_k: 0.0,
@@ -283,12 +286,14 @@ fn test_realistic_lower_stratosphere_bry_rafday_converges() {
     assert!(snap.implicit.brono2.is_finite() && snap.implicit.brono2 > 0.0);
     let hno3_mixing_ratio = snap.implicit.hno3 / snap.air_density_cm3;
     let brono2_mixing_ratio = snap.implicit.brono2 / snap.air_density_cm3;
+    // Structured runs now match the C++ default of zero rainout; the previous
+    // regression accidentally removed HNO3 at a rate set by the box index.
     assert!(
-        (hno3_mixing_ratio / 6.665216563e-12 - 1.0).abs() < 0.01,
+        (hno3_mixing_ratio / 2.243765813e-11 - 1.0).abs() < 0.01,
         "HNO3 regression: {hno3_mixing_ratio:e}"
     );
     assert!(
-        (brono2_mixing_ratio / 1.319634955e-13 - 1.0).abs() < 0.01,
+        (brono2_mixing_ratio / 6.775853066e-14 - 1.0).abs() < 0.01,
         "BrONO2 regression: {brono2_mixing_ratio:e}"
     );
 

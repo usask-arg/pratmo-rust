@@ -327,7 +327,9 @@ class DiurnBoxSpec:
     """Per-box configuration for a DIURN run."""
 
     altitude_level: int
-    """1-based standard pressure level index (1 = surface, 41 = top)."""
+    """1-based level index (legacy grid: 1..41; custom radiative grid: up to 81)."""
+    altitude_km: Optional[float]
+    """Exact chemistry altitude; flux is interpolated between radiative shells."""
     aerosol_surface_area_um2_cm3: float
     sea_salt_surface_area_um2_cm3: float
     temp_offset_k: float
@@ -337,6 +339,7 @@ class DiurnBoxSpec:
         aerosol_surface_area_um2_cm3: float = 0.0,
         sea_salt_surface_area_um2_cm3: float = 0.0,
         temp_offset_k: float = 0.0,
+        altitude_km: Optional[float] = None,
     ) -> None: ...
 
 class CtmBoxSpec:
@@ -363,6 +366,7 @@ class CustomAtmosphereProfile:
     altitude_km: Optional[list[float]]
     o3: list[float]
     o3_kind: str
+    aerosol_surface_area_um2_cm3: Optional[list[float]]
     def __init__(
         self,
         pressure_mb: list[float],
@@ -370,6 +374,7 @@ class CustomAtmosphereProfile:
         o3: list[float],
         o3_kind: str = "mixing_ratio",
         altitude_km: Optional[list[float]] = None,
+        aerosol_surface_area_um2_cm3: Optional[list[float]] = None,
     ) -> None: ...
 
 class DiurnConfig:
@@ -382,7 +387,12 @@ class DiurnConfig:
     bromine: bool
     iodine: bool
     parallel_boxes: bool
+    cpp_compatibility: bool
+    elapsed_time_hours: Optional[list[float]]
     solar_flux_scale: float
+    surface_albedo: float
+    heterogeneous_chemistry: bool
+    radiative_aerosol: bool
     atmosphere: Optional[CustomAtmosphereProfile]
     initial_mixing_ratios: Optional[list[LongLivedMixingRatios]]
     def __init__(
@@ -395,7 +405,12 @@ class DiurnConfig:
         bromine: bool = False,
         iodine: bool = True,
         parallel_boxes: bool = False,
+        cpp_compatibility: bool = False,
+        elapsed_time_hours: Optional[list[float]] = None,
         solar_flux_scale: float = 1.0,
+        surface_albedo: float = 0.20,
+        heterogeneous_chemistry: bool = True,
+        radiative_aerosol: bool = False,
         atmosphere: Optional[CustomAtmosphereProfile] = None,
         initial_mixing_ratios: Optional[list[LongLivedMixingRatios]] = None,
     ) -> None: ...

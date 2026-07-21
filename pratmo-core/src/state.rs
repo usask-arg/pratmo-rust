@@ -15,31 +15,34 @@ pub struct ModelState {
     pub titlej: Vec<[String; 3]>, // CHARACTER*20 TITLEJ(3, NXS+4) → [NJVAL][3]
 
     // ── COMMON/CCATMO/ ──────────────────────────────────────────────────────
-    /// Temperature profile (K); T(46) in Fortran — 46 to allow interpolation headroom
-    pub t: [f64; 46],
-    pub refo3: [f64; NL],  // reference O3 profile (cm⁻³)
-    pub pstd: [f64; NL],   // standard pressure profile (mb)
-    pub dm: [f64; NL],     // air number density (cm⁻³)
-    pub do3ref: [f64; NL], // local O3 reference density (cm⁻³)
-    pub z: [f64; NL],      // altitude (cm)
-    pub theta: [f64; NL],  // potential temperature (K)
-    pub aer: [f64; NL],    // aerosol extinction (km⁻¹)
-    pub do3int: [f64; NL], // integrated O3 column above (cm⁻²·atm)
+    /// Temperature profile (K), with interpolation headroom above the active grid.
+    pub t: [f64; NATM + 5],
+    pub refo3: [f64; NATM],  // reference O3 profile (cm⁻³)
+    pub pstd: [f64; NATM],   // standard pressure profile (mb)
+    pub dm: [f64; NATM],     // air number density (cm⁻³)
+    pub do3ref: [f64; NATM], // local O3 reference density (cm⁻³)
+    pub z: [f64; NATM],      // altitude (cm)
+    pub theta: [f64; NATM],  // potential temperature (K)
+    /// Aerosol extinction coefficient at 300 nm (cm⁻¹).
+    pub aer: [f64; NATM],
+    pub do3int: [f64; NATM], // integrated O3 column above (cm⁻²·atm)
     /// WTAU(NL,NL): optical depth table [from_level][to_level]
     pub wtau: Array2<f64>,
-    pub dnoy_ref: [f64; NL], // reference NOy profile (cm⁻³)
-    pub rflect: f64,         // surface albedo
-    pub sza: f64,            // solar zenith angle (degrees)
-    pub u0: f64,             // cos(SZA)
-    pub tanht: f64,          // tangent height (km)
-    pub nlbatm: usize,       // number of atmospheric levels used
-    pub nc: usize,           // number of active altitude levels
-    pub ncdim: usize,        // declared dimension for nc
-    pub nbdim: usize,        // declared dimension for nb
-    pub nbox: usize,         // number of boxes in current run
-    pub n2box: usize,        // number of box columns actually present in fort02
-    pub nd216: i32,          // run mode flag (>0: CTM, 0: DIURN/TPATH, <0: DERIVS)
-    pub nd216s: i32,         // saved nd216
+    pub dnoy_ref: [f64; NATM], // reference NOy profile (cm⁻³)
+    pub rflect: f64,           // surface albedo
+    pub sza: f64,              // solar zenith angle (degrees)
+    pub u0: f64,               // cos(SZA)
+    pub tanht: f64,            // tangent height (km)
+    pub nlbatm: usize,         // number of atmospheric levels used
+    pub nc: usize,             // number of active altitude levels
+    /// Atmospheric levels including off-grid chemistry-only levels.
+    pub nlev: usize,
+    pub ncdim: usize, // declared dimension for nc
+    pub nbdim: usize, // declared dimension for nb
+    pub nbox: usize,  // number of boxes in current run
+    pub n2box: usize, // number of box columns actually present in fort02
+    pub nd216: i32,   // run mode flag (>0: CTM, 0: DIURN/TPATH, <0: DERIVS)
+    pub nd216s: i32,  // saved nd216
 
     // ── COMMON/CCETC/ ───────────────────────────────────────────────────────
     pub press0: f64,      // surface pressure (mb)
@@ -61,12 +64,12 @@ pub struct ModelState {
     pub flscal: f64,      // solar flux scale factor
 
     // ── COMMON/CCSCAT/ ──────────────────────────────────────────────────────
-    pub tau: [f64; 42],   // total optical depth per layer
-    pub piray: [f64; 42], // Rayleigh scattering phase integral
-    pub piaer: [f64; 42], // aerosol scattering phase integral
-    pub fltau: [f64; 42], // filtered tau
-    pub ttfbot: f64,      // total tau at bottom
-    pub ntt: usize,       // number of tau levels
+    pub tau: [f64; NTAU],   // total optical depth per layer
+    pub piray: [f64; NTAU], // Rayleigh scattering phase integral
+    pub piaer: [f64; NTAU], // aerosol scattering phase integral
+    pub fltau: [f64; NTAU], // filtered tau
+    pub ttfbot: f64,        // total tau at bottom
+    pub ntt: usize,         // number of tau levels
 
     // ── COMMON/CCWORK/ ──────────────────────────────────────────────────────
     /// Previous time step species densities for up to 40 implicit species
@@ -276,8 +279,9 @@ pub struct ModelState {
     pub ppmean: Array2<f64>, // shape [NDEN+20+NNDXPQ, NB]
     /// Per-box species at each time step; XXNOFT(30, 44, NB)
     pub xxnoft: Array3<f64>, // shape [NDEN, NXNOFT, NB]
-    /// Stored J-values; STORJV(NXS+4, 16, NB)
-    pub storjv: Array3<f64>, // shape [NJVAL, 16, NB]
+    /// Stored J-values; the legacy second dimension was 16, while the C++
+    /// fixed-mu grid can require up to half of NXNOFT plus the dark point.
+    pub storjv: Array3<f64>, // shape [NJVAL, NXNOFT, NB]
     pub ndxpp: [usize; NNDXPQ],
     pub ndxqq: [usize; NNDXPQ],
 
@@ -340,12 +344,20 @@ pub struct ModelState {
     pub dayerr: f64,   // daily convergence error
     pub maxraf: usize, // max NR iterations
     pub maxrlx: usize, // max relaxation iterations
+    /// Use the later C++ fixed-mu grid and endpoint-convergence driver.
+    pub cpp_compatibility: bool,
+    /// Include the aerosol profile in photolysis optical depth and scattering.
+    pub radiative_aerosol: bool,
 
     // ── COMMON/CCPARM/ ──────────────────────────────────────────────────────
-    pub boxrn: [f64; NB],  // box run number / identifier
-    pub boxaa: [f64; NB],  // generic aerosol surface area density (um2/cm3)
-    pub boxss: [f64; NB],  // sea-salt surface area density (um2/cm3)
-    pub boxtt: [f64; NB],  // box temperature offset (K)
+    pub boxrn: [f64; NB], // box run number / identifier
+    pub boxaa: [f64; NB], // generic aerosol surface area density (um2/cm3)
+    pub boxss: [f64; NB], // sea-salt surface area density (um2/cm3)
+    pub boxtt: [f64; NB], // box temperature offset (K)
+    /// Radiative shell pair and upper-shell weight used for box flux interpolation.
+    pub box_flux_lower: [usize; NB],
+    pub box_flux_upper: [usize; NB],
+    pub box_flux_upper_weight: [f64; NB],
     pub nboxpr: [i32; NB], // print flags per box
     pub nboxdo: [i32; NB], // altitude level for each box (1-based; negative = use DAILY)
     pub nboxmx: [i32; NB], // max integration days per box
@@ -383,37 +395,39 @@ pub struct ModelState {
     pub lresol: bool,
     pub lprty: bool,
     pub lprt8: bool,
+    /// Enable sulfate-aerosol and sea-salt heterogeneous reaction channels.
+    pub heterogeneous_chemistry: bool,
 
     // ── COMMON/CHRIS/ ───────────────────────────────────────────────────────
     /// CTM diagnostic storage; dpl(12, 18, NB, NTAB)
     pub dpl: Array4<f64>, // shape [12, 18, NB, NTAB]
-    pub asa: [f64; NL], // aerosol surface area density (μm²/cm³)
+    pub asa: [f64; NATM], // aerosol surface area density (μm²/cm³)
     /// Density output; denout(12, 18, 3, 4, NB)
     pub denout: ndarray::Array5<f64>, // shape [12, 18, 3, 4, NB]
     /// AM/PM ratio means; rampm(12, 18, 9, NB)
     pub rampm: Array4<f64>, // shape [12, 18, 9, NB]
-    pub aersf: f64,     // aerosol scale factor
+    pub aersf: f64,       // aerosol scale factor
     pub smxsf: [f64; NQ], // spectral solar flux scale factors
-    pub ssf: [f64; NQ], // spectral scale factors
-    pub coclo: [f64; 44], // ClO diurnal cycle
-    pub cbro: [f64; 44], // BrO diurnal cycle
-    pub cno2: [f64; 44], // NO2 diurnal cycle
-    pub cno3: [f64; 44], // NO3 diurnal cycle
-    pub cclo: [f64; 44], // Cl diurnal cycle
-    pub chono: [f64; 44], // HONOx diurnal cycle
-    pub xpo3: f64,      // O3 production
-    pub xlo3: f64,      // O3 loss
-    pub do2int: [f64; NL], // integrated O2 column above (cm⁻²·atm)
+    pub ssf: [f64; NQ],   // spectral scale factors
+    pub coclo: [f64; NXNOFT], // ClO diurnal cycle
+    pub cbro: [f64; NXNOFT], // BrO diurnal cycle
+    pub cno2: [f64; NXNOFT], // NO2 diurnal cycle
+    pub cno3: [f64; NXNOFT], // NO3 diurnal cycle
+    pub cclo: [f64; NXNOFT], // Cl diurnal cycle
+    pub chono: [f64; NXNOFT], // HONOx diurnal cycle
+    pub xpo3: f64,        // O3 production
+    pub xlo3: f64,        // O3 loss
+    pub do2int: [f64; NATM], // integrated O2 column above (cm⁻²·atm)
     /// O3 tracer profiles; o3tr(12, 55)
     pub o3tr: Array2<f64>, // shape [12, 55]
-    pub ztr: [f64; 55], // tracer altitude grid (cm)
+    pub ztr: [f64; 55],   // tracer altitude grid (cm)
     /// Water albedo table; watalb(11, 34)
     pub watalb: Array2<f64>, // shape [11, 34]
     pub wvalb: [f64; 34], // wavelength grid for albedo table
     pub szalb: [f64; 11], // SZA grid for albedo table
-    /// SZA-dependent albedo; ztalb(44, 34)
-    pub ztalb: Array2<f64>, // shape [44, 34]
-    pub dn2oref: [f64; NL], // reference N2O profile (cm⁻³)
+    /// SZA-dependent albedo; legacy shape was ztalb(44, 34).
+    pub ztalb: Array2<f64>, // shape [NXNOFT, 34]
+    pub dn2oref: [f64; NATM], // reference N2O profile (cm⁻³)
 
     // ── COMMON/CHRIS2/ ──────────────────────────────────────────────────────
     /// Input temperature climatology; TINP(12, 18, 46)
@@ -429,7 +443,7 @@ pub struct ModelState {
     pub xin: Array2<f64>, // shape [6, 101]
     pub pin_t: [f64; 101], // pressure grid for T input (mb)
     pub tfull: [f64; 101], // full T profile
-    pub fbrx_ref: [f64; NL], // reference Bry mixing ratio profile
+    pub fbrx_ref: [f64; NATM], // reference Bry mixing ratio profile
     pub zjh2o: [f64; NJH2O], // altitude grid for H2O photolysis (cm)
     pub xjh2o: [f64; NJH2O], // H2O photolysis rate table (s⁻¹)
     pub xjdo: f64,       // H2O photolysis rate at current box
@@ -499,6 +513,7 @@ impl Clone for ModelState {
             tanht: self.tanht.clone(),
             nlbatm: self.nlbatm.clone(),
             nc: self.nc.clone(),
+            nlev: self.nlev,
             ncdim: self.ncdim.clone(),
             nbdim: self.nbdim.clone(),
             nbox: self.nbox.clone(),
@@ -734,10 +749,15 @@ impl Clone for ModelState {
             dayerr: self.dayerr.clone(),
             maxraf: self.maxraf.clone(),
             maxrlx: self.maxrlx.clone(),
+            cpp_compatibility: self.cpp_compatibility,
+            radiative_aerosol: self.radiative_aerosol,
             boxrn: self.boxrn.clone(),
             boxaa: self.boxaa.clone(),
             boxss: self.boxss.clone(),
             boxtt: self.boxtt.clone(),
+            box_flux_lower: self.box_flux_lower,
+            box_flux_upper: self.box_flux_upper,
+            box_flux_upper_weight: self.box_flux_upper_weight,
             nboxpr: self.nboxpr.clone(),
             nboxdo: self.nboxdo.clone(),
             nboxmx: self.nboxmx.clone(),
@@ -771,6 +791,7 @@ impl Clone for ModelState {
             lresol: self.lresol.clone(),
             lprty: self.lprty.clone(),
             lprt8: self.lprt8.clone(),
+            heterogeneous_chemistry: self.heterogeneous_chemistry,
             dpl: self.dpl.clone(),
             asa: self.asa.clone(),
             denout: self.denout.clone(),
@@ -838,23 +859,24 @@ impl ModelState {
             titlev: String::new(),
             titlej: vec![[String::new(), String::new(), String::new()]; NJVAL],
 
-            t: [0.0; 46],
-            refo3: [0.0; NL],
-            pstd: [0.0; NL],
-            dm: [0.0; NL],
-            do3ref: [0.0; NL],
-            z: [0.0; NL],
-            theta: [0.0; NL],
-            aer: [0.0; NL],
-            do3int: [0.0; NL],
+            t: [0.0; NATM + 5],
+            refo3: [0.0; NATM],
+            pstd: [0.0; NATM],
+            dm: [0.0; NATM],
+            do3ref: [0.0; NATM],
+            z: [0.0; NATM],
+            theta: [0.0; NATM],
+            aer: [0.0; NATM],
+            do3int: [0.0; NATM],
             wtau: Array2::zeros((NL, NL)),
-            dnoy_ref: [0.0; NL],
+            dnoy_ref: [0.0; NATM],
             rflect: 0.0,
             sza: 0.0,
             u0: 0.0,
             tanht: 0.0,
             nlbatm: 0,
             nc: 0,
+            nlev: 0,
             ncdim: NL,
             nbdim: NB,
             nbox: 0,
@@ -880,10 +902,10 @@ impl ModelState {
             turbdx: 0.0,
             flscal: 0.0,
 
-            tau: [0.0; 42],
-            piray: [0.0; 42],
-            piaer: [0.0; 42],
-            fltau: [0.0; 42],
+            tau: [0.0; NTAU],
+            piray: [0.0; NTAU],
+            piaer: [0.0; NTAU],
+            fltau: [0.0; NTAU],
             ttfbot: 0.0,
             ntt: 0,
 
@@ -1064,7 +1086,7 @@ impl ModelState {
             xnoft: Array2::zeros((NDEN, NXNOFT)),
             ppmean: Array2::zeros((crate::constants::NPPMEAN, NB)),
             xxnoft: Array3::zeros((NDEN, NXNOFT, NB)),
-            storjv: Array3::zeros((NJVAL, 16, NB)),
+            storjv: Array3::zeros((NJVAL, NXNOFT, NB)),
             ndxpp: [0; NNDXPQ],
             ndxqq: [0; NNDXPQ],
 
@@ -1110,11 +1132,16 @@ impl ModelState {
             dayerr: 0.0,
             maxraf: 0,
             maxrlx: 0,
+            cpp_compatibility: false,
+            radiative_aerosol: false,
 
             boxrn: [0.0; NB],
             boxaa: [0.0; NB],
             boxss: [0.0; NB],
             boxtt: [0.0; NB],
+            box_flux_lower: [0; NB],
+            box_flux_upper: [0; NB],
+            box_flux_upper_weight: [0.0; NB],
             nboxpr: [0; NB],
             nboxdo: [0i32; NB],
             nboxmx: [0; NB],
@@ -1150,30 +1177,31 @@ impl ModelState {
             lresol: false,
             lprty: false,
             lprt8: false,
+            heterogeneous_chemistry: true,
 
             dpl: Array4::zeros((12, 18, NB, NTAB)),
-            asa: [-1.0; NL],
+            asa: [-1.0; NATM],
             denout: ndarray::Array5::zeros((12, 18, 3, 4, NB)),
             rampm: Array4::zeros((12, 18, 9, NB)),
             aersf: 0.0,
             smxsf: [0.0; NQ],
             ssf: [1.0; NQ],
-            coclo: [0.0; 44],
-            cbro: [0.0; 44],
-            cno2: [0.0; 44],
-            cno3: [0.0; 44],
-            cclo: [0.0; 44],
-            chono: [0.0; 44],
+            coclo: [0.0; NXNOFT],
+            cbro: [0.0; NXNOFT],
+            cno2: [0.0; NXNOFT],
+            cno3: [0.0; NXNOFT],
+            cclo: [0.0; NXNOFT],
+            chono: [0.0; NXNOFT],
             xpo3: 0.0,
             xlo3: 0.0,
-            do2int: [0.0; NL],
+            do2int: [0.0; NATM],
             o3tr: Array2::zeros((12, 55)),
             ztr: [0.0; 55],
             watalb: Array2::zeros((11, 34)),
             wvalb: [0.0; 34],
             szalb: [0.0; 11],
-            ztalb: Array2::zeros((44, 34)),
-            dn2oref: [0.0; NL],
+            ztalb: Array2::zeros((NXNOFT, 34)),
+            dn2oref: [0.0; NATM],
 
             tinp: Array3::zeros((12, 18, 46)),
             do3inp: Array3::zeros((12, 18, NL)),
@@ -1183,7 +1211,7 @@ impl ModelState {
             xin: Array2::zeros((6, 101)),
             pin_t: [0.0; 101],
             tfull: [0.0; 101],
-            fbrx_ref: [0.0; NL],
+            fbrx_ref: [0.0; NATM],
             zjh2o: [0.0; NJH2O],
             xjh2o: [0.0; NJH2O],
             xjdo: 0.0,

@@ -27,6 +27,7 @@ from pratmo import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+CLIMATOLOGY_FIXTURE = REPOSITORY_ROOT / "pratmo-core/tests/fixtures/legacy_inputs"
 
 
 @pytest.fixture(scope="module")
@@ -289,7 +290,7 @@ def test_diurn_config_defaults():
 def test_pratmo_climatology_uses_cpp_pressure_height_grid():
     from pratmo import PratmoClimatology
 
-    profile = PratmoClimatology(REPOSITORY_ROOT / "fortran").sample(
+    profile = PratmoClimatology(CLIMATOLOGY_FIXTURE).sample(
         -85.0, date(2008, 1, 16), np.array([0.0, 8.0, 80.0])
     )
     assert profile.temperature_k == pytest.approx([256.4, 228.42518988, 182.79799212])
@@ -304,7 +305,7 @@ def test_pratmo_climatology_uses_cpp_pressure_height_grid():
 def test_pratmo_climatology_matches_cpp_osiris_case():
     from pratmo import PratmoClimatology
 
-    profile = PratmoClimatology(REPOSITORY_ROOT / "fortran").sample(
+    profile = PratmoClimatology(CLIMATOLOGY_FIXTURE).sample(
         30.466005325317383, date(2008, 7, 2), np.array([26.5])
     )
     assert profile.noy[0] == pytest.approx(10.65843794e-9)
@@ -315,7 +316,7 @@ def test_pratmo_climatology_matches_cpp_osiris_case():
 def test_pratmo_climatology_builds_correlated_long_lived_inputs():
     from pratmo import PratmoClimatology
 
-    profile = PratmoClimatology(REPOSITORY_ROOT / "fortran").sample(
+    profile = PratmoClimatology(CLIMATOLOGY_FIXTURE).sample(
         5.0, date(2008, 7, 2), np.array([26.5])
     )
     ratios = profile.initial_mixing_ratios(o3=np.array([5.0e-6]))[0]

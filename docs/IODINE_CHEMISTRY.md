@@ -1,3 +1,13 @@
+---
+jupytext:
+  text_representation:
+    format_name: myst
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
 # Iodine chemistry
 
 ```{warning}
@@ -20,9 +30,9 @@ carried explicitly.
 
 Primary references:
 
-- Saiz-Lopez et al. (2014), https://doi.org/10.5194/acp-14-13119-2014
-- Lewis et al. (2020), https://doi.org/10.5194/acp-20-10865-2020
-- Cuevas et al. (2022), https://doi.org/10.1073/pnas.2110864119
+- [Saiz-Lopez et al. (2014)](https://doi.org/10.5194/acp-14-13119-2014)
+- [Lewis et al. (2020)](https://doi.org/10.5194/acp-20-10865-2020)
+- [Cuevas et al. (2022)](https://doi.org/10.1073/pnas.2110864119)
 
 ## Numerical implementation
 
@@ -100,6 +110,52 @@ integrated HNO3 forward again and erased its update; `FIXRAT` then propagated
 the error into BrONO2 through the coupled NOy/Bry constraint. The one-time
 relaxation keeps the fast diurnal orbit initialized without resetting the slow
 family solve.
+
+## Interactive paired experiment
+
+Always compare the experimental mechanism with an otherwise identical
+iodine-off run and retain both sets of diagnostics.
+
+```{code-cell} ipython3
+:execution_timeout: 600
+
+from pratmo import Box, ChemistryOptions, Model
+
+model = Model()
+iodine_off = model.diurnal(
+    latitude=0.0,
+    day="2026-04-30",
+    boxes=[Box.at_level(15)],
+)
+iodine_on = model.diurnal(
+    latitude=0.0,
+    day="2026-04-30",
+    boxes=[Box.at_level(15)],
+    chemistry=ChemistryOptions(iodine=True),
+)
+```
+
+```{code-cell} ipython3
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+hours = iodine_on.elapsed_seconds / 3600.0
+iodine_figure = make_subplots(rows=1, cols=2, subplot_titles=("Ozone response", "Active iodine"))
+iodine_figure.add_scatter(
+    x=hours, y=iodine_off.species_grid("o3")[0], name="O3 iodine off", row=1, col=1
+)
+iodine_figure.add_scatter(
+    x=hours, y=iodine_on.species_grid("o3")[0], name="O3 iodine on", row=1, col=1
+)
+iodine_figure.add_scatter(
+    x=hours, y=iodine_on.species_grid("io")[0], name="IO", row=1, col=2
+)
+iodine_figure.update_xaxes(title_text="Elapsed hours from local noon")
+iodine_figure.update_yaxes(title_text="O3 (cm⁻³)", row=1, col=1)
+iodine_figure.update_yaxes(title_text="IO (cm⁻³)", type="log", row=1, col=2)
+iodine_figure.update_layout(template="plotly_white")
+iodine_figure
+```
 
 ## Known boundaries
 

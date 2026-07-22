@@ -413,13 +413,19 @@ struct PyLongLivedMixingRatios {
 
 #[pymethods]
 impl PyLongLivedMixingRatios {
-    /// Construct long-lived mixing ratios. All arguments are keyword-only and default to 0.0.
+    /// Construct a representative lower-stratospheric long-lived state.
+    ///
+    /// Values are dimensionless mixing ratios. Keyword arguments override the
+    /// representative defaults; use climatological or measured profiles for
+    /// quantitative work.
     #[new]
     #[pyo3(signature = (
-        o3=0.0, n2o=0.0, noy=0.0, ch4=0.0, co=0.0,
-        clx=0.0, cf2cl2=0.0, cfcl3=0.0, ccl4=0.0, ch3cl=0.0,
-        ch3ccl3=0.0, h2=0.0, h2o=0.0, nh3=0.0, c5h8=0.0,
-        brx=0.0, ch3br=0.0, ocs=0.0, iodx=0.0
+        *,
+        o3=5.0e-6, n2o=300.0e-9, noy=10.0e-9, ch4=1.7e-6, co=50.0e-9,
+        clx=3.0e-9, cf2cl2=500.0e-12, cfcl3=250.0e-12, ccl4=90.0e-12,
+        ch3cl=550.0e-12, ch3ccl3=20.0e-12, h2=500.0e-9, h2o=5.0e-6,
+        nh3=0.0, c5h8=0.0, brx=20.0e-12, ch3br=10.0e-12,
+        ocs=500.0e-12, iodx=1.0e-12
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -1176,7 +1182,7 @@ struct PyDiurnBoxSpec {
 #[pymethods]
 impl PyDiurnBoxSpec {
     #[new]
-    #[pyo3(signature = (altitude_level, aerosol_surface_area_um2_cm3=0.0, sea_salt_surface_area_um2_cm3=0.0, temp_offset_k=0.0, altitude_km=None))]
+    #[pyo3(signature = (altitude_level, aerosol_surface_area_um2_cm3=0.25, sea_salt_surface_area_um2_cm3=0.0, temp_offset_k=0.0, altitude_km=None))]
     fn new(
         altitude_level: u8,
         aerosol_surface_area_um2_cm3: f64,
@@ -1363,9 +1369,9 @@ impl PyDiurnConfig {
         latitude_deg=0.0,
         julian_day=120,
         integration_days=20,
-        boxes=vec![],
-        bromine=false,
-        iodine=true,
+        boxes=None,
+        bromine=true,
+        iodine=false,
         parallel_boxes=false,
         cpp_compatibility=false,
         elapsed_time_hours=None,
@@ -1381,7 +1387,7 @@ impl PyDiurnConfig {
         latitude_deg: f64,
         julian_day: u16,
         integration_days: u32,
-        boxes: Vec<PyDiurnBoxSpec>,
+        boxes: Option<Vec<PyDiurnBoxSpec>>,
         bromine: bool,
         iodine: bool,
         parallel_boxes: bool,
@@ -1398,7 +1404,15 @@ impl PyDiurnConfig {
             latitude_deg,
             julian_day,
             integration_days,
-            boxes,
+            boxes: boxes.unwrap_or_else(|| {
+                vec![PyDiurnBoxSpec {
+                    altitude_level: 15,
+                    altitude_km: None,
+                    aerosol_surface_area_um2_cm3: 0.25,
+                    sea_salt_surface_area_um2_cm3: 0.0,
+                    temp_offset_k: 0.0,
+                }]
+            }),
             bromine,
             iodine,
             parallel_boxes,
@@ -1490,16 +1504,16 @@ impl PyCtmConfig {
         latitude_deg=60.0,
         julian_day=75,
         integration_days=40,
-        boxes=vec![],
-        bromine=false,
-        iodine=true,
+        boxes=None,
+        bromine=true,
+        iodine=false,
         solar_flux_scale=1.0
     ))]
     fn new(
         latitude_deg: f64,
         julian_day: u16,
         integration_days: u32,
-        boxes: Vec<PyCtmBoxSpec>,
+        boxes: Option<Vec<PyCtmBoxSpec>>,
         bromine: bool,
         iodine: bool,
         solar_flux_scale: f64,
@@ -1508,7 +1522,17 @@ impl PyCtmConfig {
             latitude_deg,
             julian_day,
             integration_days,
-            boxes,
+            boxes: boxes.unwrap_or_else(|| {
+                [10, 15, 20, 25]
+                    .into_iter()
+                    .map(|altitude_level| PyCtmBoxSpec {
+                        altitude_level,
+                        aerosol_surface_area_um2_cm3: 0.0,
+                        sea_salt_surface_area_um2_cm3: 0.0,
+                        temp_offset_k: 0.0,
+                    })
+                    .collect()
+            }),
             bromine,
             iodine,
             solar_flux_scale,
@@ -2001,6 +2025,20 @@ struct PyPratmoModel {
 
 #[pymethods]
 impl PyPratmoModel {
+    /// Create a model using compiled-in science data, or load data from a directory.
+    #[new]
+    #[pyo3(signature = (data_dir=None))]
+    fn new(data_dir: Option<PathBuf>) -> Self {
+        match data_dir {
+            Some(path) => Self {
+                inner: PratmoModel::new(path),
+            },
+            None => Self {
+                inner: PratmoModel::with_defaults(),
+            },
+        }
+    }
+
     /// Create a model using only compiled-in embedded science data. No files needed.
     #[staticmethod]
     fn with_defaults() -> Self {

@@ -4,31 +4,30 @@ from __future__ import annotations
 
 from pratmo import (
     IMPLICIT_SPECIES_NAMES,
-    CtmBoxSpec,
-    CtmConfig,
-    PratmoModel,
+    Box,
+    ChemistryOptions,
+    CtmOptions,
+    Model,
+    mixing_ratio_as,
 )
 
 
 def main() -> None:
-    model = PratmoModel.with_defaults()
-    output = model.run_ctm(
-        CtmConfig(
-            latitude_deg=60.0,
-            julian_day=75,
-            integration_days=10,
-            boxes=[CtmBoxSpec(altitude_level=level) for level in (10, 15, 20, 25)],
-            bromine=True,
-            iodine=True,
-        )
+    model = Model()
+    output = model.ctm(
+        latitude=60.0,
+        day="2026-03-16",
+        boxes=[Box.at_level(level) for level in (10, 15, 20, 25)],
+        chemistry=ChemistryOptions(),
+        options=CtmOptions(integration_days=40),
     )
 
     ozone = output.species_profile("o3")
     hydroxyl = output.species_profile("oh")
-    noy = output.long_lived_profile("noy")
+    noy = mixing_ratio_as(output.long_lived_profile("noy"), "ppbv")
 
-    print(" altitude      pressure             O3             OH        NOy VMR")
-    print("      (km)          (mb)         (cm-3)         (cm-3)               ")
+    print(" altitude      pressure             O3             OH      NOy (ppbv)")
+    print("      (km)         (hPa)         (cm-3)         (cm-3)                ")
     for altitude, pressure, o3, oh, noy_vmr in zip(
         output.altitude_km,
         output.pressure_mb,

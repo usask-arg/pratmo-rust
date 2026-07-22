@@ -19,7 +19,7 @@ clock labels therefore begin and end at 12:00.
 :tags: [hide-input]
 :execution_timeout: 600
 
-from pratmo import IMPLICIT_SPECIES_NAMES, PratmoModel, DiurnConfig, DiurnBoxSpec
+from pratmo import Box, ChemistryOptions, IMPLICIT_SPECIES_NAMES, Model
 import json
 from IPython.display import HTML
 
@@ -80,7 +80,7 @@ DEFAULT_PRESET = "NOx"
 
 # ── Run model for multiple altitudes ──────────────────────────────────────────
 
-model = PratmoModel.with_defaults()
+model = Model()
 ALT_LEVELS = [8, 12, 18, 22]   # ~14, ~22, ~34, ~42 km
 O3_SCALE_FACTOR = 1.0 # multiply initial box O3; lower this to test less ozone
 NOY_SCALE_FACTOR = 1.0 # multiply initial total NOy; lower this to reduce NO2/IONO2
@@ -96,30 +96,28 @@ AEROSOL_AREA_BY_LEVEL = {
 payload = {}
 for level in ALT_LEVELS:
     aerosol_area = AEROSOL_AREA_BY_LEVEL.get(level, 0.0) * AEROSOL_AREA_SCALE_FACTOR
-    cfg = DiurnConfig(
-        latitude_deg=0.0, julian_day=120, integration_days=20,
-        boxes=[DiurnBoxSpec(
-            altitude_level=level,
+    out = model.diurnal(
+        latitude=0.0, day=120,
+        boxes=[Box.at_level(
+            level,
             aerosol_surface_area_um2_cm3=aerosol_area,
         )],
-        bromine=True
+        chemistry=ChemistryOptions(iodine=True),
     )
-    out = model.run_diurn(cfg)
 
     if O3_SCALE_FACTOR != 1.0 or NOY_SCALE_FACTOR != 1.0:
         init = out.boxes[0].long_lived
         init.o3 *= O3_SCALE_FACTOR
         init.noy *= NOY_SCALE_FACTOR
-        cfg = DiurnConfig(
-            latitude_deg=0.0, julian_day=120, integration_days=20,
-            boxes=[DiurnBoxSpec(
-                altitude_level=level,
+        out = model.diurnal(
+            latitude=0.0, day=120,
+            boxes=[Box.at_level(
+                level,
                 aerosol_surface_area_um2_cm3=aerosol_area,
             )],
-            bromine=True,
+            chemistry=ChemistryOptions(iodine=True),
             initial_mixing_ratios=[init],
         )
-        out = model.run_diurn(cfg)
 
     ts  = out.time_series[0]
     snap = out.boxes[0]
@@ -173,7 +171,8 @@ alt_options = "\n".join(
 )
 
 preset_btns = "\n".join(
-    f'<button class="px-btn" data-preset="{name}" onclick="dxSetPreset(\'{name}\')">{name}</button>'
+    f'<button type="button" class="px-btn" data-preset="{name}" aria-pressed="false" '
+    f'onclick="dxSetPreset(\'{name}\')">{name}</button>'
     for name in PRESETS
 )
 
@@ -193,6 +192,7 @@ widget = f"""
   border: 1px solid #dee2e6;
   border-radius: 8px;
   margin-bottom: 10px;
+  color: #212529;
 }}
 #dx-widget .dx-bar label {{
   font-weight: 600;
@@ -208,6 +208,7 @@ widget = f"""
   font-size: 13px;
   cursor: pointer;
   background: white;
+  color: #212529;
 }}
 .dx-group {{
   display: flex;
@@ -239,11 +240,11 @@ widget = f"""
 <div id="dx-widget">
   <div class="dx-bar">
     <div>
-      <label>Altitude:</label>
+      <label for="dx-alt">Altitude:</label>
       <select id="dx-alt" onchange="dxUpdateAlt(this.value)">{alt_options}</select>
     </div>
     <div>
-      <label>Scale:</label>
+      <label for="dx-scale">Scale:</label>
       <select id="dx-scale" onchange="dxUpdateScale(this.value)">
         <option value="log" selected>Log</option>
         <option value="linear">Linear</option>
@@ -252,8 +253,8 @@ widget = f"""
     <div class="dx-group">
       <label>Preset:</label>
       {preset_btns}
-      <button class="px-btn extra" data-preset="_all"  onclick="dxSetPreset('_all')">All</button>
-      <button class="px-btn extra" data-preset="_none" onclick="dxSetPreset('_none')">None</button>
+      <button type="button" class="px-btn extra" data-preset="_all" aria-pressed="false" onclick="dxSetPreset('_all')">All</button>
+      <button type="button" class="px-btn extra" data-preset="_none" aria-pressed="false" onclick="dxSetPreset('_none')">None</button>
     </div>
   </div>
   <div id="dx-chart"></div>
@@ -367,7 +368,9 @@ widget = f"""
     var visible = SPECIES.map(function (sp) {{ return act.has(sp) ? true : "legendonly"; }});
     Plotly.restyle("dx-chart", {{ visible: visible }});
     document.querySelectorAll(".px-btn").forEach(function (b) {{
-      b.classList.toggle("active", b.dataset.preset === preset);
+      var active = b.dataset.preset === preset;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-pressed", active ? "true" : "false");
     }});
   }};
 
@@ -388,10 +391,9 @@ widget = f"""
       {{ responsive: true, displaylogo: false,
          modeBarButtonsToRemove: ["lasso2d", "select2d"] }}
     );
-    // Mark default preset button active
-    document.querySelectorAll(".px-btn").forEach(function (b) {{
-      if (b.dataset.preset === DEFAULT) b.classList.add("active");
-    }});    dxUpdateAlt(curAlt);  }}
+    dxSetPreset(DEFAULT);
+    dxUpdateAlt(curAlt);
+  }}
 
   if (typeof Plotly !== "undefined") {{
     init();

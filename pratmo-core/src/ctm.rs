@@ -14,6 +14,26 @@ use crate::{
     state::ModelState,
 };
 
+static EMBEDDED_FORT03: &[u8] = include_bytes!("../data/fort03_LLM.x");
+static EMBEDDED_FORT05: &[u8] = include_bytes!("../data/fort05.x");
+static EMBEDDED_FORT51: &[u8] = include_bytes!("../data/fort51.x");
+
+fn ctm_path_index(julian_day: i32, latitude_deg: f64) -> i32 {
+    const REPRESENTATIVE_DAYS: [i32; 24] = [
+        1, 16, 32, 47, 60, 75, 91, 106, 121, 137, 152, 167, 182, 197, 213, 228, 244, 259, 274, 289,
+        305, 320, 335, 350,
+    ];
+    let season = REPRESENTATIVE_DAYS
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, day)| (**day - julian_day).unsigned_abs())
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    let latitude_index =
+        (((latitude_deg.clamp(-90.0, 90.0) + 90.0) / 2.5).floor() as i32).clamp(1, 71);
+    season as i32 * 71 + latitude_index
+}
+
 // ── CTMLFQ ───────────────────────────────────────────────────────────────────
 
 /// Outer loop over latitudes × months for CTM-style climatological run.
@@ -25,18 +45,33 @@ use crate::{
 /// The I/O requires fort03_LLM.x, fort04.x, fort05.x, fort51.x in cinpdir.
 /// Fortran: SUBROUTINE CTMLFQ
 pub fn ctmlfq(s: &mut ModelState) -> Result<()> {
-    ctmlfq_impl(s, true)
+    ctmlfq_impl(s, true, None, false)
 }
 
 /// Run CTM calculations without creating `boxout.dat` or printing legacy
 /// climatology diagnostics. Used by structured programmatic APIs.
-pub(crate) fn ctmlfq_in_memory(s: &mut ModelState) -> Result<()> {
-    ctmlfq_impl(s, false)
+pub(crate) fn ctmlfq_in_memory(
+    s: &mut ModelState,
+    latitude_deg: f64,
+    julian_day: u16,
+    use_embedded_climatology: bool,
+) -> Result<()> {
+    ctmlfq_impl(
+        s,
+        false,
+        Some((latitude_deg, julian_day)),
+        use_embedded_climatology,
+    )
 }
 
-fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
+fn ctmlfq_impl(
+    s: &mut ModelState,
+    emit_legacy_output: bool,
+    structured_location: Option<(f64, u16)>,
+    use_embedded_climatology: bool,
+) -> Result<()> {
     use std::fs::File;
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Cursor};
     use std::path::Path;
 
     let base = Path::new(&s.cinpdir);
@@ -49,7 +84,9 @@ fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
     // Read boxin_gui.dat for run configuration
     // bctmx.f reads: jdaydo, xlatdo, xalbedo, iwnoy/iwn2o/iwbry, aero_sf,
     //   ipf(8), ipfr(24), ipjv(10), isza, szaout, iampm, ivarO3, bmoutfile, irunclim, iTfull
-    let mut jdaydo: i32 = 75;
+    let mut jdaydo: i32 = structured_location
+        .map(|(_, day)| i32::from(day))
+        .unwrap_or(75);
     let mut ipf = [0i32; 8];
     let mut ipfr = [0i32; 24];
     let mut ipjv = [0i32; 10];
@@ -63,7 +100,7 @@ fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
     let mut bmoutfile = base.join("boxout.dat");
 
     let boxin = base.join("boxin_gui.dat");
-    if boxin.exists() {
+    if structured_location.is_none() && boxin.exists() {
         let f = File::open(&boxin)?;
         let mut r = BufReader::new(f);
         let mut line = String::new();
@@ -174,25 +211,16 @@ fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
 
         // Compute nd216/nd216s from jdaydo and xlatdo (bctmx.f lines 187-194)
         // JDDO(1..24): representative Julian days for each of 24 half-months
-        const JDDO: [i32; 24] = [
-            1, 16, 32, 47, 60, 75, 91, 106, 121, 137, 152, 167, 182, 197, 213, 228, 244, 259, 274,
-            289, 305, 320, 335, 350,
-        ];
-        // HUNT for closest JDDO to jdaydo
-        let mut j0 = 0usize;
-        hunt(
-            &JDDO.iter().map(|&x| x as f64).collect::<Vec<_>>(),
-            jdaydo as f64,
-            &mut j0,
-        );
-        let j0_1 = j0.min(JDDO.len() - 2); // 0-based, clamp to valid range
-        let dd1 = (JDDO[j0_1 + 1] - jdaydo).unsigned_abs();
-        let dd2 = (JDDO[j0_1] - jdaydo).unsigned_abs();
-        let j0_final = if dd1 < dd2 { j0_1 + 1 } else { j0_1 }; // 0-based (Fortran: 1-based)
-                                                                // ilat: 2.5° spacing from -90 to +90 (71 lats total, 0-based)
-        let ilat = ((xlatdo + 90.0) / 2.5).floor() as i32;
-        let nd_val = j0_final as i32 * 71 + ilat;
+        let nd_val = ctm_path_index(jdaydo, xlatdo);
         s.nd216 = nd_val.max(1); // at least 1 so loop runs
+        s.nd216s = nd_val.max(1);
+    }
+
+    if let Some((latitude_deg, _)) = structured_location {
+        s.xlatd = latitude_deg;
+        s.xlat = latitude_deg.to_radians();
+        let nd_val = ctm_path_index(jdaydo, latitude_deg);
+        s.nd216 = nd_val.max(1);
         s.nd216s = nd_val.max(1);
     }
 
@@ -204,9 +232,12 @@ fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
 
     // Read CTM climatology if fort03_LLM.x exists
     let fort03 = base.join("fort03_LLM.x");
-    if fort03.exists() {
-        let f = File::open(&fort03)?;
-        let mut r = BufReader::new(f);
+    if fort03.exists() || use_embedded_climatology {
+        let mut r: Box<dyn BufRead> = if fort03.exists() {
+            Box::new(BufReader::new(File::open(&fort03)?))
+        } else {
+            Box::new(BufReader::new(Cursor::new(EMBEDDED_FORT03)))
+        };
         let mut line = String::new();
 
         // Skip two header lines
@@ -253,9 +284,12 @@ fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
 
     // Read NOy climatology (fort05.x)
     let fort05 = base.join("fort05.x");
-    if fort05.exists() {
-        let f = File::open(&fort05)?;
-        let mut r = BufReader::new(f);
+    if fort05.exists() || use_embedded_climatology {
+        let mut r: Box<dyn BufRead> = if fort05.exists() {
+            Box::new(BufReader::new(File::open(&fort05)?))
+        } else {
+            Box::new(BufReader::new(Cursor::new(EMBEDDED_FORT05)))
+        };
         let mut line = String::new();
         r.read_line(&mut line)?;
         line.clear();
@@ -274,9 +308,12 @@ fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
 
     // Read N2O climatology (fort51.x)
     let fort51 = base.join("fort51.x");
-    if fort51.exists() {
-        let f = File::open(&fort51)?;
-        let mut r = BufReader::new(f);
+    if fort51.exists() || use_embedded_climatology {
+        let mut r: Box<dyn BufRead> = if fort51.exists() {
+            Box::new(BufReader::new(File::open(&fort51)?))
+        } else {
+            Box::new(BufReader::new(Cursor::new(EMBEDDED_FORT51)))
+        };
         let mut line = String::new();
         r.read_line(&mut line)?;
         line.clear();
@@ -371,7 +408,6 @@ fn ctmlfq_impl(s: &mut ModelState, emit_legacy_output: bool) -> Result<()> {
             s.dnoy_ref[i] = interp2(wm, wj, &s.dnoyi_np, mm1, mm2, jj1, jj2, i);
             s.dn2oref[i] = interp2(wm, wj, &s.dn2oinp, mm1, mm2, jj1, jj2, i);
         }
-
         if itfull == 1 {
             for (j, &temperature) in full_temperatures.iter().take(nc).enumerate() {
                 s.t[j] = temperature;
@@ -1294,5 +1330,23 @@ mod tests {
         assert!((vals[0] - 250.0).abs() < 0.05, "vals[0]={}", vals[0]);
         assert!((vals[1] - 240.5).abs() < 0.05, "vals[1]={}", vals[1]);
         assert!((vals[2] - 230.1).abs() < 0.05, "vals[2]={}", vals[2]);
+    }
+
+    #[test]
+    fn embedded_ctm_temperature_profile_is_readable() {
+        use std::io::{BufRead, BufReader, Cursor};
+
+        let mut reader = BufReader::new(Cursor::new(EMBEDDED_FORT03));
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+
+        let temperatures = read_f7_1(&mut reader, 41).unwrap();
+        assert_eq!(temperatures.len(), 41);
+        assert!((temperatures[0] - 256.4).abs() < 0.05);
+        assert!((temperatures[40] - 170.4).abs() < 0.05);
     }
 }

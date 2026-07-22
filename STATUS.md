@@ -89,6 +89,9 @@ of the CTM/DIURN implementation-comparison gate.
 | 12 | `SETDAY` mirrored `DTIME` one slot late, changing the first evening integration weights | Use `NTIM-1-j` for the zero-based destination |
 | 13 | ODF ISR values were parsed together with their trailing wavelength-band annotation | Parse the first fixed-format token only |
 | 14 | Parity-mode CHEMPL omitted R177 from HNO3 in every mode, although Fortran includes it in CTM | Restrict the legacy omission to `nd216 == 0` (DIURN) |
+| 15 | The embedded high-level CTM path did not load the seasonal climatology and could return initialized rather than integrated fields | Bundle the required climatology tables and select them explicitly for `PratmoModel::with_defaults()` |
+| 16 | Structured CTM/DIURN snapshots read the cleared instantaneous J-value array | Report time-weighted daily-mean J-values from `STORJV` |
+| 17 | Normal-mode DIURN exposed invalid HHMM labels such as `0160` | Generate clock labels with carried minutes while retaining the legacy format only in parity mode |
 
 ### `bugs.txt` follow-up
 
@@ -105,25 +108,25 @@ of the CTM/DIURN implementation-comparison gate.
 
 ## Test coverage
 
-90 Rust tests pass in the default configuration; 5 policy-specific short-lived
+102 Rust tests pass in the default configuration; 5 policy-specific short-lived
 assertions are ignored in the normal build. The `fortran-parity` all-features
-configuration has 64 active Rust tests (55 unit tests plus 9 feature-policy
-tests). The Python binding suite adds 36 passing integration tests.
+configuration has 71 active Rust tests (62 unit tests plus 9 feature-policy
+tests). The Python binding suite adds 53 passing integration tests.
 
 | Suite | Count | What it covers |
 |---|---|---|
 | `tests/ctm_integration.rs` | 11 | 6 active CTM regressions + 5 policy-specific ignored comparisons |
-| `tests/custom_diurn.rs` | 4 | Public custom-atmosphere DIURN API |
+| `tests/custom_diurn.rs` | 8 | Public custom-atmosphere DIURN API, off-grid boxes, radiation options, and constrained NO2 |
 | `tests/fortran_parity_feature.rs` | 8 normal / 9 parity | Original 40-species input, ODF parsing, policy switches, public DIURN smoke, representative latitude/season matrix, and end-to-end parity CTM smoke coverage |
 | `tests/iodine_chemistry.rs` | 13 | Iodine chemistry, photolysis, convergence, and heterogeneous recycling |
-| `chemistry::iodine_tests` | 7 | Reaction stoichiometry, atom conservation, analytic Jacobian, and evaluated rate points |
-| `reader::tests` | 23 | `parse_e_field`, `parse_fixed_i32s`, `parse_fixed_f64s_fw`, `hystat` (logp + geometric), `setday` (ntim, weights, time-grid mirror, polar night, nday modes) |
-| `ctm::tests` | 8 | `interp2` (corners, midpoint, linear, uniform), strict boxin integer counts, `read_f8_4`, `read_f7_1` |
+| `chemistry::iodine_tests` | 8 | Reaction stoichiometry, atom conservation, analytic Jacobian, and evaluated rate points |
+| `reader::tests` | 26 | Fixed-format parsing, `hystat`, `setday`, and valid normal-mode HHMM generation |
+| `ctm::tests` | 9 | Interpolation, strict boxin integer counts, fixed-width readers, and bundled climatology parsing |
 | `output::tests` | 9 | `hunt` (interior, boundary, below/above range, hint, JDDO array), `fmt_e10p3` |
 | `solver::tests` | 4 | machine-precision convergence floor, cancellation guard, and iodine-family scaling |
 | `tracers::tests` | 2 | Cly/CH3Cl fit boundaries and out-of-range sentinels |
-| `api::tests` | 6 | Configuration validation, cyclic HHMM lookup, J-value mapping, and rejection of DERIVS/PZSTD |
-| `tests/test_pratmo.py` | 36 | Python configuration/output objects, discoverable names, NumPy profiles/grids, and CTM/DIURN runs |
+| `api::tests` | 9 | Configuration validation, cyclic HHMM lookup, daily-mean J-values, and rejection of DERIVS/PZSTD |
+| `tests/test_pratmo.py` | 53 | Python quantities, warnings, custom atmospheres, plots, constrained NO2, and CTM/DIURN runs |
 
 ---
 

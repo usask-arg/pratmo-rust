@@ -1,5 +1,11 @@
+import os
+
 # Autodoc and notebook execution use the installed wheel or editable package.
 # Run `uv run maturin develop` before a local documentation build.
+
+# Ask Plotly for portable HTML output that MyST-NB can embed. Notebook kernels
+# inherit this setting from Sphinx, so examples can simply return a Figure.
+os.environ.setdefault("PLOTLY_RENDERER", "notebook_connected")
 
 project = "pratmo"
 author = "PRATMO Authors"
@@ -16,9 +22,10 @@ extensions = [
 
 # MyST-NB / MyST-Parser settings
 myst_enable_extensions = ["colon_fence", "dollarmath"]
-nb_execution_mode = "cache"
+nb_execution_mode = "force"
 nb_execution_timeout = 600
 nb_execution_raise_on_error = True
+nb_output_stderr = "remove"
 
 exclude_patterns = [
     "_build",
@@ -52,3 +59,12 @@ intersphinx_mapping = {
 }
 
 html_theme = "furo"
+html_title = "PRATMO Python guide"
+html_static_path = ["_static"]
+html_logo = "_static/pratmo-mark.svg"
+html_favicon = "_static/pratmo-mark.svg"
+html_theme_options = {
+    "source_repository": "https://github.com/usask-arg/pratmo-rust/",
+    "source_branch": "main",
+    "source_directory": "docs/",
+}

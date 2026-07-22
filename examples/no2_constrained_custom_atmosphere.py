@@ -17,16 +17,15 @@ from __future__ import annotations
 import numpy as np
 
 from pratmo import (
-    CustomAtmosphereProfile,
-    DiurnConfig,
-    No2ConstrainedDiurnConfig,
-    PratmoModel,
+    Atmosphere,
+    DiurnalOptions,
+    Model,
 )
 
 
 def main() -> None:
     # Pressure must decrease with altitude. O3 is supplied here as a dimensionless
-    # volume mixing ratio; use o3_kind="number_density" for cm^-3 instead.
+    # volume mixing ratio; use ozone_unit="cm-3" for number density instead.
     pressure_mb = [80.0, 50.0, 30.0]
     temperature_k = [225.0, 220.0, 215.0]
     altitude_km = [18.0, 21.0, 24.0]
@@ -35,34 +34,24 @@ def main() -> None:
     observed_no2_cm3 = [2.0e8, 5.0e7, 1.0e7]
     target_hhmm = 630
 
-    atmosphere = CustomAtmosphereProfile(
-        pressure_mb=pressure_mb,
-        temperature_k=temperature_k,
-        o3=o3_vmr,
-        o3_kind="mixing_ratio",
-        altitude_km=altitude_km,
+    atmosphere = Atmosphere(
+        pressure=pressure_mb,
+        temperature=temperature_k,
+        ozone=o3_vmr,
+        ozone_unit="fraction",
+        altitude=altitude_km,
     )
 
-    diurn = DiurnConfig(
-        latitude_deg=0.0,
-        julian_day=120,
-        integration_days=3,
-        boxes=[],  # empty => one DIURN box per custom atmosphere level
-        bromine=True,
-        iodine=False,
-        parallel_boxes=True,
+    model = Model()
+    result = model.diurnal_no2_constrained(
         atmosphere=atmosphere,
-    )
-
-    constrained = No2ConstrainedDiurnConfig(
-        diurn=diurn,
+        latitude=0.0,
+        day=120,
+        options=DiurnalOptions(integration_days=3, parallel_boxes=True),
         observed_no2_cm3=observed_no2_cm3,
         target_hhmm=target_hhmm,
         iterations=3,
     )
-
-    model = PratmoModel.with_defaults()
-    result = model.run_diurn_no2_constrained(constrained)
 
     out = result.output
     times_hhmm = out.time_hhmm

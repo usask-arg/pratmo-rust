@@ -3545,6 +3545,10 @@ dev = [
 ]
 docs = [
     { name = "furo" },
+    { name = "ipykernel", version = "6.31.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "ipykernel", version = "7.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "myst-nb", version = "1.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "myst-nb", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "numpydoc", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "numpydoc", version = "1.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "plotly" },
@@ -3604,8 +3608,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "furo", marker = "extra == 'docs'", specifier = ">=2024.1" },
+    { name = "ipykernel", marker = "extra == 'docs'", specifier = ">=6.0" },
     { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.9" },
     { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.9" },
+    { name = "myst-nb", marker = "extra == 'docs'", specifier = ">=1.1" },
     { name = "netcdf4", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "netcdf4", marker = "extra == 'io'", specifier = ">=1.7" },
     { name = "numpy", specifier = ">=1.24" },

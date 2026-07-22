@@ -23,6 +23,8 @@ docs = [
     "sphinx>=7.4",
     "sphinx-autodoc-typehints>=2.0",
     "furo>=2024.1",
+    "ipykernel>=6.0",
+    "myst-nb>=1.1",
     "numpydoc>=1.7",
     "plotly>=5.24",
 ]

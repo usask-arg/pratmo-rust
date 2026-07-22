@@ -1164,6 +1164,8 @@ struct PyDiurnBoxSpec {
     #[pyo3(get, set)]
     altitude_level: u8,
     #[pyo3(get, set)]
+    altitude_km: Option<f64>,
+    #[pyo3(get, set)]
     aerosol_surface_area_um2_cm3: f64,
     #[pyo3(get, set)]
     sea_salt_surface_area_um2_cm3: f64,
@@ -1174,15 +1176,17 @@ struct PyDiurnBoxSpec {
 #[pymethods]
 impl PyDiurnBoxSpec {
     #[new]
-    #[pyo3(signature = (altitude_level, aerosol_surface_area_um2_cm3=0.0, sea_salt_surface_area_um2_cm3=0.0, temp_offset_k=0.0))]
+    #[pyo3(signature = (altitude_level, aerosol_surface_area_um2_cm3=0.0, sea_salt_surface_area_um2_cm3=0.0, temp_offset_k=0.0, altitude_km=None))]
     fn new(
         altitude_level: u8,
         aerosol_surface_area_um2_cm3: f64,
         sea_salt_surface_area_um2_cm3: f64,
         temp_offset_k: f64,
+        altitude_km: Option<f64>,
     ) -> Self {
         Self {
             altitude_level,
+            altitude_km,
             aerosol_surface_area_um2_cm3,
             sea_salt_surface_area_um2_cm3,
             temp_offset_k,
@@ -1191,8 +1195,9 @@ impl PyDiurnBoxSpec {
 
     fn __repr__(&self) -> String {
         format!(
-            "DiurnBoxSpec(altitude_level={}, aerosol_surface_area_um2_cm3={}, sea_salt_surface_area_um2_cm3={}, temp_offset_k={})",
+            "DiurnBoxSpec(altitude_level={}, altitude_km={:?}, aerosol_surface_area_um2_cm3={}, sea_salt_surface_area_um2_cm3={}, temp_offset_k={})",
             self.altitude_level,
+            self.altitude_km,
             self.aerosol_surface_area_um2_cm3,
             self.sea_salt_surface_area_um2_cm3,
             self.temp_offset_k
@@ -1256,18 +1261,21 @@ struct PyCustomAtmosphereProfile {
     o3: Vec<f64>,
     #[pyo3(get, set)]
     o3_kind: String,
+    #[pyo3(get, set)]
+    aerosol_surface_area_um2_cm3: Option<Vec<f64>>,
 }
 
 #[pymethods]
 impl PyCustomAtmosphereProfile {
     #[new]
-    #[pyo3(signature = (pressure_mb, temperature_k, o3, o3_kind="mixing_ratio".to_string(), altitude_km=None))]
+    #[pyo3(signature = (pressure_mb, temperature_k, o3, o3_kind="mixing_ratio".to_string(), altitude_km=None, aerosol_surface_area_um2_cm3=None))]
     fn new(
         pressure_mb: Vec<f64>,
         temperature_k: Vec<f64>,
         o3: Vec<f64>,
         o3_kind: String,
         altitude_km: Option<Vec<f64>>,
+        aerosol_surface_area_um2_cm3: Option<Vec<f64>>,
     ) -> Self {
         Self {
             pressure_mb,
@@ -1275,6 +1283,7 @@ impl PyCustomAtmosphereProfile {
             altitude_km,
             o3,
             o3_kind,
+            aerosol_surface_area_um2_cm3,
         }
     }
 
@@ -1304,6 +1313,7 @@ impl PyCustomAtmosphereProfile {
             altitude_km: self.altitude_km.clone(),
             o3: self.o3.clone(),
             o3_kind,
+            aerosol_surface_area_um2_cm3: self.aerosol_surface_area_um2_cm3.clone(),
         })
     }
 }
@@ -1329,7 +1339,17 @@ struct PyDiurnConfig {
     #[pyo3(get, set)]
     parallel_boxes: bool,
     #[pyo3(get, set)]
+    cpp_compatibility: bool,
+    #[pyo3(get, set)]
+    elapsed_time_hours: Option<Vec<f64>>,
+    #[pyo3(get, set)]
     solar_flux_scale: f64,
+    #[pyo3(get, set)]
+    surface_albedo: f64,
+    #[pyo3(get, set)]
+    heterogeneous_chemistry: bool,
+    #[pyo3(get, set)]
+    radiative_aerosol: bool,
     #[pyo3(get, set)]
     atmosphere: Option<PyCustomAtmosphereProfile>,
     #[pyo3(get, set)]
@@ -1347,7 +1367,12 @@ impl PyDiurnConfig {
         bromine=false,
         iodine=true,
         parallel_boxes=false,
+        cpp_compatibility=false,
+        elapsed_time_hours=None,
         solar_flux_scale=1.0,
+        surface_albedo=0.20,
+        heterogeneous_chemistry=true,
+        radiative_aerosol=false,
         atmosphere=None,
         initial_mixing_ratios=None
     ))]
@@ -1360,7 +1385,12 @@ impl PyDiurnConfig {
         bromine: bool,
         iodine: bool,
         parallel_boxes: bool,
+        cpp_compatibility: bool,
+        elapsed_time_hours: Option<Vec<f64>>,
         solar_flux_scale: f64,
+        surface_albedo: f64,
+        heterogeneous_chemistry: bool,
+        radiative_aerosol: bool,
         atmosphere: Option<PyCustomAtmosphereProfile>,
         initial_mixing_ratios: Option<Vec<PyLongLivedMixingRatios>>,
     ) -> Self {
@@ -1372,7 +1402,12 @@ impl PyDiurnConfig {
             bromine,
             iodine,
             parallel_boxes,
+            cpp_compatibility,
+            elapsed_time_hours,
             solar_flux_scale,
+            surface_albedo,
+            heterogeneous_chemistry,
+            radiative_aerosol,
             atmosphere,
             initial_mixing_ratios,
         }
@@ -1403,6 +1438,7 @@ impl PyDiurnConfig {
                 .iter()
                 .map(|b| DiurnBoxSpec {
                     altitude_level: b.altitude_level,
+                    altitude_km: b.altitude_km,
                     aerosol_surface_area_um2_cm3: b.aerosol_surface_area_um2_cm3,
                     sea_salt_surface_area_um2_cm3: b.sea_salt_surface_area_um2_cm3,
                     temp_offset_k: b.temp_offset_k,
@@ -1411,7 +1447,12 @@ impl PyDiurnConfig {
             bromine: self.bromine,
             iodine: self.iodine,
             parallel_boxes: self.parallel_boxes,
+            cpp_compatibility: self.cpp_compatibility,
+            elapsed_time_hours: self.elapsed_time_hours.clone(),
             solar_flux_scale: self.solar_flux_scale,
+            surface_albedo: self.surface_albedo,
+            heterogeneous_chemistry: self.heterogeneous_chemistry,
+            radiative_aerosol: self.radiative_aerosol,
             atmosphere: self.atmosphere.as_ref().map(|a| a.to_rust()).transpose()?,
             initial_mixing_ratios: self
                 .initial_mixing_ratios

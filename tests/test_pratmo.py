@@ -5,6 +5,9 @@ Both CTM and DIURN modes work with ``PratmoModel.with_defaults()`` using the
 embedded science data (fort01.x, fort02.x, and the spectral/atmosphere files).
 """
 
+from datetime import date
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -21,6 +24,10 @@ from pratmo import (
     LongLivedMixingRatios,
     PratmoModel,
 )
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+CLIMATOLOGY_FIXTURE = REPOSITORY_ROOT / "pratmo-core/tests/fixtures/legacy_inputs"
 
 
 @pytest.fixture(scope="module")
@@ -243,11 +250,13 @@ def test_long_lived_setters():
 def test_diurn_box_spec():
     b = DiurnBoxSpec(
         altitude_level=25,
+        altitude_km=26.5,
         aerosol_surface_area_um2_cm3=0.1,
         sea_salt_surface_area_um2_cm3=0.02,
         temp_offset_k=5.0,
     )
     assert b.altitude_level == 25
+    assert b.altitude_km == pytest.approx(26.5)
     assert b.aerosol_surface_area_um2_cm3 == pytest.approx(0.1)
     assert b.sea_salt_surface_area_um2_cm3 == pytest.approx(0.02)
     assert b.temp_offset_k == pytest.approx(5.0)
@@ -269,8 +278,57 @@ def test_diurn_config_defaults():
     assert cfg.julian_day == 120
     assert cfg.integration_days == 20
     assert cfg.bromine is False
+    assert cfg.cpp_compatibility is False
+    assert cfg.elapsed_time_hours is None
     assert cfg.solar_flux_scale == pytest.approx(1.0)
+    assert cfg.surface_albedo == pytest.approx(0.20)
+    assert cfg.heterogeneous_chemistry is True
+    assert cfg.radiative_aerosol is False
     assert cfg.initial_mixing_ratios is None
+
+
+def test_pratmo_climatology_uses_cpp_pressure_height_grid():
+    from pratmo import PratmoClimatology
+
+    profile = PratmoClimatology(CLIMATOLOGY_FIXTURE).sample(
+        -85.0, date(2008, 1, 16), np.array([0.0, 8.0, 80.0])
+    )
+    assert profile.temperature_k == pytest.approx([256.4, 228.42518988, 182.79799212])
+    assert profile.o3[:2] == pytest.approx([0.0, 0.0573016796e-6])
+    assert profile.noy[:2] == pytest.approx([0.235e-9, 0.759941626e-9])
+    assert profile.n2o[:2] == pytest.approx([317.615e-9, 315.160443e-9])
+    assert profile.aerosol_surface_area_um2_cm3 == pytest.approx(
+        [0.9399, 0.9399, 2.09534636e-8]
+    )
+
+
+def test_pratmo_climatology_matches_cpp_osiris_case():
+    from pratmo import PratmoClimatology
+
+    profile = PratmoClimatology(CLIMATOLOGY_FIXTURE).sample(
+        30.466005325317383, date(2008, 7, 2), np.array([26.5])
+    )
+    assert profile.noy[0] == pytest.approx(10.65843794e-9)
+    assert profile.n2o[0] == pytest.approx(192.1951233e-9)
+    assert profile.aerosol_surface_area_um2_cm3[0] == pytest.approx(0.25008213)
+
+
+def test_pratmo_climatology_builds_correlated_long_lived_inputs():
+    from pratmo import PratmoClimatology
+
+    profile = PratmoClimatology(CLIMATOLOGY_FIXTURE).sample(
+        5.0, date(2008, 7, 2), np.array([26.5])
+    )
+    ratios = profile.initial_mixing_ratios(o3=np.array([5.0e-6]))[0]
+    assert ratios.o3 == pytest.approx(5.0e-6)
+    assert ratios.n2o == pytest.approx(profile.n2o[0])
+    assert ratios.noy == pytest.approx(profile.noy[0])
+    assert ratios.ch4 > 0.0
+    assert ratios.h2o == pytest.approx(7.0e-6 - 2.0 * ratios.ch4)
+    assert ratios.co == pytest.approx(3.0e-8)
+    assert ratios.ch3br == pytest.approx(10.0e-12)
+    assert ratios.brx > 2.0e-12
+    assert ratios.iodx == pytest.approx(1.0e-12)
 
 
 def test_ctm_config_defaults():
@@ -348,6 +406,20 @@ def test_diurn_time_series(model):
     assert out.species_profile("o3").shape == (1,)
     assert out.long_lived_profile("noy").shape == (1,)
     assert out.jvalue_profile("no2").shape == (1,)
+
+
+def test_diurn_exact_elapsed_time_grid(model):
+    hours = np.arange(0.0, 24.5, 0.5)
+    out = model.run_diurn(
+        DiurnConfig(
+            latitude_deg=30.0,
+            julian_day=184,
+            integration_days=1,
+            boxes=[DiurnBoxSpec(altitude_level=20)],
+            elapsed_time_hours=hours.tolist(),
+        )
+    )
+    assert np.array_equal(out.elapsed_seconds / 3600.0, hours)
 
 
 def test_diurn_species_grid(model):

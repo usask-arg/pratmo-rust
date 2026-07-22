@@ -7,7 +7,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
-use crate::constants::{NDEN, NJVAL};
+use crate::constants::{NDEN, NJVAL, NXNOFT};
 use crate::solver::fixmix;
 use crate::state::ModelState;
 
@@ -1068,6 +1068,7 @@ impl ModelReader for FortranReader {
         // A future refactor can extract them. For now we apply 0 aerosol and rely on fort13.
         // TODO: store aersol[0..4] into a dedicated field and compute AER() here.
         s.nc = 41; // set to full altitude range
+        s.nlev = s.nc;
 
         // Set up diurnal time grid
         setday(s);
@@ -1398,8 +1399,8 @@ pub fn setday(s: &mut ModelState) {
     let morn = jj + night_j;
     // NTIM matches Fortran: JJ_fortran + JJ_fortran + J_night
     s.ntim = jj_fortran + jj_fortran + night_j;
-    if s.ntim > 44 {
-        panic!("NTIM ({}) > 44", s.ntim);
+    if s.ntim > NXNOFT {
+        panic!("NTIM ({}) > {NXNOFT}", s.ntim);
     }
 
     // Mirror morning into afternoon/night: Fortran mirrors JJ_fortran steps (1..JJ in 1-based).
@@ -1499,6 +1500,142 @@ pub fn setday(s: &mut ModelState) {
         s.nhhmm[j] = (100.0
             * (0.60 * (htime - iitime as f64) + (iitime + 12).rem_euclid(24) as f64)
             + 0.50) as i32;
+    }
+
+    s.ittt = 1;
+}
+
+/// Build the later C++ port's fixed-cos(SZA) integration grid.
+///
+/// The default C++ wrapper requests 48 nominal steps. Its implementation uses
+/// 24 intervals in each half-day plus the repeated-noon endpoint, producing 49
+/// integration points with extra resolution around dawn and dusk.
+pub fn setday_cpp(s: &mut ModelState, nominal_steps: usize) {
+    let gmua = s.xlat.sin() * s.xdec.sin();
+    let gmub = s.xlat.cos() * s.xdec.cos();
+    let max_mu = gmua + gmub;
+    let min_mu = gmua - gmub;
+    let astronomical_dark = -0.20_f64;
+    let half_steps = nominal_steps.div_ceil(2);
+
+    let (day_steps, dark_steps, dark_mu) = if max_mu < astronomical_dark {
+        (0, half_steps, max_mu)
+    } else if min_mu > astronomical_dark {
+        (half_steps, 0, min_mu)
+    } else {
+        let argument = ((astronomical_dark - gmua) / gmub).clamp(-1.0, 1.0);
+        let start_of_dark = argument.acos() / (2.0 * std::f64::consts::PI);
+        let dark_fraction = (0.5 - start_of_dark) / 0.5;
+        let dark_steps = (half_steps as f64 * dark_fraction / 1.5 + 0.5).floor() as usize;
+        (half_steps - dark_steps, dark_steps, astronomical_dark)
+    };
+
+    let mut count = 0usize;
+    let day_delta = if day_steps > 0 {
+        (max_mu - dark_mu) / day_steps as f64
+    } else {
+        0.0
+    };
+    for index in 0..day_steps {
+        let mu = max_mu - index as f64 * day_delta;
+        s.utime[count] = mu;
+        s.dtime[count] =
+            ((mu - gmua) / gmub).clamp(-1.0, 1.0).acos() / (2.0 * std::f64::consts::PI) * s.daysec;
+        count += 1;
+    }
+
+    let dark_delta = if dark_steps > 0 {
+        (dark_mu - min_mu) / dark_steps as f64
+    } else {
+        0.0
+    };
+    for index in 0..=dark_steps {
+        let mu = dark_mu - index as f64 * dark_delta;
+        s.utime[count] = mu;
+        s.dtime[count] =
+            ((mu - gmua) / gmub).clamp(-1.0, 1.0).acos() / (2.0 * std::f64::consts::PI) * s.daysec;
+        count += 1;
+    }
+
+    let first_half_count = count;
+    let mut source = first_half_count.saturating_sub(2);
+    for _ in 0..half_steps {
+        s.utime[count] = s.utime[source];
+        s.dtime[count] = s.daysec - s.dtime[source];
+        count += 1;
+        source = source.saturating_sub(1);
+    }
+    assert!(count <= NXNOFT, "C++ time grid exceeds NXNOFT");
+
+    s.ntim = count;
+    s.ntimdo = count;
+    s.ldiurn = true;
+    s.wtime[0] = 0.0;
+    for index in 1..count {
+        s.wtime[index] = (s.dtime[index] - s.dtime[index - 1]) / s.daysec;
+    }
+
+    s.nmu = 1;
+    for index in 0..first_half_count {
+        let mu = s.utime[index];
+        s.ztime[index] = 57.29578 * mu.clamp(-1.0, 1.0).acos();
+        s.jtim[index] = s.nmu as i32;
+        let mirror = count - 1 - index;
+        if mirror >= first_half_count {
+            s.ztime[mirror] = s.ztime[index];
+            s.jtim[mirror] = s.nmu as i32;
+        }
+        if mu >= s.gmu0 {
+            s.nmu += 1;
+        }
+    }
+    s.nmu = s.nmu.min(first_half_count);
+
+    for index in 0..count {
+        let hours = s.dtime[index] / 3600.0 + 0.001;
+        let whole_hours = hours as i32;
+        s.nhhmm[index] = (100.0
+            * (0.60 * (hours - whole_hours as f64) + (whole_hours + 12).rem_euclid(24) as f64)
+            + 0.50) as i32;
+    }
+    s.ittt = 1;
+}
+
+/// Build a DIURN integration grid from explicit elapsed hours after local noon.
+///
+/// Unlike the legacy and C++ fixed-mu grids, every supplied point gets its own
+/// photolysis calculation. This is intended for exact comparisons with an
+/// externally archived time coordinate (for example, 0.0, 0.5, ..., 24.0 h).
+/// The caller validates that the coordinate is finite, strictly increasing,
+/// starts at 0 h, ends at 24 h, and fits in `NXNOFT`.
+pub fn setday_elapsed_hours(s: &mut ModelState, elapsed_hours: &[f64]) {
+    let gmua = s.xlat.sin() * s.xdec.sin();
+    let gmub = s.xlat.cos() * s.xdec.cos();
+
+    s.ntim = elapsed_hours.len();
+    s.ntimdo = elapsed_hours.len();
+    s.nmu = elapsed_hours.len();
+    s.ldiurn = true;
+
+    for (index, &hours) in elapsed_hours.iter().enumerate() {
+        let elapsed_seconds = hours * 3600.0;
+        let phase = 2.0 * std::f64::consts::PI * hours / 24.0;
+        let mu = (gmua + gmub * phase.cos()).clamp(-1.0, 1.0);
+
+        s.dtime[index] = elapsed_seconds;
+        s.wtime[index] = if index == 0 {
+            0.0
+        } else {
+            (elapsed_seconds - s.dtime[index - 1]) / s.daysec
+        };
+        s.utime[index] = mu;
+        s.ztime[index] = 57.29578 * mu.acos();
+        s.jtim[index] = index as i32 + 1;
+
+        let local_hours = (hours + 12.0).rem_euclid(24.0);
+        let whole_hours = local_hours.floor() as i32;
+        let minutes = ((local_hours - whole_hours as f64) * 60.0).round() as i32;
+        s.nhhmm[index] = 100 * ((whole_hours + minutes / 60) % 24) + minutes % 60;
     }
 
     s.ittt = 1;
@@ -1744,6 +1881,38 @@ mod tests {
         setday(&mut s);
         assert_eq!(s.ntim, 34, "ntim={}", s.ntim);
         assert_eq!(s.ntimdo, 34, "ntimdo={}", s.ntimdo);
+    }
+
+    #[test]
+    fn test_setday_cpp_default_has_49_monotone_points() {
+        let mut s = standard_setday_state();
+        setday_cpp(&mut s, 48);
+        assert_eq!(s.ntim, 49);
+        assert_eq!(s.ntimdo, 49);
+        assert_eq!(s.dtime[0], 0.0);
+        assert!((s.dtime[48] - s.daysec).abs() < 1.0e-9);
+        assert!(s.dtime[..49].windows(2).all(|pair| pair[1] > pair[0]));
+        assert!(s.utime[..49]
+            .iter()
+            .zip(s.utime[..49].iter().rev())
+            .all(|(left, right)| (left - right).abs() < 1.0e-12));
+    }
+
+    #[test]
+    fn test_setday_elapsed_hours_uses_exact_half_hour_grid() {
+        let mut s = standard_setday_state();
+        let hours: Vec<f64> = (0..=48).map(|index| index as f64 * 0.5).collect();
+        setday_elapsed_hours(&mut s, &hours);
+
+        assert_eq!(s.ntim, 49);
+        assert_eq!(s.nmu, 49);
+        for (index, &hour) in hours.iter().enumerate() {
+            assert!((s.dtime[index] - hour * 3600.0).abs() < 1.0e-10);
+            assert_eq!(s.jtim[index], index as i32 + 1);
+        }
+        assert_eq!(s.nhhmm[0], 1200);
+        assert_eq!(s.nhhmm[24], 0);
+        assert_eq!(s.nhhmm[48], 1200);
     }
 
     #[test]

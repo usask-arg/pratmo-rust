@@ -236,8 +236,14 @@ pub fn setupr(s: &mut ModelState) {
     if s.asa[ialt] >= 0.0 {
         s.boxaa[ibox] = s.asa[ialt];
     }
-    let zaersl = 675.0 * tt.sqrt() * s.boxaa[ibox] * 1.0e-8;
-    let zseasl = 675.0 * tt.sqrt() * s.boxss[ibox] * 1.0e-8;
+    let (zaersl, zseasl) = if s.heterogeneous_chemistry {
+        (
+            675.0 * tt.sqrt() * s.boxaa[ibox] * 1.0e-8,
+            675.0 * tt.sqrt() * s.boxss[ibox] * 1.0e-8,
+        )
+    } else {
+        (0.0, 0.0)
+    };
     let zraino = s.boxrn[ibox] / 86400.0;
 
     // Arrhenius helpers
@@ -463,7 +469,11 @@ pub fn setupr(s: &mut ModelState) {
     }
 
     // Heterogeneous reactions 170–177 via hetprob
-    apply_het_rates_setupr(s, zaersl);
+    if s.heterogeneous_chemistry {
+        apply_het_rates_setupr(s, zaersl);
+    } else {
+        s.ratek[169..177].fill(0.0);
+    }
 
     // In the original DIURN executable the aerosol surface-rate COMMON
     // values remain zero (the CTM path is what initializes/uses them).  The
@@ -2349,6 +2359,32 @@ mod iodine_tests {
         let collision_frequency = 675.0 * 220.0_f64.sqrt() * 0.1 * 1.0e-8;
         assert_relative(s.ratek[91], 0.06 * collision_frequency, 1.0e-12);
         assert_relative(s.ratek[92], 0.01 * collision_frequency, 1.0e-12);
+    }
+
+    #[test]
+    fn heterogeneous_switch_zeros_all_surface_reaction_rates() {
+        let mut s = ModelState::new();
+        s.liod = true;
+        s.ialt = 0;
+        s.ibox = 0;
+        s.t[0] = 220.0;
+        s.pstd[0] = 100.0;
+        s.dm[0] = 1.0e18;
+        s.boxaa[0] = 1.0;
+        s.boxss[0] = 1.0;
+        s.heterogeneous_chemistry = false;
+
+        setupr(&mut s);
+
+        for rate in [42, 45, 56, 84, 91, 92] {
+            assert_eq!(
+                s.ratek[rate],
+                0.0,
+                "surface rate {} remained active",
+                rate + 1
+            );
+        }
+        assert!(s.ratek[169..177].iter().all(|&rate| rate == 0.0));
     }
 
     fn iono2_photolysis_state(iono2: f64, previous_iono2: f64) -> Box<ModelState> {

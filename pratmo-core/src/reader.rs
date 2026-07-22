@@ -1347,6 +1347,12 @@ fn read_boxf_multiline(r: &mut impl BufRead, arr: &mut [f64], nbox: usize) -> Re
 
 // ── SETDAY / HYSTAT — called from read_control_params / read_atmosphere ───────
 
+#[cfg(not(feature = "fortran-parity"))]
+fn elapsed_seconds_to_hhmm(elapsed_seconds: f64) -> i32 {
+    let local_minutes = ((elapsed_seconds / 60.0).round() as i32 + 12 * 60).rem_euclid(24 * 60);
+    100 * (local_minutes / 60) + local_minutes % 60
+}
+
 /// Compute diurnal time grid (butil.f SETDAY).
 pub fn setday(s: &mut ModelState) {
     let cpisec = 13750.99_f64;
@@ -1495,11 +1501,18 @@ pub fn setday(s: &mut ModelState) {
 
     // NHHMM
     for j in 0..ntim {
-        let htime = s.dtime[j] / 3600.0 + 0.001;
-        let iitime = htime as i32;
-        s.nhhmm[j] = (100.0
-            * (0.60 * (htime - iitime as f64) + (iitime + 12).rem_euclid(24) as f64)
-            + 0.50) as i32;
+        #[cfg(feature = "fortran-parity")]
+        {
+            let htime = s.dtime[j] / 3600.0 + 0.001;
+            let iitime = htime as i32;
+            s.nhhmm[j] = (100.0
+                * (0.60 * (htime - iitime as f64) + (iitime + 12).rem_euclid(24) as f64)
+                + 0.50) as i32;
+        }
+        #[cfg(not(feature = "fortran-parity"))]
+        {
+            s.nhhmm[j] = elapsed_seconds_to_hhmm(s.dtime[j]);
+        }
     }
 
     s.ittt = 1;
@@ -1592,11 +1605,18 @@ pub fn setday_cpp(s: &mut ModelState, nominal_steps: usize) {
     s.nmu = s.nmu.min(first_half_count);
 
     for index in 0..count {
-        let hours = s.dtime[index] / 3600.0 + 0.001;
-        let whole_hours = hours as i32;
-        s.nhhmm[index] = (100.0
-            * (0.60 * (hours - whole_hours as f64) + (whole_hours + 12).rem_euclid(24) as f64)
-            + 0.50) as i32;
+        #[cfg(feature = "fortran-parity")]
+        {
+            let hours = s.dtime[index] / 3600.0 + 0.001;
+            let whole_hours = hours as i32;
+            s.nhhmm[index] = (100.0
+                * (0.60 * (hours - whole_hours as f64) + (whole_hours + 12).rem_euclid(24) as f64)
+                + 0.50) as i32;
+        }
+        #[cfg(not(feature = "fortran-parity"))]
+        {
+            s.nhhmm[index] = elapsed_seconds_to_hhmm(s.dtime[index]);
+        }
     }
     s.ittt = 1;
 }
@@ -1881,6 +1901,22 @@ mod tests {
         setday(&mut s);
         assert_eq!(s.ntim, 34, "ntim={}", s.ntim);
         assert_eq!(s.ntimdo, 34, "ntimdo={}", s.ntimdo);
+    }
+
+    #[cfg(not(feature = "fortran-parity"))]
+    #[test]
+    fn generated_time_labels_are_valid_hhmm() {
+        let mut legacy = standard_setday_state();
+        setday(&mut legacy);
+        assert!(legacy.nhhmm[..legacy.ntimdo]
+            .iter()
+            .all(|value| value.rem_euclid(100) < 60));
+
+        let mut cpp = standard_setday_state();
+        setday_cpp(&mut cpp, 48);
+        assert!(cpp.nhhmm[..cpp.ntimdo]
+            .iter()
+            .all(|value| value.rem_euclid(100) < 60));
     }
 
     #[test]

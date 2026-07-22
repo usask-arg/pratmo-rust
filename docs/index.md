@@ -1,64 +1,86 @@
-# pratmo documentation
+# PRATMO Python guide
 
 ```{warning}
 `pratmo` is an experimental, AI-assisted Rust rewrite of the PRATMO v6.0
 stratospheric photochemical box model. It has not been scientifically
-validated. The iodine chemistry is an additional experimental mechanism and
-has not been validated either. Do not treat model output as suitable for
-scientific, operational, or safety-critical use without independent review and
-validation.
+validated. The iodine extension is experimental as well. Treat the outputs as
+research software results that require independent scientific review.
 ```
 
-The `pratmo` Python package provides PyO3 bindings to the Rust core, giving
-direct access to CTM steady-state and DIURN diurnal-cycle workflows. Selected
-comparisons with the Fortran executable are implementation checks only; they
-do not validate the model, its inputs, or its scientific predictions.
+PRATMO calculates gas-phase, photolytic, and heterogeneous chemistry in a set
+of independent atmospheric boxes. The recommended Python interface is
+{class}`pratmo.Model`, with {class}`pratmo.Atmosphere` for custom profiles and
+{class}`pratmo.Box` for selecting chemistry levels.
 
-## Feature overview
+## Install
 
-- Rust core, legacy-compatible command-line runner, and typed Python/NumPy API.
-- 40 implicit gas-phase species and 19 long-lived species or families.
-- Standard and custom atmospheric profiles with altitude, pressure,
-  temperature, and density coordinates.
-- CTM profiles, full diurnal time series, J-values, diagnostics, and
-  observation-constrained NO2 runs.
-- Configurable aerosol and sea-salt surface areas.
-- Experimental inorganic iodine chemistry with ten gas-phase iodine species,
-  photolysis, higher oxides, and heterogeneous recycling.
-- Runnable profile, diurnal-cycle, iodine, custom-atmosphere, and batch examples.
-
-```{toctree}
-:maxdepth: 2
-:caption: Contents
-
-quickstart
-diurn
-custom-atmosphere
-explorer
-IODINE_CHEMISTRY
-iodine_saiz_lopez_2014_upgrade
-api
-releasing
-```
-
-## Installation
-
-Create the development environment and build the extension from source:
+Install the model with the interactive plotting helpers used in this guide:
 
 ```bash
-uv sync --dev
-uv run maturin develop --release
+python -m pip install "pratmo[plot]"
 ```
 
-Then import as usual:
+Then run a climatological profile:
 
 ```python
-import pratmo
+from pratmo import Model
+
+model = Model()
+profile = model.ctm()
+print(profile.altitude_km)
+print(profile.species_profile("o3"))
 ```
 
-The published distribution and import are both named `pratmo`. The core package
-requires NumPy. Install `pratmo[io]` for the xarray/NetCDF
-batch example and `pratmo[plot]` for plotting examples.
+No external input directory is needed for the standard workflows. Developers
+building from source should follow the repository README; those commands are
+intentionally kept out of the user installation path.
 
-* {ref}`genindex`
-* {ref}`modindex`
+## Choose a path
+
+- Start with {doc}`quickstart` for a guided CTM profile and DIURN cycle.
+- Read {doc}`concepts` before interpreting model output.
+- Use {doc}`atmospheric-inputs` for pressure, temperature, ozone, altitude,
+  aerosol, and long-lived-family inputs.
+- Use {doc}`options` for chemistry, radiation, and numerical experiments.
+- Check {doc}`science-scope` and {doc}`validation` before quantitative work.
+
+```{toctree}
+:maxdepth: 1
+:caption: Getting started
+
+quickstart
+concepts
+standard-levels
+species-and-units
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Workflows
+
+ctm
+diurn
+atmospheric-inputs
+custom-atmosphere
+options
+results
+explorer
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Science and validation
+
+science-scope
+validation
+IODINE_CHEMISTRY
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Reference
+
+defaults
+troubleshooting
+api
+```

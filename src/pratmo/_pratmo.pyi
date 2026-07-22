@@ -101,30 +101,34 @@ class ImplicitSpecies:
         ...
 
 class LongLivedMixingRatios:
-    """Dimensionless mixing ratios for the 19 long-lived species/families."""
+    """Dimensionless mixing ratios for the 19 long-lived species/families.
+
+    Defaults form a representative, non-singular lower-stratospheric state.
+    Use climatological or measured values for quantitative work.
+    """
 
     def __init__(
         self,
         *,
-        o3: float = 0.0,
-        n2o: float = 0.0,
-        noy: float = 0.0,
-        ch4: float = 0.0,
-        co: float = 0.0,
-        clx: float = 0.0,
-        cf2cl2: float = 0.0,
-        cfcl3: float = 0.0,
-        ccl4: float = 0.0,
-        ch3cl: float = 0.0,
-        ch3ccl3: float = 0.0,
-        h2: float = 0.0,
-        h2o: float = 0.0,
+        o3: float = 5.0e-6,
+        n2o: float = 300.0e-9,
+        noy: float = 10.0e-9,
+        ch4: float = 1.7e-6,
+        co: float = 50.0e-9,
+        clx: float = 3.0e-9,
+        cf2cl2: float = 500.0e-12,
+        cfcl3: float = 250.0e-12,
+        ccl4: float = 90.0e-12,
+        ch3cl: float = 550.0e-12,
+        ch3ccl3: float = 20.0e-12,
+        h2: float = 500.0e-9,
+        h2o: float = 5.0e-6,
         nh3: float = 0.0,
         c5h8: float = 0.0,
-        brx: float = 0.0,
-        ch3br: float = 0.0,
-        ocs: float = 0.0,
-        iodx: float = 0.0,
+        brx: float = 20.0e-12,
+        ch3br: float = 10.0e-12,
+        ocs: float = 500.0e-12,
+        iodx: float = 1.0e-12,
     ) -> None: ...
     o3: float
     n2o: float
@@ -336,7 +340,7 @@ class DiurnBoxSpec:
     def __init__(
         self,
         altitude_level: int,
-        aerosol_surface_area_um2_cm3: float = 0.0,
+        aerosol_surface_area_um2_cm3: float = 0.25,
         sea_salt_surface_area_um2_cm3: float = 0.0,
         temp_offset_k: float = 0.0,
         altitude_km: Optional[float] = None,
@@ -401,9 +405,9 @@ class DiurnConfig:
         latitude_deg: float = 0.0,
         julian_day: int = 120,
         integration_days: int = 20,
-        boxes: list[DiurnBoxSpec] = [],
-        bromine: bool = False,
-        iodine: bool = True,
+        boxes: Optional[list[DiurnBoxSpec]] = None,
+        bromine: bool = True,
+        iodine: bool = False,
         parallel_boxes: bool = False,
         cpp_compatibility: bool = False,
         elapsed_time_hours: Optional[list[float]] = None,
@@ -431,9 +435,9 @@ class CtmConfig:
         latitude_deg: float = 60.0,
         julian_day: int = 75,
         integration_days: int = 40,
-        boxes: list[CtmBoxSpec] = [],
-        bromine: bool = False,
-        iodine: bool = True,
+        boxes: Optional[list[CtmBoxSpec]] = None,
+        bromine: bool = True,
+        iodine: bool = False,
         solar_flux_scale: float = 1.0,
     ) -> None: ...
 
@@ -595,4 +599,7 @@ class PratmoModel:
         ...
     def run_ctm(self, cfg: CtmConfig) -> CtmOutput:
         """Run the CTM climatological mode."""
+        ...
+    def __init__(self, data_dir: Optional[str] = None) -> None:
+        """Create a model with embedded data or data loaded from *data_dir*."""
         ...

@@ -16,13 +16,27 @@ from pratmo import (
     JVALUE_NAMES,
     LONG_LIVED_NAMES,
     BoxSnapshot,
+    Atmosphere,
+    Box,
+    ChemistryOptions,
     CtmBoxSpec,
     CtmConfig,
+    CtmOptions,
     DiurnBoxSpec,
     DiurnConfig,
+    DiurnalOptions,
     JValues,
     LongLivedMixingRatios,
+    Model,
+    PhotolysisOptions,
     PratmoModel,
+    background_mixing_ratios,
+    mixing_ratio_as,
+    number_density,
+    ppbv,
+    ppmv,
+    pressure,
+    temperature,
 )
 
 
@@ -224,17 +238,19 @@ def test_long_lived_to_dict(ctm_out_1box):
 # ── LongLivedMixingRatios constructor and setters ─────────────────────────────
 
 def test_long_lived_constructor():
-    mr = LongLivedMixingRatios(o3=5e-6, ch4=1.8e-6, h2o=5e-3)
+    mr = LongLivedMixingRatios(o3=5e-6, ch4=1.8e-6, h2o=5e-6)
     assert mr.o3 == pytest.approx(5e-6)
     assert mr.ch4 == pytest.approx(1.8e-6)
-    assert mr.h2o == pytest.approx(5e-3)
-    assert mr.n2o == 0.0
+    assert mr.h2o == pytest.approx(5e-6)
+    assert mr.n2o == pytest.approx(300e-9)
 
 
-def test_long_lived_default_zero():
+def test_long_lived_defaults_are_representative_and_non_singular():
     mr = LongLivedMixingRatios()
-    assert mr.o3 == 0.0
-    assert mr.brx == 0.0
+    assert mr.o3 == pytest.approx(5e-6)
+    assert mr.n2o == pytest.approx(300e-9)
+    assert mr.brx == pytest.approx(20e-12)
+    assert mr.iodx == pytest.approx(1e-12)
 
 
 def test_long_lived_setters():
@@ -277,7 +293,10 @@ def test_diurn_config_defaults():
     assert cfg.latitude_deg == pytest.approx(0.0)
     assert cfg.julian_day == 120
     assert cfg.integration_days == 20
-    assert cfg.bromine is False
+    assert len(cfg.boxes) == 1
+    assert cfg.boxes[0].altitude_level == 15
+    assert cfg.bromine is True
+    assert cfg.iodine is False
     assert cfg.cpp_compatibility is False
     assert cfg.elapsed_time_hours is None
     assert cfg.solar_flux_scale == pytest.approx(1.0)
@@ -336,6 +355,9 @@ def test_ctm_config_defaults():
     assert cfg.latitude_deg == pytest.approx(60.0)
     assert cfg.julian_day == 75
     assert cfg.integration_days == 40
+    assert [box.altitude_level for box in cfg.boxes] == [10, 15, 20, 25]
+    assert cfg.bromine is True
+    assert cfg.iodine is False
 
 
 def test_ctm_config_setters():
@@ -344,6 +366,13 @@ def test_ctm_config_setters():
     cfg.julian_day = 180
     assert cfg.latitude_deg == pytest.approx(45.0)
     assert cfg.julian_day == 180
+
+
+def test_low_level_defaults_are_runnable(model):
+    ctm = model.run_ctm(CtmConfig())
+    diurn = model.run_diurn(DiurnConfig())
+    assert len(ctm) == 4
+    assert len(diurn) == 1
 
 
 # ── Diagnostics ───────────────────────────────────────────────────────────────
@@ -442,10 +471,14 @@ def test_pratmo_model_repr(model):
     assert repr(model) == "PratmoModel()"
 
 
+def test_pratmo_model_constructor_uses_embedded_data():
+    assert repr(PratmoModel()) == "PratmoModel()"
+
+
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        (CtmConfig(), "at least one box"),
+        (CtmConfig(boxes=[]), "at least one box"),
         (
             CtmConfig(boxes=[CtmBoxSpec(altitude_level=42)]),
             "altitude_level",
@@ -460,3 +493,133 @@ def test_invalid_configs_raise_value_error(model, config, message):
     run = model.run_ctm if isinstance(config, CtmConfig) else model.run_diurn
     with pytest.raises(ValueError, match=message):
         run(config)
+
+
+# ── High-level Python interface and quantities ───────────────────────────────
+
+def test_quantity_helpers_convert_scalars_and_arrays():
+    assert ppmv(5.0) == pytest.approx(5.0e-6)
+    assert ppbv(300.0) == pytest.approx(300.0e-9)
+    assert pressure(5000.0, "Pa") == pytest.approx(50.0)
+    assert temperature(-55.0, "degC") == pytest.approx(218.15)
+    assert number_density(1.0e18, "m-3") == pytest.approx(1.0e12)
+    assert np.array_equal(ppmv([1.0, 2.0]), np.array([1.0e-6, 2.0e-6]))
+    assert np.array_equal(
+        mixing_ratio_as(np.array([1.0e-9, 2.0e-9]), "ppbv"),
+        np.array([1.0, 2.0]),
+    )
+
+
+def test_quantity_helpers_reject_unknown_units():
+    with pytest.raises(ValueError, match="Unknown pressure unit"):
+        pressure(1.0, "psi")
+
+
+def test_atmosphere_converts_and_validates_units():
+    atmosphere = Atmosphere(
+        pressure=[8000.0, 5000.0, 3000.0],
+        pressure_unit="Pa",
+        temperature=[-48.15, -53.15, -58.15],
+        temperature_unit="degC",
+        altitude=[18000.0, 21000.0, 24000.0],
+        altitude_unit="m",
+        ozone=[3.5, 5.0, 6.0],
+        ozone_unit="ppmv",
+    )
+    assert np.array_equal(atmosphere.pressure_mb, [80.0, 50.0, 30.0])
+    assert np.array_equal(atmosphere.altitude_km, [18.0, 21.0, 24.0])
+    assert np.allclose(atmosphere.ozone, [3.5e-6, 5.0e-6, 6.0e-6])
+    assert atmosphere.ozone_kind == "mixing_ratio"
+
+
+def test_atmosphere_rejects_bad_grid():
+    with pytest.raises(ValueError, match="pressure must decrease"):
+        Atmosphere(
+            pressure=[50.0, 80.0],
+            temperature=[220.0, 225.0],
+            ozone=[5.0, 3.5],
+        )
+
+
+def test_atmosphere_warns_for_likely_unconverted_ozone():
+    with pytest.warns(UserWarning, match="set ozone_unit='ppmv'"):
+        Atmosphere(
+            pressure=[80.0, 50.0],
+            temperature=[225.0, 220.0],
+            ozone=[3.5, 5.0],
+            ozone_unit="fraction",
+        )
+
+
+def test_background_mixing_ratios_accept_readable_overrides():
+    ratios = background_mixing_ratios(o3=ppmv(6.0), noy=ppbv(12.0))
+    assert ratios.o3 == pytest.approx(6.0e-6)
+    assert ratios.noy == pytest.approx(12.0e-9)
+    assert ratios.iodx > 0.0
+
+
+def test_high_level_ctm_smoke():
+    output = Model().ctm(
+        latitude=45.0,
+        day="2026-03-20",
+        boxes=[Box.at_level(20)],
+        options=CtmOptions(integration_days=3),
+    )
+    assert output.altitude_km.shape == (1,)
+    assert output.species_profile("o3")[0] > 0.0
+    assert output.jvalue_profile("no2")[0] > 0.0
+
+
+def test_high_level_custom_atmosphere_and_plots_smoke():
+    atmosphere = Atmosphere(
+        pressure=[80.0, 50.0, 30.0],
+        temperature=[225.0, 220.0, 215.0],
+        altitude=[18.0, 21.0, 24.0],
+        ozone=[3.5, 5.0, 6.0],
+        aerosol_surface_area=[0.3, 0.2, 0.1],
+    )
+    output = Model().diurnal(
+        atmosphere=atmosphere,
+        options=DiurnalOptions(integration_days=3),
+    )
+    from pratmo.plotting import plot_atmosphere, plot_diurnal, plot_profile
+
+    assert len(output) == 3
+    assert len(plot_atmosphere(atmosphere).data) == 4
+    assert len(plot_diurnal(output, ["oh", "no2"]).data) == 2
+    assert len(plot_profile(output, ["o3", "no2"]).data) == 2
+
+
+def test_high_level_no2_constrained_smoke():
+    atmosphere = Atmosphere(
+        pressure=[50.0],
+        temperature=[220.0],
+        altitude=[21.0],
+        ozone=[5.0],
+    )
+    result = Model().diurnal_no2_constrained(
+        atmosphere=atmosphere,
+        observed_no2_cm3=[1.0e8],
+        target_hhmm=630,
+        iterations=1,
+        options=DiurnalOptions(integration_days=3),
+    )
+    assert len(result.output) == 1
+    assert np.isfinite(result.noy_scale[0])
+    assert result.modeled_no2_cm3[0] >= 0.0
+
+
+def test_high_level_option_warnings():
+    with pytest.warns(UserWarning, match="unusually reflective"):
+        PhotolysisOptions(surface_albedo=0.95)
+    with pytest.warns(UserWarning, match="experimental"):
+        Model._warn_chemistry(ChemistryOptions(iodine=True))
+
+
+def test_high_level_ctm_warns_when_latitude_is_binned():
+    with pytest.warns(UserWarning, match="50° latitude grid point"):
+        Model().ctm(
+            latitude=52.1,
+            boxes=[Box.at_level(20)],
+            options=CtmOptions(integration_days=3),
+        )

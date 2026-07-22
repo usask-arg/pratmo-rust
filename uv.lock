@@ -2565,6 +2565,43 @@ wheels = [
 ]
 
 [[package]]
+name = "narwhals"
+version = "2.21.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.10'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2d/0e/3ad61eb87088cc4932e0d851531fa82f845a6230b68b091a0e298cc7e537/narwhals-2.21.0.tar.gz", hash = "sha256:7c6e7f50528e62b7a967dd864d7e117d2955d38d4f730653ce46a9861358e2dc", size = 633083 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/e1/68c2256b69a314eba133673377ba9118c356f6342a0c02b61de449cf2bf2/narwhals-2.21.0-py3-none-any.whl", hash = "sha256:1e6617d0fca68ae1fda29e5397c4eaacd3ffc9fffe6bcd6ded0c690475e853be", size = 451943 },
+]
+
+[[package]]
+name = "narwhals"
+version = "2.24.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.14' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.14' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.11.*' and platform_machine != 'ARM64' and sys_platform == 'win32'",
+    "python_full_version == '3.11.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.11.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.10.*' and platform_machine == 'ARM64' and sys_platform == 'win32'",
+    "(python_full_version == '3.10.*' and platform_machine != 'ARM64') or (python_full_version == '3.10.*' and sys_platform != 'win32')",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2b/1d/58946e5aab18393e793bd4add6985b95d0e01c3a2d832f38f54468b10dcd/narwhals-2.24.0.tar.gz", hash = "sha256:b5c0f684ccd9d7475b564111e319a4964abcf2baf79d3cf6b1003d06ac9b828d", size = 661143 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/85/a5bfaebfd305ac18b57b0854d74e37e586809061a91fda62f0bd50c8518e/narwhals-2.24.0-py3-none-any.whl", hash = "sha256:42fdedf44e5b2ca7505630d45b4ac3058f38d8485cba9fe1652ca23152df7489", size = 461030 },
+]
+
+[[package]]
 name = "nbclient"
 version = "0.10.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3457,6 +3494,20 @@ wheels = [
 ]
 
 [[package]]
+name = "plotly"
+version = "6.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "narwhals", version = "2.21.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "narwhals", version = "2.24.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/96/07/795c79dbce40c39bece88e69d049babbd23ffa95b5d117f248db8ea03abb/plotly-6.9.0.tar.gz", hash = "sha256:967ad33e8c704fed051800d11d985eb206a9c795c14206b30a6f463ed9c67d0d", size = 6919903 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/18/d8544811ab076f876c4892b3714f5b0dad335e1dc33aef826df431b8325d/plotly-6.9.0-py3-none-any.whl", hash = "sha256:36bebe2f1bb13884774fe61689c329071446f6ce4a8927fb1f0d6fb24f581236", size = 9909646 },
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3477,6 +3528,9 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "matplotlib", version = "3.9.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "matplotlib", version = "3.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "netcdf4", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "netcdf4", version = "1.7.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*' and platform_machine == 'ARM64' and sys_platform == 'win32'" },
     { name = "netcdf4", version = "1.7.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.10' and platform_machine != 'ARM64') or (python_full_version >= '3.11' and platform_machine == 'ARM64' and sys_platform == 'win32') or (python_full_version >= '3.10' and sys_platform != 'win32')" },
@@ -3491,8 +3545,13 @@ dev = [
 ]
 docs = [
     { name = "furo" },
+    { name = "ipykernel", version = "6.31.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "ipykernel", version = "7.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "myst-nb", version = "1.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "myst-nb", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "numpydoc", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "numpydoc", version = "1.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "plotly" },
     { name = "sphinx", version = "7.4.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
@@ -3514,6 +3573,7 @@ plot = [
     { name = "matplotlib", version = "3.9.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "matplotlib", version = "3.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "plotly" },
 ]
 
 [package.dev-dependencies]
@@ -3521,6 +3581,9 @@ dev = [
     { name = "furo" },
     { name = "ipykernel", version = "6.31.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "ipykernel", version = "7.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "matplotlib", version = "3.9.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "matplotlib", version = "3.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "maturin" },
     { name = "myst-nb", version = "1.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "myst-nb", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -3529,6 +3592,7 @@ dev = [
     { name = "netcdf4", version = "1.7.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.10' and platform_machine != 'ARM64') or (python_full_version >= '3.11' and platform_machine == 'ARM64' and sys_platform == 'win32') or (python_full_version >= '3.10' and sys_platform != 'win32')" },
     { name = "numpydoc", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "numpydoc", version = "1.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "plotly" },
     { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pytest", version = "9.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "sphinx", version = "7.4.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -3544,12 +3608,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "furo", marker = "extra == 'docs'", specifier = ">=2024.1" },
+    { name = "ipykernel", marker = "extra == 'docs'", specifier = ">=6.0" },
+    { name = "matplotlib", marker = "extra == 'dev'", specifier = ">=3.9" },
     { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.9" },
+    { name = "myst-nb", marker = "extra == 'docs'", specifier = ">=1.1" },
     { name = "netcdf4", marker = "extra == 'dev'", specifier = ">=1.7" },
     { name = "netcdf4", marker = "extra == 'io'", specifier = ">=1.7" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.24" },
     { name = "numpydoc", marker = "extra == 'docs'", specifier = ">=1.7" },
+    { name = "plotly", marker = "extra == 'docs'", specifier = ">=5.24" },
+    { name = "plotly", marker = "extra == 'plot'", specifier = ">=5.24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=7.4" },
     { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'", specifier = ">=2.0" },
@@ -3562,10 +3631,12 @@ provides-extras = ["docs", "io", "plot", "dev"]
 dev = [
     { name = "furo", specifier = ">=2025.12.19" },
     { name = "ipykernel", specifier = ">=6.29" },
+    { name = "matplotlib", specifier = ">=3.9" },
     { name = "maturin", specifier = ">=1.8,<2.0" },
     { name = "myst-nb", specifier = ">=1.1" },
     { name = "netcdf4", specifier = ">=1.7" },
     { name = "numpydoc", specifier = ">=1.7" },
+    { name = "plotly", specifier = ">=5.24" },
     { name = "pytest", specifier = ">=8.4" },
     { name = "sphinx", specifier = ">=7.4" },
     { name = "sphinx-autodoc-typehints", specifier = ">=2.0" },

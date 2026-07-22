@@ -1,78 +1,17 @@
-# API Reference
+# Python API reference
 
-## Model
+Start with the high-level interface. Results and plotting are separated from
+the native compatibility layer so ordinary workflows do not need to navigate
+the extension's full configuration surface.
 
-```{eval-rst}
-.. autoclass:: pratmo.PratmoModel
-   :members:
+```{toctree}
+:maxdepth: 1
+
+api-high-level
+api-results
+api-low-level
 ```
 
-## Discoverable field names
-
-```{eval-rst}
-.. autodata:: pratmo.IMPLICIT_SPECIES_NAMES
-
-.. autodata:: pratmo.LONG_LIVED_NAMES
-
-.. autodata:: pratmo.JVALUE_NAMES
-```
-
-## Configuration
-
-```{eval-rst}
-.. autoclass:: pratmo.DiurnConfig
-   :members:
-
-.. autoclass:: pratmo.CtmConfig
-   :members:
-
-.. autoclass:: pratmo.DiurnBoxSpec
-   :members:
-
-.. autoclass:: pratmo.CtmBoxSpec
-   :members:
-
-.. autoclass:: pratmo.CustomAtmosphereProfile
-   :members:
-
-.. autoclass:: pratmo.LongLivedMixingRatios
-   :members:
-
-.. autoclass:: pratmo.No2ConstrainedDiurnConfig
-   :members:
-```
-
-## Output
-
-```{eval-rst}
-.. autoclass:: pratmo.DiurnOutput
-   :members:
-
-.. autoclass:: pratmo.CtmOutput
-   :members:
-
-.. autoclass:: pratmo.BoxSnapshot
-   :members:
-
-.. autoclass:: pratmo.DiurnBoxTimeSeries
-   :members:
-
-.. autoclass:: pratmo.DiurnTimeStep
-   :members:
-
-.. autoclass:: pratmo.No2ConstrainedDiurnOutput
-   :members:
-```
-
-## Species data
-
-```{eval-rst}
-.. autoclass:: pratmo.ImplicitSpecies
-   :members:
-
-.. autoclass:: pratmo.JValues
-   :members:
-
-.. autoclass:: pratmo.Diagnostics
-   :members:
-```
+Field names accepted by result accessors are listed in
+{doc}`species-and-units` and exposed programmatically as
+`IMPLICIT_SPECIES_NAMES`, `LONG_LIVED_NAMES`, and `JVALUE_NAMES`.

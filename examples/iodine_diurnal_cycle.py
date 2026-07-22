@@ -10,7 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from pratmo import DiurnBoxSpec, DiurnConfig, PratmoModel
+from pratmo import Box, ChemistryOptions, Model
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,15 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    model = PratmoModel.with_defaults()
-    output = model.run_diurn(
-        DiurnConfig(
-            latitude_deg=0.0,
-            julian_day=120,
-            integration_days=20,
-            boxes=[DiurnBoxSpec(altitude_level=13)],
-            iodine=True,
-        )
+    model = Model()
+    output = model.diurnal(
+        latitude=0.0,
+        day="2026-04-30",
+        boxes=[Box.at_level(13)],
+        chemistry=ChemistryOptions(iodine=True),
     )
 
     air_density = output.air_density_cm3[0]

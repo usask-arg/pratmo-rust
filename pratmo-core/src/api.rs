@@ -306,60 +306,77 @@ pub struct JValues {
 }
 
 impl JValues {
+    #[cfg(test)]
     fn from_state_alt(s: &ModelState, il: usize) -> Self {
+        Self::from_getter(|index| s.jval_get(il, index))
+    }
+
+    fn from_state_box_daily_mean(s: &ModelState, ib: usize) -> Self {
+        Self::from_getter(|channel| {
+            (1..s.ntimdo)
+                .map(|time_index| {
+                    let angle_index = (s.jtim[time_index] - 1).max(0) as usize;
+                    let weight = (s.dtime[time_index] - s.dtime[time_index - 1]) / s.daysec;
+                    weight * s.storjv[[channel, angle_index, ib]]
+                })
+                .sum()
+        })
+    }
+
+    fn from_getter(mut get: impl FnMut(usize) -> f64) -> Self {
         Self {
-            no: s.vno[il],
-            o2: s.vo2[il],
-            o3: s.vo3[il],
-            o3_o1d: s.vo3d[il],
-            h2co_a: s.vh2coa[il],
-            h2co_b: s.vh2cob[il],
-            h2o2: s.vh2o2[il],
-            rooh: s.vrooh[il],
-            no2: s.vno2[il],
-            no3_x: s.vno3x[il],
-            no3_l: s.vno3l[il],
-            n2o5: s.vn2o5[il],
-            hno2: s.vhno2[il],
-            hno3: s.vhno3[il],
-            hno4: s.vhno4[il],
-            clono2: s.vclno3[il],
-            cl2: s.vcl2[il],
-            hocl: s.vhocl[il],
-            oclo: s.voclo[il],
-            cl2o2: s.vcl2o2[il],
-            clo: s.vclo[il],
-            bro: s.vbro[il],
-            brono2: s.vbrno3[il],
-            hobr: s.vhobr[il],
-            n2o: s.vn2o[il],
-            cfc11: s.vcfcl3[il],
-            cfc12: s.vf2cl2[il],
-            cfc113: s.vf113[il],
-            cfc114: s.vf114[il],
-            cfc115: s.vf115[il],
-            ccl4: s.vccl4[il],
-            ch3cl: s.vch3cl[il],
-            ch3ccl3: s.vmecf[il],
-            ch3br: s.vch3br[il],
-            h1211: s.vh1211[il],
-            h1301: s.vh1301[il],
-            h2402: s.vh2402[il],
-            hcfc22: s.vh22[il],
-            hcfc123: s.vh123[il],
-            hcfc141b: s.vh141b[il],
-            chbr3: s.vchbr3[il],
-            ch3i: s.vch3i[il],
-            cf3i: s.vcf3i[il],
-            ocs: s.vocs[il],
-            io: s.vio[il],
-            hoi: s.vhoi[il],
-            iono2: s.viono2[il],
-            oio: s.voio[il],
-            i2: s.vi2[il],
-            i2o2: s.vi2o2[il],
-            i2o3: s.vi2o3[il],
-            i2o4: s.vi2o4[il],
+            no: get(0),
+            o2: get(1),
+            o3: get(2),
+            o3_o1d: get(3),
+            h2co_a: get(4),
+            h2co_b: get(5),
+            h2o2: get(6),
+            rooh: get(7),
+            no2: get(8),
+            no3_x: get(9),
+            no3_l: get(10),
+            n2o5: get(11),
+            hno2: get(12),
+            hno3: get(13),
+            hno4: get(14),
+            clono2: get(15),
+            cl2: get(16),
+            hocl: get(17),
+            oclo: get(18),
+            cl2o2: get(19),
+            clo: get(20),
+            bro: get(21),
+            brono2: get(22),
+            hobr: get(23),
+            n2o: get(24),
+            cfc11: get(25),
+            cfc12: get(26),
+            cfc113: get(27),
+            cfc114: get(28),
+            cfc115: get(29),
+            ccl4: get(30),
+            ch3cl: get(31),
+            ch3ccl3: get(32),
+            ch3br: get(33),
+            h1211: get(34),
+            h1301: get(35),
+            h2402: get(36),
+            hcfc22: get(37),
+            hcfc123: get(38),
+            hcfc141b: get(39),
+            chbr3: get(40),
+            ch3i: get(41),
+            cf3i: get(42),
+            ocs: get(43),
+            io: get(44),
+            hoi: get(45),
+            iono2: get(46),
+            oio: get(47),
+            i2: get(48),
+            i2o2: get(49),
+            i2o3: get(50),
+            i2o4: get(51),
         }
     }
 }
@@ -641,7 +658,11 @@ fn hhmm_to_minutes(hhmm: i32) -> Option<i32> {
 }
 
 fn time_distance_hhmm(a: i32, b: i32) -> i32 {
-    let a_minutes = hhmm_to_minutes(a).expect("model time labels must be valid HHMM values");
+    // Parity mode preserves a legacy rounding quirk that can encode 02:00 as
+    // 0160. Carry such model minutes rather than panicking in the structured
+    // observation-matching API.
+    let a_minutes = hhmm_to_minutes(a)
+        .unwrap_or_else(|| (a.div_euclid(100) * 60 + a.rem_euclid(100)).rem_euclid(24 * 60));
     let b_minutes = hhmm_to_minutes(b).expect("validated target must be a valid HHMM value");
     let direct = (a_minutes - b_minutes).abs();
     direct.min(24 * 60 - direct)
@@ -809,8 +830,9 @@ impl PratmoModel {
     ///
     /// Loads base chemistry setup, then overrides geographic/temporal/box
     /// parameters from `cfg`. Returns structured output without writing any files.
-    /// Climatology data (fort03_LLM.x / fort05.x / fort51.x) is only available
-    /// when using [`PratmoModel::new`] with a directory that contains those files.
+    /// The standard climatology is compiled in for [`PratmoModel::with_defaults`].
+    /// A file-based model reads `fort03_LLM.x`, `fort05.x`, and `fort51.x` from
+    /// its configured directory instead.
     pub fn run_ctm(&self, cfg: &CtmConfig) -> Result<CtmOutput> {
         validate_ctm_config(cfg)?;
         let mut s = self.load_base_state()?;
@@ -821,7 +843,12 @@ impl PratmoModel {
         s.out_unit8 = None;
         s.out_unit9 = None;
 
-        ctmlfq_in_memory(&mut s)?;
+        ctmlfq_in_memory(
+            &mut s,
+            cfg.latitude_deg,
+            cfg.julian_day,
+            self.data_dir.is_none(),
+        )?;
 
         Ok(extract_ctm_output(&s))
     }
@@ -1612,7 +1639,7 @@ fn extract_box_snapshot(s: &ModelState, ib: usize) -> BoxSnapshot {
         air_density_cm3: s.dm[ialt],
         implicit: ImplicitSpecies::from_state(s, ib),
         long_lived: LongLivedMixingRatios::from_state(s, ib),
-        jvalues: JValues::from_state_alt(s, ib),
+        jvalues: JValues::from_state_box_daily_mean(s, ib),
     }
 }
 
@@ -1687,9 +1714,9 @@ fn extract_ctm_output(s: &ModelState) -> CtmOutput {
 #[cfg(test)]
 mod tests {
     use super::{
-        time_distance_hhmm, validate_ctm_config, validate_diurn_config, validate_supported_mode,
-        CtmBoxSpec, CtmConfig, CustomAtmosphereProfile, DiurnBoxSpec, DiurnConfig, JValues,
-        LongLivedMixingRatios, O3InputKind,
+        extract_box_snapshot, time_distance_hhmm, validate_ctm_config, validate_diurn_config,
+        validate_supported_mode, CtmBoxSpec, CtmConfig, CustomAtmosphereProfile, DiurnBoxSpec,
+        DiurnConfig, JValues, LongLivedMixingRatios, O3InputKind,
     };
     use crate::state::ModelState;
 
@@ -1713,6 +1740,7 @@ mod tests {
     fn hhmm_distance_wraps_across_midnight() {
         assert_eq!(time_distance_hhmm(2359, 1), 2);
         assert_eq!(time_distance_hhmm(1200, 1200), 0);
+        assert_eq!(time_distance_hhmm(160, 200), 0);
     }
 
     #[test]
@@ -1852,5 +1880,20 @@ mod tests {
             ],
             [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
         );
+    }
+
+    #[test]
+    fn box_snapshot_reports_daily_mean_jvalues() {
+        let mut state = ModelState::new();
+        state.nboxdo[0] = 15;
+        state.ntimdo = 2;
+        state.daysec = 86_400.0;
+        state.dtime[0] = 0.0;
+        state.dtime[1] = state.daysec;
+        state.jtim[1] = 1;
+        state.storjv[[8, 0, 0]] = 2.5;
+
+        let snapshot = extract_box_snapshot(&state, 0);
+        assert_eq!(snapshot.jvalues.no2, 2.5);
     }
 }

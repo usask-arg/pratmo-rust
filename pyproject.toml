@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/usask-arg/pratmo-rust/tree/main/docs"
+Documentation = "https://usask-arg.github.io/pratmo-rust/"
 Repository = "https://github.com/usask-arg/pratmo-rust"
 
 [project.optional-dependencies]
@@ -23,7 +23,10 @@ docs = [
     "sphinx>=7.4",
     "sphinx-autodoc-typehints>=2.0",
     "furo>=2024.1",
+    "ipykernel>=6.0",
+    "myst-nb>=1.1",
     "numpydoc>=1.7",
+    "plotly>=5.24",
 ]
 io = [
     "netCDF4>=1.7",
@@ -31,8 +34,10 @@ io = [
 ]
 plot = [
     "matplotlib>=3.9",
+    "plotly>=5.24",
 ]
 dev = [
+    "matplotlib>=3.9",
     "netCDF4>=1.7",
     "pytest>=8.4",
     "numpy>=1.24",
@@ -52,10 +57,12 @@ testpaths = ["tests"]
 dev = [
     "furo>=2025.12.19",
     "ipykernel>=6.29",
+    "matplotlib>=3.9",
     "maturin>=1.8,<2.0",
     "myst-nb>=1.1",
     "netCDF4>=1.7",
     "numpydoc>=1.7",
+    "plotly>=5.24",
     "pytest>=8.4",
     "sphinx>=7.4",
     "sphinx-autodoc-typehints>=2.0",

@@ -40,7 +40,7 @@ The published distribution and import name are both `pratmo`. To install a
 released wheel:
 
 ```bash
-python -m pip install pratmo
+python -m pip install "pratmo[plot]"
 ```
 
 For development, build the extension into the project environment:
@@ -50,30 +50,33 @@ uv sync --dev
 uv run maturin develop --release
 ```
 
-Run a small CTM altitude profile:
+Run a CTM altitude profile with runnable, validated defaults:
 
 ```python
-from pratmo import CtmBoxSpec, CtmConfig, PratmoModel
+from pratmo import Model
+from pratmo.plotting import plot_profile
 
-model = PratmoModel.with_defaults()
-output = model.run_ctm(
-    CtmConfig(
-        latitude_deg=60.0,
-        julian_day=75,
-        integration_days=40,
-        boxes=[CtmBoxSpec(altitude_level=level) for level in (10, 15, 20, 25)],
-    )
-)
+model = Model()
+output = model.ctm(latitude=60.0, day="2026-03-16")
 
 print(output.altitude_km)
 print(output.species_profile("o3"))       # cm^-3
 print(output.long_lived_profile("noy"))  # dimensionless mixing ratio
+plot_profile(output, ["o3", "no2", "oh"]).show()
 ```
 
-The package exposes `IMPLICIT_SPECIES_NAMES`, `LONG_LIVED_NAMES`, and
-`JVALUE_NAMES` for programmatic discovery. Field lookup is case-insensitive.
-See the [Python documentation](docs/index.md) and [examples](examples/) for CTM,
-DIURN, custom-atmosphere, and observation-constrained workflows.
+`Atmosphere` accepts pressure, temperature, altitude, ozone, and aerosol
+profiles with explicit units. Helpers such as `ppmv(5)`, `ppbv(300)`,
+`pressure(values, "Pa")`, and `number_density(values, "m-3")` keep conversions
+visible. Suspicious values emit `PratmoWarning`; inconsistent profiles raise
+`ValueError` before integration.
+
+The lower-level `PratmoModel`, `CtmConfig`, and `DiurnConfig` API remains
+available. The package also exposes `IMPLICIT_SPECIES_NAMES`,
+`LONG_LIVED_NAMES`, and `JVALUE_NAMES` for discovery. See the
+[rendered Python guide](https://usask-arg.github.io/pratmo-rust/) and
+[examples](examples/) for CTM, DIURN,
+custom-atmosphere, and observation-constrained workflows.
 
 ## Rust and CLI
 
@@ -117,6 +120,8 @@ scripts/fortran_differential.sh
 
 The detailed numerical comparisons, parity policy, and unsupported legacy modes
 are tracked in [STATUS.md](STATUS.md) and [FORTRAN_PARITY.md](FORTRAN_PARITY.md).
+Release procedures and archived implementation notes are separated under
+[developer documentation](developer-docs/README.md).
 
 ## Current boundaries
 

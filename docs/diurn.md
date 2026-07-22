@@ -10,119 +10,128 @@ kernelspec:
 
 # DIURN mode
 
-DIURN integrates the photochemistry through a full 24-hour diurnal cycle,
-tracking 40 implicit species at 34 time steps (night → sunrise → noon → sunset).
-The embedded science data includes climatological initial conditions (`fort02.x`),
-so no external files are needed.
+DIURN integrates a full noon-to-noon photochemical cycle and retains the 34
+resolved time steps. Use it when local solar time matters or when the
+atmosphere comes from an instrument or retrieval.
 
 ## Basic run
 
 ```{code-cell} ipython3
-from pratmo import PratmoModel, DiurnConfig, DiurnBoxSpec
+:execution_timeout: 600
 
-model = PratmoModel.with_defaults()
-cfg = DiurnConfig(
-    latitude_deg=0.0,
-    julian_day=120,          # 30 April
-    integration_days=20,
-    boxes=[DiurnBoxSpec(altitude_level=8)],
+from pratmo import Box, Model
+
+model = Model()
+cycle = model.diurnal(
+    latitude=0.0,
+    day="2026-04-30",
+    boxes=[Box.at_level(15)],
 )
-out = model.run_diurn(cfg)
-snap = out.boxes[0]
-print(f"{snap.altitude_km:.1f} km  O₃={snap.implicit.o3:.2e} cm⁻³  OH={snap.implicit.oh:.2e} cm⁻³")
+
+print(cycle)
+print(cycle.altitude_km)
+print(cycle.species_grid("oh").shape)
 ```
 
-## Diurnal time series
+The default atmosphere and initial conditions are embedded. `Box.at_level(15)`
+is a standard atmospheric level; see {doc}`standard-levels`.
+
+## Time coordinates
+
+`elapsed_seconds` increases monotonically from zero to 86,400 seconds.
+`time_hhmm` is a cyclic local-solar-time label, so both endpoints are 1200.
 
 ```{code-cell} ipython3
-ts = out.time_series[0]
-print(f"Time steps: {len(ts.steps)}")
-print(f"\n{'Elapsed':>8}  {'HHMM':>6}  {'OH (cm⁻³)':>12}  {'O₃ (cm⁻³)':>12}  {'NO₂ (cm⁻³)':>12}")
-print("-" * 48)
-for step in ts.steps[::4]:   # every 4th step
-    hh = step.time_hhmm // 100
-    mm = step.time_hhmm % 100
-    elapsed_h = step.elapsed_seconds / 3600
-    print(f"{elapsed_h:7.2f}h  {hh:02d}:{mm:02d}  {step.implicit.oh:12.2e}  {step.implicit.o3:12.2e}  {step.implicit.no2:12.2e}")
+for elapsed, hhmm in zip(cycle.elapsed_seconds[::4], cycle.time_hhmm[::4]):
+    print(f"{elapsed / 3600:5.1f} elapsed hours  {hhmm:04d} local solar time")
 ```
 
-## Species grids as numpy arrays
+Plot and sort with elapsed time. Use `time_hhmm` only as a clock label.
 
-`species_grid` returns shape `(n_boxes, n_timesteps)` — one row per box:
+## Interactive time series
 
 ```{code-cell} ipython3
-import numpy as np
+from pratmo.plotting import plot_diurnal
 
-cfg2 = DiurnConfig(
-    latitude_deg=0.0,
-    julian_day=120,
-    integration_days=20,
-    boxes=[DiurnBoxSpec(altitude_level=8), DiurnBoxSpec(altitude_level=12)],
-)
-out2 = model.run_diurn(cfg2)
-
-o3  = out2.species_grid("o3")   # shape (2, 34)
-oh  = out2.species_grid("oh")
-elapsed_hours = out2.elapsed_seconds / 3600.0
-times = out2.time_hhmm
-
-print(f"Grid shape: {o3.shape}  (boxes × timesteps)")
-print(f"\nPeak daytime OH (cm⁻³):")
-for i, snap in enumerate(out2.boxes):
-    print(f"  {snap.altitude_km:.0f} km: {oh[i].max():.2e}")
+plot_diurnal(cycle, ["oh", "ho2", "no", "no2"])
 ```
 
-`out2.altitude_km`, `pressure_mb`, `temperature_k`, and `air_density_cm3`
-provide the box coordinates directly as one-dimensional NumPy arrays. Daily
-means are available through `species_profile`, `long_lived_profile`, and
-`jvalue_profile`; `species_grid` contains the resolved diurnal trajectory.
+## Multiple boxes
 
-`jvalue_grid` is retained for shape-compatible workflows, but PRATMO currently
-exports daily-mean J-values, repeated along its time dimension. It is not a
-time-resolved actinic-flux product.
+```{code-cell} ipython3
+:execution_timeout: 600
 
-## Supplying custom initial mixing ratios
+from pratmo import DiurnalOptions
 
-Pass one `LongLivedMixingRatios` per box to override the embedded defaults.
-The values must be physically consistent with the target altitude and season;
-the model will iterate to convergence from there.
+profile_cycle = model.diurnal(
+    latitude=0.0,
+    day="2026-04-30",
+    boxes=[Box.at_level(level) for level in (8, 12, 18, 22)],
+    options=DiurnalOptions(integration_days=20),
+)
+
+print(profile_cycle.species_grid("o3").shape)  # (box, time)
+```
+
+```{code-cell} ipython3
+from pratmo.plotting import plot_profile
+
+plot_profile(profile_cycle, ["o3", "no2", "hno3"])
+```
+
+With `parallel_boxes=None`, multiple boxes run in parallel automatically. Their
+output order remains the requested box order.
+
+## Exact time coordinates
+
+Supply elapsed hours when matching an external sampling grid:
 
 ```python
-from pratmo import LongLivedMixingRatios
+import numpy as np
+from pratmo import DiurnalOptions
 
-init = LongLivedMixingRatios(
-    o3=5e-6,
-    n2o=3.1e-7,
-    ch4=1.8e-6,
-    h2o=5e-3,
-    noy=1e-8,
+half_hourly = DiurnalOptions(
+    elapsed_time_hours=np.arange(0.0, 24.5, 0.5),
 )
-
-cfg_custom = DiurnConfig(
-    latitude_deg=0.0,
-    julian_day=120,
-    integration_days=20,
-    boxes=[DiurnBoxSpec(altitude_level=8)],
-    initial_mixing_ratios=[init],  # one entry per box
-)
-out_custom = model.run_diurn(cfg_custom)
+cycle = model.diurnal(options=half_hourly)
 ```
 
-## Time-step layout
+The coordinate must contain 2–64 strictly increasing values, start at 0, and
+end at 24. Every value is both an integration and a photolysis-evaluation time.
 
-DIURN uses 34 time steps per 24-hour day:
+## Custom initial mixing ratios
 
-| Phase       | Steps |
-|-------------|-------|
-| Night       | 6     |
-| Sunrise     | 8     |
-| Daytime     | 12    |
-| Sunset      | 8     |
+Pass one complete long-lived state per chemistry box. The helper supplies
+representative lower-stratospheric values so unspecified gases are not
+silently set to zero.
 
-The array is ordered from noon to the following noon. Use `elapsed_seconds` for
-plotting because it is monotonic from 0 to 86400 seconds; `time_hhmm` is a cyclic
-clock label, so both endpoints are `1200` and sorting by it breaks the orbit.
-Time codes are local-solar-time integers in HHMM format (for example, `1430`
-means 14:30 local solar time).
-J-values are recomputed at each solar zenith angle; nighttime steps carry
-`J = 0` for photolysis channels.
+```python
+from pratmo import background_mixing_ratios, ppbv, ppmv
+
+initial = background_mixing_ratios(
+    o3=ppmv(5.0),
+    n2o=ppbv(300),
+    noy=ppbv(10),
+)
+
+cycle = model.diurnal(
+    boxes=[Box.at_level(15)],
+    initial_mixing_ratios=[initial],
+)
+```
+
+These values are examples, not a climatology. Quantitative work should use
+altitude-, latitude-, and season-appropriate measured or climatological inputs.
+
+## J-value limitation
+
+`jvalue_profile` exposes daily-mean photolysis frequencies. `jvalue_grid`
+repeats those means across the time dimension for array-shape compatibility;
+it is not a resolved actinic-flux time series.
+
+## Lower-level compatibility API
+
+The extension-level `PratmoModel` and `DiurnConfig` classes remain available
+for serialized legacy configurations and exact compatibility work. They use
+canonical units and fewer user-facing checks. New workflows should start with
+`Model.diurnal()`.

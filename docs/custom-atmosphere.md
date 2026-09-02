@@ -174,8 +174,8 @@ successful numerical match does not validate the assumed partitioning of NOy.
 
 ## Initialize from the legacy climatology
 
-`PratmoClimatology` reads `fort03_LLM.x`, `fort04.x`, `fort05.x`, and
-`fort51.x` from an explicit legacy-data directory:
+`PratmoClimatology` reads the packaged `fort03_LLM.x`, `fort04.x`,
+`fort05.x`, and `fort51.x` tables by default:
 
 ```python
 from datetime import date
@@ -183,7 +183,7 @@ import numpy as np
 from pratmo import Atmosphere, PratmoClimatology
 
 altitude_km = np.array([18.0, 21.0, 24.0])
-climatology = PratmoClimatology("path/to/legacy-fortran-data")
+climatology = PratmoClimatology()
 sample = climatology.sample(60.0, date(2026, 3, 16), altitude_km)
 
 climatological_atmosphere = Atmosphere(
@@ -203,6 +203,10 @@ result = model.diurnal(
 
 Measured ozone can replace `sample.o3` while retaining climatological N2O,
 NOy, and correlated tracer initialization.
+
+Pass a legacy-data directory to `PratmoClimatology(data_dir)` when testing
+replacement Fortran-format tables. Normal installed-package use does not need
+external data files.
 
 ## Lower-level compatibility API
 

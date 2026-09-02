@@ -9,27 +9,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from importlib.resources import files
 from pathlib import Path
 import re
 
 import numpy as np
+
+try:
+    from importlib.resources.abc import Traversable
+except ImportError:  # Python 3.9
+    from importlib.abc import Traversable
 
 
 _LATITUDES = np.arange(-85.0, 86.0, 10.0)
 _NUMBER = re.compile(r"[-+]?(?:\d+\.?(?:\d*)?|\.\d+)(?:[Ee][-+]?\d+)?")
 
 
-def _tagged_values(path: Path, tag: str, rows: str) -> list[float]:
+def _tagged_values(path: Path | Traversable, tag: str, rows: str) -> list[float]:
     pattern = re.compile(rf"^{re.escape(tag)}[{rows}]\s", re.IGNORECASE)
     values: list[float] = []
-    for line in path.read_text(errors="ignore").splitlines():
-        stripped = line.lstrip()
-        if pattern.match(stripped):
-            values.extend(float(value) for value in _NUMBER.findall(stripped[2:]))
+    with path.open("r", encoding="ascii", errors="ignore") as stream:
+        for line in stream:
+            stripped = line.lstrip()
+            if pattern.match(stripped):
+                values.extend(float(value) for value in _NUMBER.findall(stripped[2:]))
     return values
 
 
-def _monthly_table(path: Path, tag: str, rows: str, heights: int) -> np.ndarray:
+def _monthly_table(
+    path: Path | Traversable, tag: str, rows: str, heights: int
+) -> np.ndarray:
     expected = 12 * 18 * heights
     values = _tagged_values(path, tag, rows)[:expected]
     if len(values) != expected:
@@ -37,12 +46,13 @@ def _monthly_table(path: Path, tag: str, rows: str, heights: int) -> np.ndarray:
     return np.asarray(values).reshape(12, 18, heights)
 
 
-def _aerosol_table(path: Path) -> np.ndarray:
+def _aerosol_table(path: Path | Traversable) -> np.ndarray:
     values: list[float] = []
-    for line in path.read_text(errors="ignore").splitlines():
-        fields = line.split()
-        if fields and fields[0] in {"8", "9"}:
-            values.extend(float(value) for value in fields[1:])
+    with path.open("r", encoding="ascii", errors="ignore") as stream:
+        for line in stream:
+            fields = line.split()
+            if fields and fields[0] in {"8", "9"}:
+                values.extend(float(value) for value in fields[1:])
     expected = 4 * 18 * 17
     if len(values) != expected:
         raise ValueError(f"{path} contains {len(values)} aerosol values; expected {expected}")
@@ -205,10 +215,17 @@ class PratmoClimatologyProfile:
 
 
 class PratmoClimatology:
-    """Loader and interpolator for the PRATMO T/O3/N2O/NOy/ASA tables."""
+    """Loader and interpolator for the PRATMO T/O3/N2O/NOy/ASA tables.
 
-    def __init__(self, data_dir: str | Path):
-        directory = Path(data_dir)
+    With no argument, the climatology reads the legacy tables bundled with the
+    Python package. Pass a directory to override them with compatible
+    Fortran-format files.
+    """
+
+    def __init__(self, data_dir: str | Path | None = None):
+        directory: Path | Traversable = (
+            files("pratmo.data") if data_dir is None else Path(data_dir)
+        )
         self._temperature = _monthly_table(directory / "fort03_LLM.x", "T", "1234", 41)
         self._o3 = _monthly_table(directory / "fort03_LLM.x", "Z", "123", 31) * 1.0e-6
         self._noy = _monthly_table(directory / "fort05.x", "n", "123", 31) * 1.0e-9

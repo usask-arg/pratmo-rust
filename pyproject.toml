@@ -49,6 +49,7 @@ manifest-path = "pratmo-py/Cargo.toml"
 python-source = "src"
 module-name = "pratmo._pratmo"
 features = ["pratmo-py/extension-module"]
+include = ["pratmo/data/*.x"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -6,6 +6,7 @@ embedded science data (fort01.x, fort02.x, and the spectral/atmosphere files).
 """
 
 from datetime import date
+from importlib.resources import files
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +43,7 @@ from pratmo import (
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CLIMATOLOGY_FIXTURE = REPOSITORY_ROOT / "pratmo-core/tests/fixtures/legacy_inputs"
+CLIMATOLOGY_TABLES = ("fort03_LLM.x", "fort04.x", "fort05.x", "fort51.x")
 
 
 @pytest.fixture(scope="module")
@@ -319,6 +321,34 @@ def test_pratmo_climatology_uses_cpp_pressure_height_grid():
     assert profile.aerosol_surface_area_um2_cm3 == pytest.approx(
         [0.9399, 0.9399, 2.09534636e-8]
     )
+
+
+def test_packaged_pratmo_climatology_matches_explicit_tables():
+    from pratmo import PratmoClimatology
+
+    altitude_km = np.array([8.0, 26.5, 50.0])
+    packaged = PratmoClimatology().sample(
+        30.466005325317383, date(2008, 7, 2), altitude_km
+    )
+    explicit = PratmoClimatology(CLIMATOLOGY_FIXTURE).sample(
+        30.466005325317383, date(2008, 7, 2), altitude_km
+    )
+
+    for field in (
+        "temperature_k",
+        "o3",
+        "n2o",
+        "noy",
+        "aerosol_surface_area_um2_cm3",
+    ):
+        assert getattr(packaged, field) == pytest.approx(getattr(explicit, field))
+
+
+@pytest.mark.parametrize("filename", CLIMATOLOGY_TABLES)
+def test_packaged_climatology_table_matches_authoritative_source(filename):
+    packaged = files("pratmo.data").joinpath(filename).read_bytes()
+    authoritative = (REPOSITORY_ROOT / "pratmo-core/data" / filename).read_bytes()
+    assert packaged == authoritative
 
 
 def test_pratmo_climatology_matches_cpp_osiris_case():

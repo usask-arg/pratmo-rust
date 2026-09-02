@@ -29,7 +29,6 @@ from pratmo import (
 
 
 TARGET_ALTITUDE_KM = 26.5
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def vertical_interp(
@@ -82,7 +81,9 @@ def main() -> None:
         "--output", type=Path, default=Path("pratmo_osiris_cpp_reconciled.png")
     )
     parser.add_argument(
-        "--climatology-dir", type=Path, default=REPOSITORY_ROOT / "fortran"
+        "--climatology-dir",
+        type=Path,
+        help="optional directory containing replacement fort03/04/05/51 tables",
     )
     parser.add_argument("--integration-days", type=int, default=150)
     parser.add_argument(

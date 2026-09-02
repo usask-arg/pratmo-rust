@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pratmo"
-version = "0.1.0"
+version = "0.3.0"
 description = "Experimental AI-assisted Rust rewrite of the PRATMO photochemical box model"
 readme = "README.md"
 license = "MIT"
@@ -49,6 +49,7 @@ manifest-path = "pratmo-py/Cargo.toml"
 python-source = "src"
 module-name = "pratmo._pratmo"
 features = ["pratmo-py/extension-module"]
+include = ["pratmo/data/*.x"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -205,6 +205,7 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
         .into_par_iter()
         .map(|ib| {
             let mut worker = base.clone();
+            worker.rafday_warnings.clear();
             worker.out_unit7 = None;
             worker.out_unit8 = None;
             worker.out_unit9 = None;
@@ -239,6 +240,7 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
     s.radcount = 0.0;
     s.newraf_nonconvergence_count = 0;
     s.rafday_nonconvergence_count = 0;
+    s.rafday_warnings.clear();
     s.rafday_max_final_relative_correction = 0.0;
     s.rafday_max_correction_iterations = 0;
     for result in results {
@@ -279,6 +281,7 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
         s.radcount += worker.radcount;
         s.newraf_nonconvergence_count += worker.newraf_nonconvergence_count;
         s.rafday_nonconvergence_count += worker.rafday_nonconvergence_count;
+        s.rafday_warnings.extend(worker.rafday_warnings);
         s.rafday_max_final_relative_correction = s
             .rafday_max_final_relative_correction
             .max(worker.rafday_max_final_relative_correction);
@@ -500,17 +503,224 @@ fn cpp_endpoint_days(s: &mut ModelState, ib: usize) -> Result<()> {
 
 // ── RAFDAY ───────────────────────────────────────────────────────────────────
 
+#[cfg(not(feature = "fortran-parity"))]
+fn rafday_family_valid(s: &ModelState, x: &[f64; NDEN]) -> bool {
+    if x[..s.ntotx].iter().any(|v| !v.is_finite() || *v < 0.0) {
+        return false;
+    }
+    let v = |species: usize| x[s.n[species] - 1];
+    let noy = v(0) + v(1) + v(2) + 2.0 * v(3) + v(4) + v(14) + v(20) + v(19) + v(22);
+    let cly = v(15) + v(16) + 2.0 * v(17) + v(18) + v(19) + v(21) + v(27) + 2.0 * v(28) + v(29);
+    let bry = v(11) + v(12) + v(13) + v(22) + v(23) + v(29);
+    let mut families = vec![
+        (noy, s.fnoy[s.ibox]),
+        (cly, s.fclx[s.ibox]),
+        (bry, s.fbrx[s.ibox]),
+    ];
+    if s.liod {
+        let iy = (30..36).map(v).sum::<f64>() + 2.0 * (36..40).map(v).sum::<f64>();
+        families.push((iy, s.fiodx[s.ibox]));
+    }
+    families.into_iter().all(|(total, mixing)| {
+        let target = mixing * s.dm[s.ialt];
+        (total - target).abs() <= 1.0e-8 * target.abs().max(1.0e-30)
+    })
+}
+
+/// Evaluate the same constrained daily chemistry used after an accepted step.
+/// SETUPR reads named HCl/HBr/ClONO2 densities for aerosol uptake, so changing
+/// only XNOLD omits that dependence from the finite-difference Jacobian.
+/// Cloning also keeps rejected trials out of the orbit cache and diagnostics.
+#[cfg(not(feature = "fortran-parity"))]
+fn rafday_trial(s: &ModelState, candidate: &[f64; NDEN]) -> Result<ModelState> {
+    if !rafday_family_valid(s, candidate) {
+        bail!(
+            "RAFDAY: invalid density or family constraint in trial (box {})",
+            s.ibox + 1
+        );
+    }
+    let mut trial = s.clone();
+    splace(&mut trial, candidate, s.ibox);
+    trial.xnold = *candidate;
+    trial.lprtx = false;
+    trial.lsvday = false;
+    daily(&mut trial, 102)?;
+    if trial.newraf_nonconvergence_count != s.newraf_nonconvergence_count
+        || trial.xnold[..s.ntotx]
+            .iter()
+            .any(|v| !v.is_finite() || *v < 0.0)
+        || trial.pmean.iter().any(|v| !v.is_finite())
+    {
+        bail!(
+            "RAFDAY: daily integration failed in trial (box {})",
+            s.ibox + 1
+        );
+    }
+    Ok(trial)
+}
+
+/// Safeguard the whole Newton direction, including FIXRAT's coupled changes.
+/// The merit function is sum((daysec * mean(P-L) / initial_density)^2), with
+/// scales held fixed during backtracking. Small damped steps cannot establish
+/// convergence: both the *undamped* correction and daily residual must pass.
+#[cfg(not(feature = "fortran-parity"))]
+fn rafday_correction(s: &mut ModelState, fxo: &[f64], correction: &[f64]) -> Result<(f64, bool)> {
+    let mut initial = [0.0; NDEN];
+    rplace(s, &mut initial, s.ibox);
+    let slots: Vec<_> = s.nnrt[..s.nnr]
+        .iter()
+        .map(|&species| s.n[species - 1] - 1)
+        .collect();
+    let scales: Vec<_> = slots.iter().map(|&slot| initial[slot] / s.daysec).collect();
+    let norm = |residual: &[f64]| {
+        residual
+            .iter()
+            .zip(&scales)
+            .map(|(f, scale)| (f / scale).powi(2))
+            .sum::<f64>()
+    };
+    let before = norm(fxo);
+    let mut alpha = 1.0_f64;
+    let mut relerr = 0.0_f64;
+    let mut residual_error = 0.0_f64;
+    for (j, &slot) in slots.iter().enumerate() {
+        let dx = correction[j];
+        if !initial[slot].is_finite()
+            || initial[slot] <= 0.0
+            || !dx.is_finite()
+            || !scales[j].is_finite()
+            || scales[j] <= 0.0
+            || !fxo[j].is_finite()
+        {
+            bail!(
+                "RAFDAY: invalid Newton state for {} (box {})",
+                s.tnamet[slot],
+                s.ibox + 1
+            );
+        }
+        relerr = relerr.max((dx / initial[slot]).abs());
+        residual_error = residual_error.max((fxo[j] / scales[j]).abs());
+        if dx > 0.0 {
+            // Stay strictly inside the positive domain, at every iteration.
+            alpha = alpha.min(0.9 * initial[slot] / dx);
+        }
+    }
+    if !before.is_finite() || !rafday_family_valid(s, &initial) {
+        bail!(
+            "RAFDAY: invalid residual or initial family constraint (box {})",
+            s.ibox + 1
+        );
+    }
+    // Do not demand strict decrease below numerical resolution once both
+    // independent convergence criteria have already been met.
+    if relerr < s.dayerr && residual_error < s.dayerr {
+        return Ok((relerr, true));
+    }
+    for _ in 0..24 {
+        let mut candidate = initial;
+        for (&slot, &dx) in slots.iter().zip(correction) {
+            candidate[slot] -= alpha * dx;
+        }
+        fixrat(&mut candidate, s, s.ibox);
+        if let Ok(trial) = rafday_trial(s, &candidate) {
+            let residual: Vec<_> = slots.iter().map(|&slot| trial.pmean[460 + slot]).collect();
+            let after = norm(&residual);
+            if after.is_finite() && after <= (1.0 - 1.0e-4 * alpha) * before {
+                splace(s, &candidate, s.ibox);
+                return Ok((relerr, false));
+            }
+        }
+        alpha *= 0.5;
+    }
+    bail!(
+        "RAFDAY: no positive, family-conserving residual-reducing Newton step (box {})",
+        s.ibox + 1
+    )
+}
+
+/// Validate the small slow-species solve without changing LINSLV's legacy
+/// behavior in the time-step integrator or Fortran parity builds.
+#[cfg(not(feature = "fortran-parity"))]
+fn rafday_check_solve(
+    s: &ModelState,
+    jacobian: &Array2<f64>,
+    rhs: &[f64],
+    step: &[f64],
+) -> Result<()> {
+    let n = rhs.len();
+    for i in 0..n {
+        let pivot = s.a_mat.as_slice().expect("a_mat is contiguous")[i * NDEN + i];
+        if !pivot.is_finite() || pivot == 0.0 || !step[i].is_finite() || !rhs[i].is_finite() {
+            bail!(
+                "RAFDAY: singular or nonfinite Newton system (box {})",
+                s.ibox + 1
+            );
+        }
+        let mut residual = -rhs[i];
+        let mut scale = rhs[i].abs();
+        for j in 0..n {
+            let term = jacobian[[i, j]] * step[j];
+            residual += term;
+            scale += term.abs();
+        }
+        if !residual.is_finite() || !scale.is_finite() || residual.abs() > 1.0e-10 * scale {
+            bail!("RAFDAY: inaccurate Newton solve (box {})", s.ibox + 1);
+        }
+    }
+    Ok(())
+}
+
 /// Newton-Raphson steady-state driver for NNRT slow species.
 /// Runs DAILY to compute 24h means, then applies NR correction.
 /// Fortran: SUBROUTINE RAFDAY(IB)
 pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
+    #[cfg(feature = "fortran-parity")]
+    {
+        rafday_inner(s)
+    }
+    #[cfg(not(feature = "fortran-parity"))]
+    {
+        let mut checkpoint = None;
+        let lprtx = s.lprtx;
+        let result = rafday_inner(s, &mut checkpoint);
+        s.lprtx = lprtx;
+        if let Err(error) = result {
+            let Some(mut valid) = checkpoint else {
+                // Without a successfully integrated orbit there is no usable
+                // output to return. Input/initial-integration errors stay fatal.
+                return Err(error);
+            };
+            // ModelState::clone intentionally omits file handles.
+            valid.out_unit7 = s.out_unit7.take();
+            valid.out_unit8 = s.out_unit8.take();
+            valid.out_unit9 = s.out_unit9.take();
+            *s = valid;
+            s.lprtx = lprtx;
+            s.rafday_nonconvergence_count += 1;
+            rafday_warn(s, &error.to_string());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(not(feature = "fortran-parity"))]
+fn rafday_warn(s: &mut ModelState, reason: &str) {
+    s.rafday_warnings.push(format!(
+        "RAFDAY did not converge for box {} at {:.3} km: {}. Returning the last valid diurnal cycle; photochemical equilibrium is not established.",
+        s.ibox + 1, s.z[s.ialt] * 1.0e-5, reason
+    ));
+}
+
+fn rafday_inner(
+    s: &mut ModelState,
+    #[cfg(not(feature = "fortran-parity"))] checkpoint: &mut Option<ModelState>,
+) -> Result<()> {
     let nnr = s.nnr;
 
     // Local arrays (NSLOWM = 11 max)
     let mut fxdder = Array2::<f64>::zeros((NSLOWM, NSLOWM));
     let mut fxo = [0.0f64; NSLOWM];
     let mut xo = [0.0f64; NSLOWM];
-    let mut xoo = [0.0f64; NDEN];
 
     let mut lcnvrg = false;
     let lpsave = s.lprtx;
@@ -556,7 +766,42 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
         }
 
         s.lprtx = lpsave && (itrraf >= maxraf || lcnvrg);
+        #[cfg(not(feature = "fortran-parity"))]
+        let failures_before = s.newraf_nonconvergence_count;
+        #[cfg(not(feature = "fortran-parity"))]
+        {
+            // Match the deterministic starting guesses used for Jacobian and
+            // line-search trials; changing cached guesses can change adaptive
+            // time-step paths and make the residual discontinuous.
+            s.lsvday = false;
+        }
         daily(s, 3)?;
+
+        #[cfg(not(feature = "fortran-parity"))]
+        {
+            let mut initial = [0.0; NDEN];
+            rplace(s, &mut initial, s.ibox);
+            if s.newraf_nonconvergence_count != failures_before
+                || !rafday_family_valid(s, &initial)
+                || s.pmean.iter().any(|v| !v.is_finite())
+                || (0..s.ntimdo).any(|it| {
+                    (0..s.ntotx).any(|slot| {
+                        let value = s.xnoft[[slot, it]];
+                        !value.is_finite() || value < 0.0
+                    })
+                })
+            {
+                bail!("RAFDAY: invalid daily orbit (box {})", s.ibox + 1);
+            }
+            let mut valid = s.clone();
+            valid.rafday_max_final_relative_correction = valid
+                .rafday_max_final_relative_correction
+                .max(final_relative_correction);
+            valid.rafday_max_correction_iterations = valid
+                .rafday_max_correction_iterations
+                .max(correction_iterations);
+            *checkpoint = Some(valid);
+        }
 
         if nnr < 1 {
             break 'outer;
@@ -598,10 +843,22 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
                 let epslon = s.dayeps * s.xnold[ntjn0];
                 s.xnold[ntjn0] += epslon;
 
+                if !epslon.is_finite() || epslon <= 0.0 {
+                    bail!(
+                        "RAFDAY: invalid Jacobian perturbation for {}",
+                        s.tname[jn - 1]
+                    );
+                }
                 let mut fixed = s.xnold;
                 fixrat(&mut fixed, s, s.ibox);
-                s.xnold = fixed;
-                daily(s, 102)?;
+                #[cfg(not(feature = "fortran-parity"))]
+                let means = rafday_trial(s, &fixed)?.pmean;
+                #[cfg(feature = "fortran-parity")]
+                let means = {
+                    s.xnold = fixed;
+                    daily(s, 102)?;
+                    s.pmean
+                };
 
                 for jj in 0..nnr {
                     let jjn = s.nnrt[jj];
@@ -609,7 +866,7 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
                     if ntjjn1 == 0 {
                         continue;
                     }
-                    fxdder[[jj, j]] = (s.pmean[459 + ntjjn1] - fxo[jj]) / epslon;
+                    fxdder[[jj, j]] = (means[459 + ntjjn1] - fxo[jj]) / epslon;
                 }
             }
 
@@ -617,7 +874,22 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
             have_jacobian = true;
         }
 
-        // Copy FXDDER into A matrix for LINSLV
+        // With bromine disabled, CHEMPL gives HBr identically zero P-L.
+        // Hold its Newton coordinate fixed instead of solving a singular row.
+        #[cfg(not(feature = "fortran-parity"))]
+        if !s.lbrom {
+            for j in 0..nnr {
+                if s.nnrt[j] == 14 {
+                    if fxo[j] != 0.0 {
+                        bail!("RAFDAY: nonzero HBr residual with bromine disabled");
+                    }
+                    for k in 0..nnr {
+                        fxdder[[j, k]] = if j == k { 1.0 } else { 0.0 };
+                    }
+                }
+            }
+        }
+        // Copy FXDDER into A matrix for LINSLV.
         let a = s.a_mat.as_slice_mut().expect("a_mat is contiguous");
         for j in 0..nnr {
             for jj in 0..nnr {
@@ -627,50 +899,60 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
         let mut xo_vec = vec![0.0f64; nnr];
         linslv(s, &fxo[..nnr], &mut xo_vec, nnr);
         xo[..nnr].copy_from_slice(&xo_vec);
-
-        // Apply correction to slow species with clamping
+        #[cfg(not(feature = "fortran-parity"))]
         {
-            let mut xnold = s.xnold;
-            rplace(s, &mut xnold, s.ibox);
-            s.xnold = xnold;
+            rafday_check_solve(s, &fxdder, &fxo[..nnr], &xo[..nnr])?;
+            (final_relative_correction, lcnvrg) = rafday_correction(s, &fxo[..nnr], &xo[..nnr])?;
+            correction_iterations += 1;
         }
 
-        let mut lneg = false;
-        let mut relerr = 0.0f64;
-        for j in 0..nnr {
-            let jn = s.nnrt[j];
-            let ntjn1 = s.n[jn - 1];
-            if ntjn1 == 0 {
-                continue;
-            }
-            let ntjn0 = ntjn1 - 1;
-            xoo[j] = s.xnold[ntjn0];
-            let mut temp = xoo[j] - xo[j];
-            if itrraf < 7 {
-                let lo = s.rafmin * xoo[j];
-                let hi = s.rafmax * xoo[j];
-                temp = temp.max(lo).min(hi);
-            }
-            if temp <= 0.0 {
-                lneg = true;
-            }
-            relerr = relerr.max(xo[j].abs() / xoo[j].max(1e-100));
-            xoo[j] = temp;
-            s.xnold[ntjn0] = temp;
-        }
-
-        lcnvrg = relerr < s.dayerr;
-        final_relative_correction = relerr;
-        correction_iterations += 1;
-
-        if lneg {
-            bail!("RAFDAY: negative density after correction");
-        }
-
+        // Strict parity retains the original component bounds and stopping rule.
+        #[cfg(feature = "fortran-parity")]
         {
-            let mut xnold_snap = s.xnold;
-            fixrat(&mut xnold_snap, s, s.ibox);
-            splace(s, &xnold_snap, s.ibox);
+            {
+                let mut xnold = s.xnold;
+                rplace(s, &mut xnold, s.ibox);
+                s.xnold = xnold;
+            }
+
+            let mut xoo = [0.0f64; NDEN];
+            let mut lneg = false;
+            let mut relerr = 0.0f64;
+            for j in 0..nnr {
+                let jn = s.nnrt[j];
+                let ntjn1 = s.n[jn - 1];
+                if ntjn1 == 0 {
+                    continue;
+                }
+                let ntjn0 = ntjn1 - 1;
+                xoo[j] = s.xnold[ntjn0];
+                let mut temp = xoo[j] - xo[j];
+                if itrraf < 7 {
+                    let lo = s.rafmin * xoo[j];
+                    let hi = s.rafmax * xoo[j];
+                    temp = temp.max(lo).min(hi);
+                }
+                if temp <= 0.0 {
+                    lneg = true;
+                }
+                relerr = relerr.max(xo[j].abs() / xoo[j].max(1e-100));
+                xoo[j] = temp;
+                s.xnold[ntjn0] = temp;
+            }
+
+            lcnvrg = relerr < s.dayerr;
+            final_relative_correction = relerr;
+            correction_iterations += 1;
+
+            if lneg {
+                bail!("RAFDAY: negative density after correction");
+            }
+
+            {
+                let mut xnold_snap = s.xnold;
+                fixrat(&mut xnold_snap, s, s.ibox);
+                splace(s, &xnold_snap, s.ibox);
+            }
         }
     }
 
@@ -685,7 +967,143 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
 
     if nnr > 0 && !lcnvrg {
         s.rafday_nonconvergence_count += 1;
+        #[cfg(not(feature = "fortran-parity"))]
+        rafday_warn(s, "Newton iteration limit reached");
     }
 
     Ok(())
+}
+
+#[cfg(all(test, not(feature = "fortran-parity")))]
+mod rafday_tests {
+    use super::*;
+    use crate::reader::{FortranReader, ModelReader};
+
+    fn prepared_box() -> Box<ModelState> {
+        let mut s = ModelState::new();
+        FortranReader::embedded().read_all(&mut s).unwrap();
+        s.nbox = 1;
+        s.ibox = 0;
+        s.ialt = 11;
+        s.nboxdo[0] = 12;
+        s.boxrn[0] = 0.0;
+        s.lbrom = true;
+        s.lresol = true;
+        s.lsvday = false;
+        s.lprtx = false;
+        fixmix(&mut s);
+        let mut initial = [0.0; NDEN];
+        rplace(&s, &mut initial, 0);
+        s.xnold = initial;
+        daily(&mut s, 2).unwrap();
+        let relaxed = s.xnold;
+        splace(&mut s, &relaxed, 0);
+        fixmix(&mut s);
+        s
+    }
+
+    #[test]
+    fn oversized_newton_direction_is_damped_without_clipping_or_family_drift() {
+        let mut s = prepared_box();
+        let n = s.nnr;
+        let mut initial = [0.0; NDEN];
+        rplace(&s, &mut initial, 0);
+        let base = rafday_trial(&s, &initial).unwrap();
+        let slots: Vec<_> = s.nnrt[..n].iter().map(|&id| s.n[id - 1] - 1).collect();
+        let rhs: Vec<_> = slots.iter().map(|&slot| base.pmean[460 + slot]).collect();
+        for j in 0..n {
+            let mut perturbed = initial;
+            let eps = s.dayeps * initial[slots[j]];
+            perturbed[slots[j]] += eps;
+            fixrat(&mut perturbed, &s, 0);
+            let trial = rafday_trial(&s, &perturbed).unwrap();
+            for i in 0..n {
+                s.a_mat.as_slice_mut().unwrap()[j * NDEN + i] =
+                    (trial.pmean[460 + slots[i]] - rhs[i]) / eps;
+            }
+        }
+        let mut step = vec![0.0; n];
+        linslv(&mut s, &rhs, &mut step, n);
+        // Deliberately overshoot along an actual chemistry Newton direction.
+        for value in &mut step {
+            *value *= 100.0;
+        }
+        assert!(slots
+            .iter()
+            .zip(&step)
+            .any(|(&slot, &dx)| dx > initial[slot]));
+        let cache = s.xnoft.clone();
+        let failures = s.newraf_nonconvergence_count;
+        let (relative_correction, converged) = rafday_correction(&mut s, &rhs, &step).unwrap();
+        assert!(!converged, "a small damped step must not claim convergence");
+        assert!(relative_correction > 1.0);
+        let mut accepted = [0.0; NDEN];
+        rplace(&s, &mut accepted, 0);
+        assert!(rafday_family_valid(&s, &accepted));
+        assert!(accepted[..s.ntotx].iter().all(|&v| v > 0.0));
+        // H2O2 and CH3OOH are not rescaled by FIXRAT: both must have the
+        // same alpha, proving that the coupled direction was not clipped.
+        let alpha = |species: usize| {
+            let j = s.nnrt[..n].iter().position(|&id| id == species).unwrap();
+            (initial[slots[j]] - accepted[slots[j]]) / step[j]
+        };
+        assert!(alpha(9) > 0.0 && alpha(9) < 1.0);
+        assert!((alpha(9) - alpha(27)).abs() < 1.0e-12);
+        let trial = rafday_trial(&s, &accepted).unwrap();
+        let norm = |means: &[f64]| {
+            slots
+                .iter()
+                .map(|&slot| (means[460 + slot] / initial[slot]).powi(2))
+                .sum::<f64>()
+        };
+        assert!(norm(&trial.pmean) < norm(&base.pmean));
+        assert_eq!(s.xnoft, cache, "trial orbit leaked into accepted cache");
+        assert_eq!(s.newraf_nonconvergence_count, failures);
+    }
+
+    #[test]
+    fn rejected_direction_leaves_the_box_and_orbit_unchanged() {
+        let mut s = prepared_box();
+        let mut initial = [0.0; NDEN];
+        rplace(&s, &mut initial, 0);
+        let base = rafday_trial(&s, &initial).unwrap();
+        let rhs: Vec<_> = s.nnrt[..s.nnr]
+            .iter()
+            .map(|&id| base.pmean[459 + s.n[id - 1]])
+            .collect();
+        let cache = s.xnoft.clone();
+        let failures = s.newraf_nonconvergence_count;
+        // No change cannot decrease a nonzero residual.
+        let step = vec![0.0; s.nnr];
+        assert!(rafday_correction(&mut s, &rhs, &step).is_err());
+        let mut after = [0.0; NDEN];
+        rplace(&s, &mut after, 0);
+        assert_eq!(initial, after);
+        assert_eq!(s.xnoft, cache);
+        assert_eq!(s.newraf_nonconvergence_count, failures);
+    }
+
+    #[test]
+    fn singular_nonfinite_and_inaccurate_slow_solves_are_rejected() {
+        let mut s = ModelState::new();
+        let jac = Array2::<f64>::eye(2);
+        let rhs = [1.0, 2.0];
+        // Zero pivot, even with a finite-looking supplied solution.
+        assert!(rafday_check_solve(&s, &jac, &rhs, &rhs).is_err());
+        s.a_mat.as_slice_mut().unwrap()[0] = 1.0;
+        s.a_mat.as_slice_mut().unwrap()[NDEN + 1] = 1.0;
+        assert!(rafday_check_solve(&s, &jac, &rhs, &rhs).is_ok());
+        assert!(rafday_check_solve(&s, &jac, &rhs, &[f64::NAN, 2.0]).is_err());
+        assert!(rafday_check_solve(&s, &jac, &[f64::INFINITY, 2.0], &rhs).is_err());
+        assert!(rafday_check_solve(&s, &jac, &rhs, &[1.0, 3.0]).is_err());
+    }
+
+    #[test]
+    fn recovery_requires_a_valid_orbit() {
+        let mut s = prepared_box();
+        s.maxrlx = 0;
+        s.fnoy[0] = f64::NAN;
+        assert!(rafday(&mut s, 0).is_err());
+        assert!(s.rafday_warnings.is_empty());
+    }
 }

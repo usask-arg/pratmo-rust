@@ -326,7 +326,7 @@ dependencies = [
 
 [[package]]
 name = "pratmo-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "pratmo-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "nalgebra",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "pratmo-py"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "ndarray",

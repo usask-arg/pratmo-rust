@@ -464,6 +464,8 @@ pub struct ModelState {
     pub radcount: f64, // diagnostic iteration counter
     pub newraf_nonconvergence_count: usize,
     pub rafday_nonconvergence_count: usize,
+    /// Recoverable RAFDAY failures, including box/altitude and the cause.
+    pub rafday_warnings: Vec<String>,
     /// Largest final RAFDAY relative-correction convergence metric observed.
     pub rafday_max_final_relative_correction: f64,
     /// Largest number of RAFDAY Newton corrections applied to any box.
@@ -838,6 +840,7 @@ impl Clone for ModelState {
             radcount: self.radcount.clone(),
             newraf_nonconvergence_count: self.newraf_nonconvergence_count,
             rafday_nonconvergence_count: self.rafday_nonconvergence_count,
+            rafday_warnings: self.rafday_warnings.clone(),
             rafday_max_final_relative_correction: self.rafday_max_final_relative_correction,
             rafday_max_correction_iterations: self.rafday_max_correction_iterations,
             aersol: self.aersol.clone(),
@@ -1229,6 +1232,7 @@ impl ModelState {
             radcount: 0.0,
             newraf_nonconvergence_count: 0,
             rafday_nonconvergence_count: 0,
+            rafday_warnings: Vec::new(),
             rafday_max_final_relative_correction: 0.0,
             rafday_max_correction_iterations: 0,
             aersol: [0.0; 6],

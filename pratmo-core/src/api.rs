@@ -541,6 +541,8 @@ pub struct Diagnostics {
     pub radcount: f64,
     pub newraf_nonconvergence_count: usize,
     pub rafday_nonconvergence_count: usize,
+    /// Warnings for unconverged boxes that retain a valid diurnal result.
+    pub rafday_warnings: Vec<String>,
     /// Maximum final RAFDAY relative-correction metric across calls and boxes.
     pub rafday_max_final_relative_correction: f64,
     /// Maximum number of RAFDAY Newton corrections across calls and boxes.
@@ -1685,6 +1687,7 @@ fn extract_diurn_output(s: &ModelState) -> DiurnOutput {
             radcount: s.radcount,
             newraf_nonconvergence_count: s.newraf_nonconvergence_count,
             rafday_nonconvergence_count: s.rafday_nonconvergence_count,
+            rafday_warnings: s.rafday_warnings.clone(),
             rafday_max_final_relative_correction: s.rafday_max_final_relative_correction,
             rafday_max_correction_iterations: s.rafday_max_correction_iterations,
         },
@@ -1705,6 +1708,7 @@ fn extract_ctm_output(s: &ModelState) -> CtmOutput {
             radcount: s.radcount,
             newraf_nonconvergence_count: s.newraf_nonconvergence_count,
             rafday_nonconvergence_count: s.rafday_nonconvergence_count,
+            rafday_warnings: s.rafday_warnings.clone(),
             rafday_max_final_relative_correction: s.rafday_max_final_relative_correction,
             rafday_max_correction_iterations: s.rafday_max_correction_iterations,
         },

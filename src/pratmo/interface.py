@@ -645,7 +645,13 @@ class Model:
         photolysis: PhotolysisOptions = PhotolysisOptions(),
         options: DiurnalOptions = DiurnalOptions(),
     ) -> DiurnOutput:
-        """Run a resolved 24-hour photochemical cycle."""
+        """Run a resolved 24-hour photochemical cycle.
+
+        Recoverable RAFDAY failures emit ``RuntimeWarning`` and return the
+        last valid cycle. Check ``output.diagnostics.rafday_warnings`` and
+        ``rafday_nonconvergence_count`` before treating it as equilibrium.
+        Errors without a valid completed cycle still raise ``ValueError``.
+        """
 
         config = self._diurnal_config(
             latitude=latitude,

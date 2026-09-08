@@ -40,6 +40,24 @@ Increase `integration_days`, inspect `output.diagnostics`, and compare the
 scientifically important fields between successively longer runs. A solver
 success alone is not an equilibrium test.
 
+## RAFDAY warns but returns output
+
+Starting with 0.3.1, a recoverable RAFDAY numerical failure or exhausted Newton
+iteration limit emits a `RuntimeWarning` and returns the last valid diurnal
+cycle. Other boxes continue normally. The retained cycle is finite and keeps
+the prescribed family constraints, but its equilibrium has not been established.
+
+Inspect `output.diagnostics.rafday_nonconvergence_count` and
+`output.diagnostics.rafday_warnings`. Each warning identifies the one-based box
+number, altitude and cause. The warning is emitted once per Python run, with
+details for all affected boxes. Input errors and failures before any valid
+cycle is available still raise an exception.
+
+Increasing `integration_days` does not increase the legacy RAFDAY Newton
+iteration limit. In particular, the OSIRIS scan 37375021 failure at 17.5 km
+was caused by an inconsistent aerosol-chemistry Jacobian and an overshooting
+HCl correction; 0.3.1 fixes that case and it now converges without a warning.
+
 ## DIURN local times appear out of order
 
 The integration starts at noon and ends at noon the following day. Plot and

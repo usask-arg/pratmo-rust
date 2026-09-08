@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use ndarray::Array2;
 use numpy::{IntoPyArray, PyArray1, PyArray2};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeWarning, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
@@ -992,6 +992,10 @@ impl PyDiagnostics {
     #[getter]
     fn rafday_nonconvergence_count(&self) -> usize {
         self.inner.rafday_nonconvergence_count
+    }
+    #[getter]
+    fn rafday_warnings(&self) -> Vec<String> {
+        self.inner.rafday_warnings.clone()
     }
 
     #[getter]
@@ -2060,23 +2064,28 @@ impl PyPratmoModel {
     }
 
     /// Run the diurnal cycle (DIURN + TPATH) mode.
-    fn run_diurn(&self, cfg: &PyDiurnConfig) -> PyResult<PyDiurnOutput> {
+    fn run_diurn(&self, py: Python<'_>, cfg: &PyDiurnConfig) -> PyResult<PyDiurnOutput> {
         let rust_cfg = cfg.to_rust()?;
-        self.inner
+        let out = self
+            .inner
             .run_diurn(&rust_cfg)
-            .map(|out| PyDiurnOutput { inner: out })
-            .map_err(|e| PyValueError::new_err(e.to_string()))
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        warn_rafday(py, &out.diagnostics)?;
+        Ok(PyDiurnOutput { inner: out })
     }
 
     fn run_diurn_no2_constrained(
         &self,
+        py: Python<'_>,
         cfg: &PyNo2ConstrainedDiurnConfig,
     ) -> PyResult<PyNo2ConstrainedDiurnOutput> {
         let rust_cfg = cfg.to_rust()?;
-        self.inner
+        let out = self
+            .inner
             .run_diurn_no2_constrained(&rust_cfg)
-            .map(|out| PyNo2ConstrainedDiurnOutput { inner: out })
-            .map_err(|e| PyValueError::new_err(e.to_string()))
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        warn_rafday(py, &out.output.diagnostics)?;
+        Ok(PyNo2ConstrainedDiurnOutput { inner: out })
     }
 
     /// Run the CTM climatological mode.
@@ -2093,6 +2102,17 @@ impl PyPratmoModel {
 }
 
 // ── Module ─────────────────────────────────────────────────────────────────────
+
+fn warn_rafday(py: Python<'_>, diagnostics: &Diagnostics) -> PyResult<()> {
+    if !diagnostics.rafday_warnings.is_empty() {
+        py.import("warnings")?.getattr("warn")?.call1((
+            diagnostics.rafday_warnings.join("\n"),
+            py.get_type::<PyRuntimeWarning>(),
+            2,
+        ))?;
+    }
+    Ok(())
+}
 
 #[pymodule]
 fn _pratmo(m: &Bound<'_, PyModule>) -> PyResult<()> {

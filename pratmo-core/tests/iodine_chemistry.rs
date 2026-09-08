@@ -39,7 +39,10 @@ fn run_20km_with_iodine(iodine: bool) -> pratmo_core::api::DiurnOutput {
         iodine,
         ..Default::default()
     };
-    model.run_diurn(&cfg).expect("DIURN run failed")
+    let out = model.run_diurn(&cfg).expect("DIURN run failed");
+    assert_eq!(out.diagnostics.newraf_nonconvergence_count, 0);
+    assert_eq!(out.diagnostics.rafday_nonconvergence_count, 0);
+    out
 }
 
 fn run_16km_with_aerosol(aerosol_area: f64) -> pratmo_core::api::DiurnOutput {
@@ -362,7 +365,8 @@ fn test_iono2_diurnal_variation() {
 #[test]
 fn test_hoi_peaks_in_daytime() {
     // HOI is produced by IO + HO2 (daytime reaction) and is photolysed to I + OH.
-    // In this equatorial 20 km case, both HOI and OH peak at local noon.
+    // In this equatorial 20 km case, both peak near local noon. A converged
+    // bromine-off orbit need not put their maxima in the identical time bin.
     let out = run_20km();
     let steps = &out.time_series[0].steps;
     let (noon_idx, _) = noon_and_night_idx(steps);
@@ -377,9 +381,10 @@ fn test_hoi_peaks_in_daytime() {
         .iter()
         .map(|s| s.implicit.hoi)
         .fold(f64::MAX, f64::min);
-    assert_eq!(
-        hoi_peak_idx, noon_idx,
-        "HOI peak moved away from the OH-defined local noon"
+    let separation = (steps[hoi_peak_idx].elapsed_seconds - steps[noon_idx].elapsed_seconds).abs();
+    assert!(
+        separation.min(86_400.0 - separation) < 7_200.0,
+        "HOI peak moved more than two hours from the OH-defined local noon"
     );
     assert!(
         hoi_max > hoi_min * 1.01,
@@ -401,7 +406,9 @@ fn test_ixoy_transient_fraction_regression() {
         })
         .fold(0.0_f64, f64::max);
     assert!(
-        maximum_fraction > 5.0e-5 && maximum_fraction < 2.0e-4,
+        // The old bromine-off solve had a singular HBr row and stopped with
+        // NaN corrections. This reference comes from the converged orbit.
+        (maximum_fraction / 2.007e-4 - 1.0).abs() < 0.01,
         "unexpected peak IxOy/Iy fraction: {maximum_fraction:.3e}"
     );
 }

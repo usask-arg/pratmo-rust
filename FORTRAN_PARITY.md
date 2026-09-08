@@ -25,6 +25,15 @@ The feature currently enables these legacy behaviors:
 - preserve the pre-loop `PUNCH(0,0)` metadata altitude and the final `LEND`
   mixing-ratio dump.
 
+RAFDAY also retains the legacy component bounds, Jacobian evaluation and
+correction-only stopping rule in parity builds. Normal builds synchronize
+the aerosol-rate density inputs during Jacobian evaluation, use deterministic
+daily guesses and a positive, family-conserving line search, and require a
+small daily chemistry residual as well as a small undamped correction.
+Recoverable normal-mode failures return the last valid cycle with explicit
+nonconvergence diagnostics and warnings. The OSIRIS regression and numerical
+investigation are documented in `tests/fixtures/osiris/README.md`.
+
 The feature is forwarded by `pratmo-cli` and `pratmo-py`. Normal builds keep
 the corrected behavior.
 

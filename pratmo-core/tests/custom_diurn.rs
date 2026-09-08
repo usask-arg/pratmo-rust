@@ -61,6 +61,8 @@ fn explicit_diurn_time_grid_is_preserved_in_output() {
     let out = model
         .run_diurn(&cfg)
         .expect("explicit-grid DIURN run failed");
+    assert_eq!(out.diagnostics.newraf_nonconvergence_count, 0);
+    assert_eq!(out.diagnostics.rafday_nonconvergence_count, 0);
     let actual: Vec<f64> = out.time_series[0]
         .steps
         .iter()

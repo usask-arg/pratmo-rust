@@ -76,5 +76,8 @@ fn main() -> Result<()> {
     }
 
     println!(" RAXLOOP={} RADCOUNT={}", state.raxloop, state.radcount);
+    for warning in &state.rafday_warnings {
+        eprintln!("Warning: {warning}");
+    }
     Ok(())
 }

@@ -9,7 +9,7 @@ os.environ.setdefault("PLOTLY_RENDERER", "notebook_connected")
 
 project = "pratmo"
 author = "PRATMO Authors"
-release = "0.1.0"
+release = "0.4.0"
 
 extensions = [
     "myst_nb",

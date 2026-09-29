@@ -93,11 +93,7 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
         s.lsvday = false;
 
         if s.nboxdo[ib] > 0 {
-            if s.cpp_compatibility {
-                cpp_endpoint_days(s, ib)?;
-            } else {
-                rafday(s, ib)?;
-            }
+            solve_diurnal_box(s, ib)?;
         } else {
             let mut xnold = s.xnold;
             rplace(s, &mut xnold, ib);
@@ -179,7 +175,7 @@ pub fn diurn(s: &mut ModelState) -> Result<()> {
 
 struct BoxDiurnResult {
     ib: usize,
-    state: ModelState,
+    state: Box<ModelState>,
 }
 
 /// Parallel DIURN variant for structured API runs.
@@ -200,7 +196,7 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
         })
         .collect();
 
-    let base = s.clone();
+    let base = Box::new(s.clone());
     let results: Result<Vec<BoxDiurnResult>> = jobs
         .into_par_iter()
         .map(|ib| {
@@ -217,11 +213,7 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
             worker.lsvday = false;
 
             if worker.nboxdo[ib] > 0 {
-                if worker.cpp_compatibility {
-                    cpp_endpoint_days(&mut worker, ib)?;
-                } else {
-                    rafday(&mut worker, ib)?;
-                }
+                solve_diurnal_box(&mut worker, ib)?;
             } else {
                 let mut xnold = worker.xnold;
                 rplace(&worker, &mut xnold, ib);
@@ -258,6 +250,9 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
         for jj in 0..s.njval {
             let val = worker.jval_get(ib, jj);
             s.jval_set(ib, jj, val);
+            for kt in 0..s.storjv.shape()[1] {
+                s.storjv[[jj, kt, ib]] = worker.storjv[[jj, kt, ib]];
+            }
         }
         for kt in 0..s.ntimdo {
             for kn in 0..s.ntotx {
@@ -296,6 +291,68 @@ pub fn diurn_parallel_boxes(s: &mut ModelState) -> Result<()> {
 }
 
 // ── DAILY ────────────────────────────────────────────────────────────────────
+
+fn solve_diurnal_box(s: &mut ModelState, ib: usize) -> Result<()> {
+    #[cfg(not(feature = "fortran-parity"))]
+    if s.evolve_ozone && !s.cpp_compatibility {
+        return evolving_ozone_days(s, ib);
+    }
+    if s.cpp_compatibility {
+        cpp_endpoint_days(s, ib)
+    } else {
+        rafday(s, ib)
+    }
+}
+
+/// Close the full diurnal orbit after solving the slow-species daily balance.
+/// Updating ozone can substantially change the fast radicals' noon state;
+/// RAFDAY alone tests only its slow coordinates and leaves those fast initial
+/// values behind. Refresh them from the completed orbit and solve again.
+#[cfg(not(feature = "fortran-parity"))]
+fn evolving_ozone_days(s: &mut ModelState, ib: usize) -> Result<()> {
+    let saved_relaxation = s.maxrlx;
+    let result = (|| {
+        let max_cycles = s.nboxmx[ib].max(1) as usize;
+        let mut residual = f64::INFINITY;
+        for cycle in 0..max_cycles {
+            let failures = s.rafday_nonconvergence_count;
+            let step_failures = s.newraf_nonconvergence_count;
+            rafday(s, ib)?;
+            let endpoint = s.xnold;
+            splace(s, &endpoint, ib);
+            s.fo3[ib] = s.do3[ib] / s.dm[s.ialt];
+            if s.rafday_nonconvergence_count != failures {
+                return Ok(());
+            }
+            if s.newraf_nonconvergence_count != step_failures {
+                s.rafday_nonconvergence_count += 1;
+                rafday_warn(s, "timestep failures during ozone relaxation");
+                return Ok(());
+            }
+            residual = (0..s.ntot).fold(0.0_f64, |worst, slot| {
+                let start = s.xnoft[[slot, 0]];
+                let end = s.xnoft[[slot, s.ntimdo - 1]];
+                worst.max((end - start).abs() / start.abs().max(1.0e-2))
+            });
+            if residual < s.dayerr {
+                return Ok(());
+            }
+            if cycle + 1 < max_cycles {
+                fixmix(s);
+                s.lsvday = false;
+                s.maxrlx = 0;
+            }
+        }
+        s.rafday_nonconvergence_count += 1;
+        rafday_warn(s, &format!(
+            "noon-to-noon relative change {residual:.3e} exceeds {:.3e} after {max_cycles} convergence cycles",
+            s.dayerr
+        ));
+        Ok(())
+    })();
+    s.maxrlx = saved_relaxation;
+    result
+}
 
 /// Single-day 24-hour time-dependent integration.
 /// id < 100: save XNOFT; id >= 100: skip XNOFT update (partial-deriv mode).
@@ -474,13 +531,25 @@ fn cpp_endpoint_days(s: &mut ModelState, ib: usize) -> Result<()> {
 
     let max_days = s.nboxmx[ib].max(1) as usize;
     let mut converged = false;
-    for _ in 0..max_days {
+    for day in 0..max_days {
+        let step_failures = s.newraf_nonconvergence_count;
         daily(s, 1)?;
+        if s.evolve_ozone && s.newraf_nonconvergence_count != step_failures {
+            bail!(
+                "evolving ozone: timestep integration failed (box {})",
+                ib + 1
+            );
+        }
         let mut max_ratio = 0.0_f64;
         for slot in 0..s.ntot {
             let start = s.xnoft[[slot, 0]];
             let end = s.xnoft[[slot, s.ntimdo - 1]];
-            let ratio = if start.abs() < 1.0e-2 {
+            let ratio = if s.evolve_ozone {
+                if !start.is_finite() || !end.is_finite() || start < 0.0 || end < 0.0 {
+                    bail!("evolving ozone: invalid daily orbit (box {})", ib + 1);
+                }
+                (end - start).abs() / start.abs().max(1.0e-2)
+            } else if start.abs() < 1.0e-2 {
                 0.05 * TOLERANCE
             } else {
                 ((end - start) / start).abs()
@@ -491,12 +560,30 @@ fn cpp_endpoint_days(s: &mut ModelState, ib: usize) -> Result<()> {
             converged = true;
             break;
         }
+        if s.evolve_ozone && day + 1 < max_days {
+            let endpoint = s.xnold;
+            splace(s, &endpoint, ib);
+            fixmix(s);
+            let mut initial = s.xnold;
+            rplace(s, &mut initial, ib);
+            s.xnold = initial;
+            s.lsvday = false;
+        }
     }
 
     let final_density = s.xnold;
     splace(s, &final_density, ib);
+    if s.evolve_ozone {
+        s.fo3[ib] = s.do3[ib] / s.dm[s.ialt];
+    }
     if !converged {
         s.rafday_nonconvergence_count += 1;
+        if s.evolve_ozone {
+            s.rafday_warnings.push(format!(
+                "DIURN did not converge for box {} at {:.3} km: noon-to-noon endpoint tolerance {TOLERANCE:.3e} not reached after {max_days} days. Returning the last valid diurnal cycle; photochemical equilibrium is not established.",
+                ib + 1, s.z[s.ialt] * 1.0e-5
+            ));
+        }
     }
     Ok(())
 }
@@ -532,14 +619,14 @@ fn rafday_family_valid(s: &ModelState, x: &[f64; NDEN]) -> bool {
 /// only XNOLD omits that dependence from the finite-difference Jacobian.
 /// Cloning also keeps rejected trials out of the orbit cache and diagnostics.
 #[cfg(not(feature = "fortran-parity"))]
-fn rafday_trial(s: &ModelState, candidate: &[f64; NDEN]) -> Result<ModelState> {
+fn rafday_trial(s: &ModelState, candidate: &[f64; NDEN]) -> Result<Box<ModelState>> {
     if !rafday_family_valid(s, candidate) {
         bail!(
             "RAFDAY: invalid density or family constraint in trial (box {})",
             s.ibox + 1
         );
     }
-    let mut trial = s.clone();
+    let mut trial = Box::new(s.clone());
     splace(&mut trial, candidate, s.ibox);
     trial.xnold = *candidate;
     trial.lprtx = false;
@@ -694,7 +781,7 @@ pub fn rafday(s: &mut ModelState, _ib: usize) -> Result<()> {
             valid.out_unit7 = s.out_unit7.take();
             valid.out_unit8 = s.out_unit8.take();
             valid.out_unit9 = s.out_unit9.take();
-            *s = valid;
+            std::mem::swap(s, valid.as_mut());
             s.lprtx = lprtx;
             s.rafday_nonconvergence_count += 1;
             rafday_warn(s, &error.to_string());
@@ -713,7 +800,7 @@ fn rafday_warn(s: &mut ModelState, reason: &str) {
 
 fn rafday_inner(
     s: &mut ModelState,
-    #[cfg(not(feature = "fortran-parity"))] checkpoint: &mut Option<ModelState>,
+    #[cfg(not(feature = "fortran-parity"))] checkpoint: &mut Option<Box<ModelState>>,
 ) -> Result<()> {
     let nnr = s.nnr;
 
@@ -793,7 +880,7 @@ fn rafday_inner(
             {
                 bail!("RAFDAY: invalid daily orbit (box {})", s.ibox + 1);
             }
-            let mut valid = s.clone();
+            let mut valid = Box::new(s.clone());
             valid.rafday_max_final_relative_correction = valid
                 .rafday_max_final_relative_correction
                 .max(final_relative_correction);
@@ -889,16 +976,34 @@ fn rafday_inner(
                 }
             }
         }
+        // Scale the optional ozone solve: ozone and trace reservoirs can
+        // differ by many orders of magnitude. Solve for fractional density
+        // corrections, equilibrate rows, and verify the original equations.
+        let mut column_scale = [1.0_f64; NSLOWM];
+        let mut row_scale = [1.0_f64; NSLOWM];
+        if s.evolve_ozone {
+            for j in 0..nnr {
+                column_scale[j] = s.den_get(s.ibox, s.nnrt[j] - 1).abs().max(1.0e-36);
+            }
+            for i in 0..nnr {
+                row_scale[i] = (0..nnr)
+                    .map(|j| (fxdder[[i, j]] * column_scale[j]).abs())
+                    .fold(fxo[i].abs().max(1.0e-36), f64::max);
+            }
+        }
         // Copy FXDDER into A matrix for LINSLV.
         let a = s.a_mat.as_slice_mut().expect("a_mat is contiguous");
         for j in 0..nnr {
             for jj in 0..nnr {
-                a[j * NDEN + jj] = fxdder[[jj, j]];
+                a[j * NDEN + jj] = fxdder[[jj, j]] * column_scale[j] / row_scale[jj];
             }
         }
         let mut xo_vec = vec![0.0f64; nnr];
-        linslv(s, &fxo[..nnr], &mut xo_vec, nnr);
-        xo[..nnr].copy_from_slice(&xo_vec);
+        let rhs: Vec<_> = (0..nnr).map(|j| fxo[j] / row_scale[j]).collect();
+        linslv(s, &rhs, &mut xo_vec, nnr);
+        for j in 0..nnr {
+            xo[j] = xo_vec[j] * column_scale[j];
+        }
         #[cfg(not(feature = "fortran-parity"))]
         {
             rafday_check_solve(s, &fxdder, &fxo[..nnr], &xo[..nnr])?;

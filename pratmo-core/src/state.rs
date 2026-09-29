@@ -346,6 +346,8 @@ pub struct ModelState {
     pub maxrlx: usize, // max relaxation iterations
     /// Use the later C++ fixed-mu grid and endpoint-convergence driver.
     pub cpp_compatibility: bool,
+    /// Include ozone in the time-dependent and daily periodic chemistry solve.
+    pub evolve_ozone: bool,
     /// Include the aerosol profile in photolysis optical depth and scattering.
     pub radiative_aerosol: bool,
 
@@ -752,6 +754,7 @@ impl Clone for ModelState {
             maxraf: self.maxraf.clone(),
             maxrlx: self.maxrlx.clone(),
             cpp_compatibility: self.cpp_compatibility,
+            evolve_ozone: self.evolve_ozone,
             radiative_aerosol: self.radiative_aerosol,
             boxrn: self.boxrn.clone(),
             boxaa: self.boxaa.clone(),
@@ -1136,6 +1139,7 @@ impl ModelState {
             maxraf: 0,
             maxrlx: 0,
             cpp_compatibility: false,
+            evolve_ozone: false,
             radiative_aerosol: false,
 
             boxrn: [0.0; NB],

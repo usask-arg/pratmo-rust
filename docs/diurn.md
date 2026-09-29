@@ -56,6 +56,48 @@ from pratmo.plotting import plot_diurnal
 plot_diurnal(cycle, ["oh", "ho2", "no", "no2"])
 ```
 
+## Evolving ozone
+
+Ozone is prescribed in the default setup, so `species_grid("o3")` is constant
+through time within each box. To integrate its chemical production and loss
+alongside the other time-dependent species, enable `evolve_ozone`:
+
+```python
+from pratmo import Box, DiurnalOptions, Model
+from pratmo.plotting import plot_diurnal
+
+cycle = Model().diurnal(
+    latitude=0.0,
+    day="2026-04-30",
+    boxes=[Box.at_level(40)],
+    options=DiurnalOptions(evolve_ozone=True),
+)
+plot_diurnal(cycle, ["oh", "ho2", "no", "no2", "o3", "h2o2"])
+```
+
+This changes the ozone concentration in the chemistry box. The atmospheric
+ozone column used to calculate photolysis stays prescribed; it is not updated
+from the evolving box concentrations. The result is one noon-to-noon cycle,
+not a record of every integration day. Check `cycle.diagnostics` and endpoint
+stability before interpreting a cycle as photochemical equilibrium.
+
+In normal mode, evolving ozone is included in the daily production/loss solve.
+The solver then refreshes the other species until the whole noon-to-noon orbit
+closes. With the embedded controls, the tolerance is `3e-5` relative change,
+using a `0.01 cm-3` denominator floor for trace species. `integration_days`
+limits these convergence cycles; exhausting the budget emits a warning and
+returns the last valid orbit. The C++ compatibility mode retains its separate
+0.5% endpoint criterion.
+
+For evolving-ozone runs, `species_profile()` and the box snapshots report the
+final noon of the returned cycle, not a daily mean. The long-lived ozone
+mixing ratio is updated consistently with that final concentration.
+
+`Box.at_level(40)` selects grid level 40 (about 77.4 km in this example), not
+an altitude of 40 km.
+
+The lower-level equivalent is `DiurnConfig(evolve_ozone=True)`.
+
 ## Multiple boxes
 
 ```{code-cell} ipython3

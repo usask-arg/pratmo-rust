@@ -401,6 +401,8 @@ class DiurnConfig:
     radiative_aerosol: bool
     atmosphere: Optional[CustomAtmosphereProfile]
     initial_mixing_ratios: Optional[list[LongLivedMixingRatios]]
+    evolve_ozone: bool
+    """Integrate box ozone; the radiative ozone profile stays prescribed."""
     def __init__(
         self,
         *,
@@ -419,6 +421,7 @@ class DiurnConfig:
         radiative_aerosol: bool = False,
         atmosphere: Optional[CustomAtmosphereProfile] = None,
         initial_mixing_ratios: Optional[list[LongLivedMixingRatios]] = None,
+        evolve_ozone: bool = False,
     ) -> None: ...
 
 class CtmConfig:

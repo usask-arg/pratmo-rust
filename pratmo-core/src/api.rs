@@ -493,6 +493,9 @@ pub struct DiurnConfig {
     pub atmosphere: Option<CustomAtmosphereProfile>,
     /// One `LongLivedMixingRatios` per box; must match `boxes.len()` if provided.
     pub initial_mixing_ratios: Option<Vec<LongLivedMixingRatios>>,
+    /// Integrate box ozone with the time-dependent chemistry. The prescribed
+    /// ozone profile used for radiative transfer is unchanged.
+    pub evolve_ozone: bool,
 }
 
 impl Default for DiurnConfig {
@@ -513,6 +516,7 @@ impl Default for DiurnConfig {
             radiative_aerosol: false,
             atmosphere: None,
             initial_mixing_ratios: None,
+            evolve_ozone: false,
         }
     }
 }
@@ -597,7 +601,8 @@ pub struct CtmOutput {
 /// Output from a diurnal cycle run.
 #[derive(Debug, Clone)]
 pub struct DiurnOutput {
-    /// Daily-mean snapshot for each box (equivalent to fort08.x content).
+    /// Representative snapshot for each box, not a time average. Evolving
+    /// ozone runs return the final noon state of the stored cycle.
     pub boxes: Vec<BoxSnapshot>,
     /// Full diurnal time series for each box (equivalent to fort07.x content).
     pub time_series: Vec<DiurnBoxTimeSeries>,
@@ -1146,6 +1151,7 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
     s.clouds = cfg.surface_albedo;
     s.heterogeneous_chemistry = cfg.heterogeneous_chemistry;
     s.cpp_compatibility = cfg.cpp_compatibility;
+    s.evolve_ozone = cfg.evolve_ozone;
     s.radiative_aerosol = cfg.radiative_aerosol;
 
     // Recompute diurnal time grid with updated lat/dec
@@ -1270,7 +1276,42 @@ fn apply_diurn_config(s: &mut ModelState, cfg: &DiurnConfig) -> Result<()> {
         disable_iodine(s, cfg.atmosphere.is_none());
     }
 
-    if cfg.atmosphere.is_some() || cfg.initial_mixing_ratios.is_some() {
+    if cfg.evolve_ozone {
+        let ozone_slot = s.n[10];
+        if ozone_slot == 0 || ozone_slot > s.ntotx {
+            bail!("evolve_ozone requires O3 in the configured species set");
+        }
+        if ozone_slot > s.ntot {
+            // Move O3 to the first explicit slot, then include just that slot
+            // in the implicit solve. File-based configurations can contain
+            // other prescribed species which must remain outside the solve.
+            let active_slot = s.ntot + 1;
+            for species in 0..NDEN {
+                if s.n[species] == ozone_slot {
+                    s.n[species] = active_slot;
+                } else if s.n[species] == active_slot {
+                    s.n[species] = ozone_slot;
+                }
+                s.ntsav[species] = s.n[species];
+            }
+            s.tnamet.swap(ozone_slot - 1, active_slot - 1);
+            s.ntot = active_slot;
+            s.ntsav[NDEN] = active_slot;
+        }
+        // Ozone's daily production/loss must converge along with the other
+        // slow species. Activating its timestep equation alone can return a
+        // drifting orbit while RAFDAY reports convergence for NOy/halogens.
+        if !s.nnrt[..s.nnr].contains(&11) {
+            if s.nnr == s.nnrt.len() {
+                bail!("evolve_ozone exceeds the supported slow-species count");
+            }
+            s.nnrt[s.nnr] = 11;
+            s.nnr += 1;
+        }
+    }
+
+    if cfg.atmosphere.is_some() || cfg.initial_mixing_ratios.is_some() || cfg.evolve_ozone {
+        // Rebuild cached species vectors after any ozone-slot permutation.
         for ib in 0..nbox {
             reconcile_custom_box_implicit_species(s, ib);
         }

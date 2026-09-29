@@ -37,6 +37,7 @@ scientific problem.
 | `parallel_boxes` | `None` | Parallel when more than one box is selected |
 | `cpp_compatibility` | `False` | Use the normal Rust/legacy time policy |
 | `elapsed_time_hours` | `None` | Generate the 34-point noon-to-noon grid |
+| `evolve_ozone` | `False` | Keep box ozone prescribed in the default setup; opt in to time-dependent ozone chemistry |
 
 ## Guardrails
 

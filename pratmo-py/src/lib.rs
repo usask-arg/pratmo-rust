@@ -1364,6 +1364,8 @@ struct PyDiurnConfig {
     atmosphere: Option<PyCustomAtmosphereProfile>,
     #[pyo3(get, set)]
     initial_mixing_ratios: Option<Vec<PyLongLivedMixingRatios>>,
+    #[pyo3(get, set)]
+    evolve_ozone: bool,
 }
 
 #[pymethods]
@@ -1384,7 +1386,8 @@ impl PyDiurnConfig {
         heterogeneous_chemistry=true,
         radiative_aerosol=false,
         atmosphere=None,
-        initial_mixing_ratios=None
+        initial_mixing_ratios=None,
+        evolve_ozone=false
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -1403,6 +1406,7 @@ impl PyDiurnConfig {
         radiative_aerosol: bool,
         atmosphere: Option<PyCustomAtmosphereProfile>,
         initial_mixing_ratios: Option<Vec<PyLongLivedMixingRatios>>,
+        evolve_ozone: bool,
     ) -> Self {
         Self {
             latitude_deg,
@@ -1428,19 +1432,21 @@ impl PyDiurnConfig {
             radiative_aerosol,
             atmosphere,
             initial_mixing_ratios,
+            evolve_ozone,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "DiurnConfig(latitude_deg={}, julian_day={}, integration_days={}, boxes={}, bromine={}, iodine={}, parallel_boxes={})",
+            "DiurnConfig(latitude_deg={}, julian_day={}, integration_days={}, boxes={}, bromine={}, iodine={}, parallel_boxes={}, evolve_ozone={})",
             self.latitude_deg,
             self.julian_day,
             self.integration_days,
             self.boxes.len(),
             self.bromine,
             self.iodine,
-            self.parallel_boxes
+            self.parallel_boxes,
+            self.evolve_ozone
         )
     }
 }
@@ -1466,6 +1472,7 @@ impl PyDiurnConfig {
             iodine: self.iodine,
             parallel_boxes: self.parallel_boxes,
             cpp_compatibility: self.cpp_compatibility,
+            evolve_ozone: self.evolve_ozone,
             elapsed_time_hours: self.elapsed_time_hours.clone(),
             solar_flux_scale: self.solar_flux_scale,
             surface_albedo: self.surface_albedo,

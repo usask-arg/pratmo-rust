@@ -1,7 +1,7 @@
 # Releasing `pratmo`
 
 The Python distribution and import name are both `pratmo`. The current package
-version is `0.1.0`.
+version is `0.4.0`.
 
 Distributions are built by `.github/workflows/release.yml` with maturin on every
 push and pull request. The workflow builds wheels for Linux, musllinux, Windows,
@@ -38,8 +38,8 @@ Cargo workspace metadata, then run the complete verification commands from the
 project README. Tag names use the Python version with a leading `v`:
 
 ```bash
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+git tag -a v0.4.0 -m "v0.4.0"
+git push origin v0.4.0
 ```
 
 The publish job only runs for matching tags and only after all wheel and source

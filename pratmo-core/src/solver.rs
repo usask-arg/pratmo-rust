@@ -484,6 +484,12 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
             if iter < 6 {
                 temp = temp.max(s.rafmin * s.xr[j]).min(s.rafmax * s.xr[j]);
             }
+            if s.evolve_ozone && iter >= 6 {
+                // Evolving ozone can deplete trace iodine far below its
+                // initial seed. Keep the Jacobian usable after cancellation,
+                // without relaxing either Newton convergence test above.
+                temp = positive_roundoff_step(s.xr[j], dx, temp);
+            }
             s.xr[j] = temp;
         }
 
@@ -499,6 +505,20 @@ pub fn newrax(s: &mut ModelState, damp1: f64, x: &mut [f64; NDEN], n: usize) -> 
         x[j] = s.xr[j];
     }
     0
+}
+
+/// Preserve a positive Jacobian coordinate when a Newton update cancels the
+/// current density to floating-point precision. The Jacobian obtains reaction
+/// derivatives by dividing rates by density, so an exact zero would erase its
+/// column. Genuine negative steps still fail and trigger time-step refinement.
+fn positive_roundoff_step(previous: f64, correction: f64, proposed: f64) -> f64 {
+    let roundoff = 8.0 * f64::EPSILON * previous.abs().max(correction.abs());
+    if previous > 0.0 && roundoff.is_finite() && proposed <= 0.0 && proposed.abs() <= roundoff {
+        // RPLACE uses the same negligible positive seed for absent species.
+        roundoff.max(1.0e-36)
+    } else {
+        proposed
+    }
 }
 
 /// Estimate the smallest trustworthy relative P-L residual for one species.
@@ -633,7 +653,7 @@ fn retry_probe_newrax_nonconverged(
 
 #[cfg(all(test, not(feature = "fortran-parity")))]
 mod tests {
-    use super::{achievable_errpl, fix_iodine_family};
+    use super::{achievable_errpl, fix_iodine_family, positive_roundoff_step};
     use crate::{constants::NDEN, state::ModelState};
 
     fn identity_species_map() -> [usize; NDEN] {
@@ -657,6 +677,51 @@ mod tests {
     #[test]
     fn precision_floor_is_zero_without_positive_reaction_scale() {
         assert_eq!(achievable_errpl(1.0, 0.0, 1.0, -1.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn newton_roundoff_zero_preserves_a_positive_jacobian_coordinate() {
+        for density in [1.0e-30, 1.0e-12, 1.0, 1.0e10] {
+            let positive = positive_roundoff_step(density, -density, 0.0);
+            assert!(positive > 0.0 && positive.is_finite());
+            assert!(positive <= (8.0 * f64::EPSILON * density).max(1.0e-36));
+            let correction = -density * (1.0 + f64::EPSILON);
+            let negative = density + correction;
+            assert!(negative < 0.0);
+            assert!(positive_roundoff_step(density, correction, negative) > 0.0);
+        }
+    }
+
+    #[test]
+    fn newton_roundoff_guard_does_not_hide_negative_steps_or_change_positive_steps() {
+        assert_eq!(positive_roundoff_step(1.0, -1.01, -0.01), -0.01);
+        assert_eq!(positive_roundoff_step(1.0, -0.5, 0.5), 0.5);
+        assert_eq!(
+            positive_roundoff_step(1.0e-30, -1.0e-29, -9.0e-30),
+            -9.0e-30
+        );
+        assert!(positive_roundoff_step(1.0, f64::NEG_INFINITY, f64::NEG_INFINITY).is_infinite());
+    }
+
+    #[test]
+    fn evolving_ozone_upper_atmosphere_time_steps_converge() {
+        use crate::api::{DiurnBoxSpec, DiurnConfig, PratmoModel};
+        let output = PratmoModel::with_defaults()
+            .run_diurn(&DiurnConfig {
+                evolve_ozone: true,
+                bromine: true,
+                iodine: false,
+                boxes: vec![DiurnBoxSpec {
+                    altitude_level: 40,
+                    altitude_km: None,
+                    aerosol_surface_area_um2_cm3: 0.0,
+                    sea_salt_surface_area_um2_cm3: 0.0,
+                    temp_offset_k: 0.0,
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(output.diagnostics.newraf_nonconvergence_count, 0);
     }
 
     #[test]

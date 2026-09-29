@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pratmo"
-version = "0.3.1"
+version = "0.4.0"
 description = "Experimental AI-assisted Rust rewrite of the PRATMO photochemical box model"
 readme = "README.md"
 license = "MIT"

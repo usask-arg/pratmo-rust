@@ -140,7 +140,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 hours = iodine_on.elapsed_seconds / 3600.0
-iodine_figure = make_subplots(rows=1, cols=2, subplot_titles=("Ozone response", "Active iodine"))
+iodine_figure = make_subplots(rows=1, cols=2, subplot_titles=("Prescribed ozone", "Active iodine"))
 iodine_figure.add_scatter(
     x=hours, y=iodine_off.species_grid("o3")[0], name="O3 iodine off", row=1, col=1
 )
@@ -156,6 +156,11 @@ iodine_figure.update_yaxes(title_text="IO (cm⁻³)", type="log", row=1, col=2)
 iodine_figure.update_layout(template="plotly_white")
 iodine_figure
 ```
+
+These default runs hold ozone fixed, so the overlapping ozone traces do not
+measure ozone depletion. To let ozone evolve chemically, pass
+`options=DiurnalOptions(evolve_ozone=True)` to both runs, importing
+`DiurnalOptions` from `pratmo`. The radiative ozone column remains prescribed.
 
 ## Known boundaries
 

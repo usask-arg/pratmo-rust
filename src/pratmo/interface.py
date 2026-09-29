@@ -322,18 +322,27 @@ class PhotolysisOptions:
 
 @dataclass(frozen=True)
 class DiurnalOptions:
-    """Numerical controls for a diurnal-cycle run."""
+    """Controls for a diurnal-cycle run.
+
+    ``evolve_ozone=True`` integrates ozone in each chemistry box. The ozone
+    profile used for radiative transfer remains prescribed. In normal mode,
+    ``integration_days`` limits full-orbit convergence cycles; unconverged
+    cycles emit a warning.
+    """
 
     integration_days: int = 20
     parallel_boxes: bool | None = None
     cpp_compatibility: bool = False
     elapsed_time_hours: Sequence[float] | None = None
+    evolve_ozone: bool = False
 
     def __post_init__(self) -> None:
         if self.parallel_boxes is not None and not isinstance(self.parallel_boxes, bool):
             raise TypeError("parallel_boxes must be bool or None")
         if not isinstance(self.cpp_compatibility, bool):
             raise TypeError("cpp_compatibility must be bool")
+        if not isinstance(self.evolve_ozone, bool):
+            raise TypeError("evolve_ozone must be bool")
 
 
 @dataclass(frozen=True)
@@ -617,6 +626,7 @@ class Model:
             iodine=chemistry.iodine,
             parallel_boxes=parallel,
             cpp_compatibility=options.cpp_compatibility,
+            evolve_ozone=options.evolve_ozone,
             elapsed_time_hours=(
                 None
                 if options.elapsed_time_hours is None

@@ -45,6 +45,11 @@ number density. The modeled implicit species named `o3` is an output number
 density. The long-lived field also named `o3` is an input/diagnostic mixing
 ratio. See {doc}`species-and-units` for the distinction.
 
+In the default setup, box ozone is prescribed and remains constant through
+the diurnal cycle. `DiurnalOptions(evolve_ozone=True)` allows chemical changes
+to box ozone while retaining the prescribed radiative ozone profile; see
+{doc}`diurn`.
+
 ## Equilibrium and diagnostics
 
 An integration ending without a numerical error does not prove photochemical

@@ -495,6 +495,133 @@ def test_diurn_species_grid(model):
     assert np.all(o3 >= 0)
 
 
+@pytest.mark.parametrize("iodine", [False, True])
+@pytest.mark.parametrize("custom_atmosphere", [False, True])
+def test_diurn_evolving_ozone(iodine, custom_atmosphere):
+    model = Model()
+    kwargs = dict(
+        latitude=0.0,
+        day="2026-04-30",
+        boxes=[Box.at_level(20)],
+        chemistry=ChemistryOptions(iodine=iodine),
+    )
+    if custom_atmosphere:
+        kwargs.pop("boxes")
+        kwargs["atmosphere"] = Atmosphere(
+            pressure=[30.0], pressure_unit="hPa",
+            temperature=[220.0],
+            ozone=[5.0], ozone_unit="ppmv",
+            altitude=[24.0], altitude_unit="km",
+        )
+    fixed = model.diurnal(**kwargs)
+    evolving = model.diurnal(
+        **kwargs, options=DiurnalOptions(evolve_ozone=True)
+    )
+    fixed_o3 = fixed.species_grid("o3")[0]
+    evolving_o3 = evolving.species_grid("o3")[0]
+    assert np.ptp(fixed_o3) == 0.0
+    assert np.all(np.isfinite(evolving_o3))
+    assert np.all(evolving_o3 > 0.0)
+    assert np.ptp(evolving_o3) / np.mean(evolving_o3) > 1.0e-3
+    assert np.array_equal(fixed.elapsed_seconds, evolving.elapsed_seconds)
+    # Box chemistry must not replace the prescribed radiative ozone column.
+    assert np.array_equal(
+        fixed.jvalue_profile("o3"), evolving.jvalue_profile("o3")
+    )
+    assert evolving.diagnostics.newraf_nonconvergence_count == 0
+    assert evolving.diagnostics.rafday_nonconvergence_count == 0
+    assert_ozone_cycle_converged(evolving)
+
+
+def assert_ozone_cycle_converged(cycle):
+    assert cycle.diagnostics.newraf_nonconvergence_count == 0
+    assert cycle.diagnostics.rafday_nonconvergence_count == 0
+    assert cycle.diagnostics.rafday_warnings == []
+    for name in IMPLICIT_SPECIES_NAMES:
+        grid = cycle.species_grid(name)
+        assert np.all(np.isfinite(grid)) and np.all(grid >= 0.0), name
+        # The solver's trace-species absolute floor is 0.01 cm^-3.
+        residual = np.abs(grid[:, -1] - grid[:, 0]) / np.maximum(grid[:, 0], 1.0e-2)
+        assert np.all(residual < 3.0e-5), (name, residual)
+        np.testing.assert_allclose(cycle.species_profile(name), grid[:, -1], rtol=1e-12)
+    np.testing.assert_allclose(
+        cycle.long_lived_profile("o3") * cycle.air_density_cm3,
+        cycle.species_grid("o3")[:, -1], rtol=1e-12,
+    )
+
+
+@pytest.mark.parametrize("iodine", [False, True])
+@pytest.mark.parametrize("level,latitude,day", [(30, 0, 120), (40, 0, 120), (20, 60, 75)])
+def test_evolving_ozone_convergence_matrix(level, latitude, day, iodine):
+    cycle = Model().diurnal(
+        latitude=latitude, day=day, boxes=[Box.at_level(level)],
+        chemistry=ChemistryOptions(iodine=iodine),
+        options=DiurnalOptions(evolve_ozone=True),
+    )
+    assert_ozone_cycle_converged(cycle)
+
+
+def test_evolving_ozone_warns_when_full_orbit_has_not_converged():
+    with pytest.warns(RuntimeWarning, match="noon-to-noon relative change"):
+        cycle = Model().diurnal(
+            latitude=0.0,
+            day="2026-04-30",
+            boxes=[Box.at_level(20)],
+            options=DiurnalOptions(evolve_ozone=True, integration_days=1),
+        )
+    ozone = cycle.species_grid("o3")[0]
+    assert np.all(np.isfinite(ozone))
+    assert np.all(ozone > 0.0)
+    assert np.ptp(ozone) / np.mean(ozone) > 1.0e-3
+    assert cycle.diagnostics.rafday_nonconvergence_count > 0
+
+
+def test_evolving_ozone_initial_guess_does_not_set_equilibrium():
+    model = Model()
+    kwargs = dict(latitude=0.0, day=120, boxes=[Box.at_level(20)])
+    ratios = model.diurnal(**kwargs).boxes[0].long_lived.to_dict()
+    cycles = []
+    for scale in (0.5, 2.0):
+        initial = LongLivedMixingRatios(**{**ratios, "o3": ratios["o3"] * scale})
+        cycle = model.diurnal(
+            **kwargs, initial_mixing_ratios=[initial],
+            options=DiurnalOptions(evolve_ozone=True),
+        )
+        assert_ozone_cycle_converged(cycle)
+        cycles.append(cycle)
+    np.testing.assert_allclose(
+        cycles[0].species_grid("o3"), cycles[1].species_grid("o3"), rtol=3e-4
+    )
+
+
+def test_evolve_ozone_option_validation():
+    assert not DiurnalOptions().evolve_ozone
+    assert not DiurnConfig().evolve_ozone
+    assert DiurnConfig(evolve_ozone=True).evolve_ozone
+    with pytest.raises(TypeError, match="evolve_ozone must be bool"):
+        DiurnalOptions(evolve_ozone="yes")
+
+
+def test_evolving_ozone_cpp_exhausted_budget_preserves_final_snapshot():
+    with pytest.warns(RuntimeWarning, match="endpoint tolerance"):
+        cycle = Model().diurnal(
+            latitude=0, day=120, boxes=[Box.at_level(20)],
+            options=DiurnalOptions(
+                evolve_ozone=True, cpp_compatibility=True, integration_days=1,
+            ),
+        )
+    assert cycle.diagnostics.newraf_nonconvergence_count == 0
+    assert cycle.diagnostics.rafday_nonconvergence_count == 1
+    for name in IMPLICIT_SPECIES_NAMES:
+        np.testing.assert_array_equal(
+            cycle.species_profile(name), cycle.species_grid(name)[:, -1]
+        )
+    np.testing.assert_allclose(
+        cycle.long_lived_profile("o3") * cycle.air_density_cm3,
+        cycle.species_grid("o3")[:, -1], rtol=1e-12,
+    )
+
+
 # ── PratmoModel repr ──────────────────────────────────────────────────────────
 
 def test_pratmo_model_repr(model):
